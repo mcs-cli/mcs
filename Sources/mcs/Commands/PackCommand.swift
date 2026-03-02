@@ -1,6 +1,29 @@
 import ArgumentParser
 import Foundation
 
+struct PackCommandContext {
+    let env: Environment
+    let output: CLIOutput
+    let shell: ShellRunner
+    let registry: PackRegistryFile
+
+    init() {
+        self.env = Environment()
+        self.output = CLIOutput()
+        self.shell = ShellRunner(environment: env)
+        self.registry = PackRegistryFile(path: env.packsRegistry)
+    }
+
+    func loadRegistry() throws -> PackRegistryFile.RegistryData {
+        do {
+            return try registry.load()
+        } catch {
+            output.error("Failed to read pack registry: \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+    }
+}
+
 struct PackCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "pack",
@@ -29,60 +52,56 @@ struct AddPack: LockedCommand {
     var skipLock: Bool { preview }
 
     func perform() throws {
-        let env = Environment()
-        let output = CLIOutput()
+        let ctx = PackCommandContext()
 
         let resolver = PackSourceResolver()
         let packSource: PackSource
         do {
             packSource = try resolver.resolve(source)
         } catch let error as PackSourceError {
-            output.error(error.localizedDescription)
+            ctx.output.error(error.localizedDescription)
             throw ExitCode.failure
         }
 
         if case .gitURL(let expanded) = packSource,
            source.range(of: PackSourceResolver.shorthandPattern, options: .regularExpression) != nil {
-            output.info("Interpreting '\(source)' as GitHub shorthand: \(expanded)")
+            ctx.output.info("Interpreting '\(source)' as GitHub shorthand: \(expanded)")
         }
 
         switch packSource {
         case .gitURL(let gitURL):
-            try performGitAdd(gitURL: gitURL, env: env, output: output)
+            try performGitAdd(gitURL: gitURL, ctx: ctx)
         case .localPath(let path):
             if ref != nil {
-                output.warn("--ref is ignored for local packs")
+                ctx.output.warn("--ref is ignored for local packs")
             }
-            try performLocalAdd(path: path, env: env, output: output)
+            try performLocalAdd(path: path, ctx: ctx)
         }
     }
 
     // MARK: - Git Add
 
-    private func performGitAdd(gitURL: String, env: Environment, output: CLIOutput) throws {
-        let shell = ShellRunner(environment: env)
-
+    private func performGitAdd(gitURL: String, ctx: PackCommandContext) throws {
         if let ref, ref.hasPrefix("-") {
-            output.error("Invalid ref: must not start with '-'")
+            ctx.output.error("Invalid ref: must not start with '-'")
             throw ExitCode.failure
         }
 
         let fetcher = PackFetcher(
-            shell: shell,
-            output: output,
-            packsDirectory: env.packsDirectory
+            shell: ctx.shell,
+            output: ctx.output,
+            packsDirectory: ctx.env.packsDirectory
         )
-        let registry = PackRegistryFile(path: env.packsRegistry)
-        let loader = ExternalPackLoader(environment: env, registry: registry)
+        let loader = ExternalPackLoader(environment: ctx.env, registry: ctx.registry)
 
         // 1. Clone to a temporary location first
-        output.info("Fetching pack from \(gitURL)...")
+        ctx.output.info("Fetching pack from \(gitURL)...")
         let tempID = "tmp-\(UUID().uuidString.prefix(8))"
         let fetchResult: PackFetcher.FetchResult
         do {
             fetchResult = try fetcher.fetch(url: gitURL, identifier: tempID, ref: ref)
         } catch {
-            output.error("Failed to fetch pack: \(error.localizedDescription)")
+            ctx.output.error("Failed to fetch pack: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
@@ -92,76 +111,75 @@ struct AddPack: LockedCommand {
             manifest = try loader.validate(at: fetchResult.localPath)
         } catch {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.error("Invalid pack: \(error.localizedDescription)")
+            ctx.output.error("Invalid pack: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        output.success("Found pack: \(manifest.displayName)")
+        ctx.output.success("Found pack: \(manifest.displayName)")
 
         // 3. Check for collisions with existing packs
         let registryData: PackRegistryFile.RegistryData
         do {
-            registryData = try registry.load()
+            registryData = try ctx.loadRegistry()
         } catch {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.error("Failed to read pack registry: \(error.localizedDescription)")
-            throw ExitCode.failure
+            throw error
         }
 
-        if !checkDuplicate(manifest: manifest, sourceURL: gitURL, registryData: registryData, output: output) {
+        if !checkDuplicate(manifest: manifest, sourceURL: gitURL, registryData: registryData, output: ctx.output) {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.info("Pack not added.")
+            ctx.output.info("Pack not added.")
             return
         }
 
         let collisions = checkCollisions(
             manifest: manifest,
             registryData: registryData,
-            registry: registry,
-            env: env,
-            output: output
+            registry: ctx.registry,
+            env: ctx.env,
+            output: ctx.output
         )
 
         if !collisions.isEmpty {
-            if !output.askYesNo("Continue anyway?", default: false) {
+            if !ctx.output.askYesNo("Continue anyway?", default: false) {
                 try? fetcher.remove(packPath: fetchResult.localPath)
-                output.info("Pack not added.")
+                ctx.output.info("Pack not added.")
                 return
             }
         }
 
         // 4. Display summary
-        displayPackSummary(manifest: manifest, output: output)
+        displayPackSummary(manifest: manifest, output: ctx.output)
 
         if preview {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.info("Preview complete. No changes made.")
+            ctx.output.info("Preview complete. No changes made.")
             return
         }
 
         // 5. Trust verification
         let decision: PackTrustManager.TrustDecision
         do {
-            decision = try verifyTrust(manifest: manifest, packPath: fetchResult.localPath, output: output)
+            decision = try verifyTrust(manifest: manifest, packPath: fetchResult.localPath, output: ctx.output)
         } catch {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.error("Trust verification failed: \(error.localizedDescription)")
+            ctx.output.error("Trust verification failed: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
         guard decision.approved else {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.info("Pack not trusted. No changes made.")
+            ctx.output.info("Pack not trusted. No changes made.")
             return
         }
 
         // 6. Move from temp location to final location
         guard let finalPath = PathContainment.safePath(
             relativePath: manifest.identifier,
-            within: env.packsDirectory
+            within: ctx.env.packsDirectory
         ) else {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.error("Pack identifier escapes packs directory — refusing to install")
+            ctx.output.error("Pack identifier escapes packs directory — refusing to install")
             throw ExitCode.failure
         }
         let fm = FileManager.default
@@ -172,7 +190,7 @@ struct AddPack: LockedCommand {
             try fm.moveItem(at: fetchResult.localPath, to: finalPath)
         } catch {
             try? fetcher.remove(packPath: fetchResult.localPath)
-            output.error("Failed to move pack to final location: \(error.localizedDescription)")
+            ctx.output.error("Failed to move pack to final location: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
@@ -192,84 +210,77 @@ struct AddPack: LockedCommand {
 
         do {
             var data = registryData
-            registry.register(entry, in: &data)
-            try registry.save(data)
+            ctx.registry.register(entry, in: &data)
+            try ctx.registry.save(data)
         } catch {
-            output.error("Failed to update pack registry: \(error.localizedDescription)")
+            ctx.output.error("Failed to update pack registry: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        output.success("Pack '\(manifest.displayName)' added successfully.")
-        output.plain("")
-        output.info("Next step: run 'mcs sync' to apply the pack to your project.")
+        ctx.output.success("Pack '\(manifest.displayName)' added successfully.")
+        ctx.output.plain("")
+        ctx.output.info("Next step: run 'mcs sync' to apply the pack to your project.")
     }
 
     // MARK: - Local Add
 
-    private func performLocalAdd(path: URL, env: Environment, output: CLIOutput) throws {
-        let registry = PackRegistryFile(path: env.packsRegistry)
-        let loader = ExternalPackLoader(environment: env, registry: registry)
+    private func performLocalAdd(path: URL, ctx: PackCommandContext) throws {
+        let loader = ExternalPackLoader(environment: ctx.env, registry: ctx.registry)
 
         // 1. Validate manifest at the local path
-        output.info("Reading pack from \(path.path)...")
+        ctx.output.info("Reading pack from \(path.path)...")
         let manifest: ExternalPackManifest
         do {
             manifest = try loader.validate(at: path)
         } catch {
-            output.error("Invalid pack: \(error.localizedDescription)")
+            ctx.output.error("Invalid pack: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        output.success("Found pack: \(manifest.displayName)")
+        ctx.output.success("Found pack: \(manifest.displayName)")
 
         // 2. Check for collisions with existing packs
-        let registryData: PackRegistryFile.RegistryData
-        do {
-            registryData = try registry.load()
-        } catch {
-            output.error("Failed to read pack registry: \(error.localizedDescription)")
-            throw ExitCode.failure
-        }
+        let registryData = try ctx.loadRegistry()
 
-        if !checkDuplicate(manifest: manifest, sourceURL: path.path, registryData: registryData, output: output) {
-            output.info("Pack not added.")
+        if !checkDuplicate(manifest: manifest, sourceURL: path.path, registryData: registryData, output: ctx.output) {
+            ctx.output.info("Pack not added.")
             return
         }
 
         let collisions = checkCollisions(
             manifest: manifest,
             registryData: registryData,
-            registry: registry,
-            env: env,
-            output: output
+            registry: ctx.registry,
+            env: ctx.env,
+            output: ctx.output
         )
 
         if !collisions.isEmpty {
-            if !output.askYesNo("Continue anyway?", default: false) {
-                output.info("Pack not added.")
+            if !ctx.output.askYesNo("Continue anyway?", default: false) {
+                ctx.output.info("Pack not added.")
                 return
             }
         }
 
         // 3. Display summary
-        displayPackSummary(manifest: manifest, output: output)
+        displayPackSummary(manifest: manifest, output: ctx.output)
 
         if preview {
-            output.info("Preview complete. No changes made.")
+            ctx.output.info("Preview complete. No changes made.")
             return
         }
 
         // 4. Trust verification
         let decision: PackTrustManager.TrustDecision
         do {
-            decision = try verifyTrust(manifest: manifest, packPath: path, output: output)
+            decision = try verifyTrust(manifest: manifest, packPath: path, output: ctx.output)
         } catch {
-            output.error("Trust verification failed: \(error.localizedDescription)")
+            ctx.output.error("Trust verification failed: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
         guard decision.approved else {
-            output.info("Pack not trusted. No changes made.")
+            ctx.output.info("Pack not trusted. No changes made.")
             return
         }
 
@@ -289,16 +300,16 @@ struct AddPack: LockedCommand {
 
         do {
             var data = registryData
-            registry.register(entry, in: &data)
-            try registry.save(data)
+            ctx.registry.register(entry, in: &data)
+            try ctx.registry.save(data)
         } catch {
-            output.error("Failed to update pack registry: \(error.localizedDescription)")
+            ctx.output.error("Failed to update pack registry: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        output.success("Pack '\(manifest.displayName)' added as local pack.")
-        output.plain("")
-        output.info("Next step: run 'mcs sync' to apply the pack to your project.")
+        ctx.output.success("Pack '\(manifest.displayName)' added as local pack.")
+        ctx.output.plain("")
+        ctx.output.info("Next step: run 'mcs sync' to apply the pack to your project.")
     }
 
     // MARK: - Shared Helpers
@@ -419,71 +430,62 @@ struct RemovePack: LockedCommand {
     var force: Bool = false
 
     func perform() throws {
-        let env = Environment()
-        let output = CLIOutput()
-        let shell = ShellRunner(environment: env)
+        let ctx = PackCommandContext()
 
-        let registry = PackRegistryFile(path: env.packsRegistry)
         let fetcher = PackFetcher(
-            shell: shell,
-            output: output,
-            packsDirectory: env.packsDirectory
+            shell: ctx.shell,
+            output: ctx.output,
+            packsDirectory: ctx.env.packsDirectory
         )
 
         // 1. Look up pack in registry
-        let registryData: PackRegistryFile.RegistryData
-        do {
-            registryData = try registry.load()
-        } catch {
-            output.error("Failed to read pack registry: \(error.localizedDescription)")
+        let registryData = try ctx.loadRegistry()
+
+        guard let entry = ctx.registry.pack(identifier: identifier, in: registryData) else {
+            ctx.output.error("Pack '\(identifier)' is not installed.")
             throw ExitCode.failure
         }
 
-        guard let entry = registry.pack(identifier: identifier, in: registryData) else {
-            output.error("Pack '\(identifier)' is not installed.")
-            throw ExitCode.failure
-        }
-
-        guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
+        guard let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
             if entry.isLocalPack {
-                output.error("Pack '\(entry.identifier)' has an invalid local path: '\(entry.localPath)'")
+                ctx.output.error("Pack '\(entry.identifier)' has an invalid local path: '\(entry.localPath)'")
             } else {
-                output.error("Pack localPath escapes packs directory — refusing to proceed")
+                ctx.output.error("Pack localPath escapes packs directory — refusing to proceed")
             }
             throw ExitCode.failure
         }
 
         // 2. Show pack info
-        output.info("Pack: \(entry.displayName)")
+        ctx.output.info("Pack: \(entry.displayName)")
         if let author = entry.author {
-            output.plain("  Author: \(author)")
+            ctx.output.plain("  Author: \(author)")
         }
         if entry.isLocalPack {
-            output.plain("  Source: \(entry.sourceURL) (local)")
+            ctx.output.plain("  Source: \(entry.sourceURL) (local)")
         } else {
-            output.plain("  Source: \(entry.sourceURL)")
-            output.plain("  Local:  ~/.mcs/packs/\(entry.localPath)")
+            ctx.output.plain("  Source: \(entry.sourceURL)")
+            ctx.output.plain("  Local:  ~/.mcs/packs/\(entry.localPath)")
         }
 
         // 3. Discover affected scopes
-        let techPackRegistry = TechPackRegistry.loadWithExternalPacks(environment: env, output: output)
+        let techPackRegistry = TechPackRegistry.loadWithExternalPacks(environment: ctx.env, output: ctx.output)
 
-        let indexFile = ProjectIndex(path: env.projectsIndexFile)
+        let indexFile = ProjectIndex(path: ctx.env.projectsIndexFile)
         let indexData: ProjectIndex.IndexData
         do {
             indexData = try indexFile.load()
         } catch {
-            output.warn("Could not read project index — per-project cleanup may be incomplete.")
+            ctx.output.warn("Could not read project index — per-project cleanup may be incomplete.")
             indexData = ProjectIndex.IndexData()
         }
         let affectedEntries = indexFile.projects(withPack: identifier, in: indexData)
 
         let isGloballyConfigured: Bool
         do {
-            let globalState = try ProjectState(stateFile: env.globalStateFile)
+            let globalState = try ProjectState(stateFile: ctx.env.globalStateFile)
             isGloballyConfigured = globalState.configuredPacks.contains(identifier)
         } catch {
-            output.warn("Could not read global state — global cleanup may be incomplete.")
+            ctx.output.warn("Could not read global state — global cleanup may be incomplete.")
             isGloballyConfigured = false
         }
 
@@ -499,27 +501,27 @@ struct RemovePack: LockedCommand {
         }
 
         if isGloballyConfigured || !liveProjectPaths.isEmpty {
-            output.plain("")
-            output.plain("  Affected scopes:")
+            ctx.output.plain("")
+            ctx.output.plain("  Affected scopes:")
             if isGloballyConfigured {
-                output.plain("    Global (~/.claude/)")
+                ctx.output.plain("    Global (~/.claude/)")
             }
             for path in liveProjectPaths {
-                output.plain("    \(path)")
+                ctx.output.plain("    \(path)")
             }
         }
         if !staleProjectPaths.isEmpty {
-            output.plain("  Stale references (will be pruned):")
+            ctx.output.plain("  Stale references (will be pruned):")
             for path in staleProjectPaths {
-                output.dimmed("    \(path)")
+                ctx.output.dimmed("    \(path)")
             }
         }
-        output.plain("")
+        ctx.output.plain("")
 
         // 4. Confirm
         if !force {
-            guard output.askYesNo("Remove pack '\(entry.displayName)'?", default: false) else {
-                output.info("Pack not removed.")
+            guard ctx.output.askYesNo("Remove pack '\(entry.displayName)'?", default: false) else {
+                ctx.output.info("Pack not removed.")
                 return
             }
         }
@@ -527,13 +529,13 @@ struct RemovePack: LockedCommand {
         // 5. Federated unconfigure — remove artifacts from all affected scopes
         if isGloballyConfigured {
             do {
-                var globalState = try ProjectState(stateFile: env.globalStateFile)
+                var globalState = try ProjectState(stateFile: ctx.env.globalStateFile)
                 let configurator = Configurator(
-                    environment: env,
-                    output: output,
-                    shell: shell,
+                    environment: ctx.env,
+                    output: ctx.output,
+                    shell: ctx.shell,
                     registry: techPackRegistry,
-                    strategy: GlobalSyncStrategy(environment: env)
+                    strategy: GlobalSyncStrategy(environment: ctx.env)
                 )
                 configurator.unconfigurePack(
                     identifier,
@@ -542,7 +544,7 @@ struct RemovePack: LockedCommand {
                 )
                 try globalState.save()
             } catch {
-                output.warn("Global cleanup failed: \(error.localizedDescription)")
+                ctx.output.warn("Global cleanup failed: \(error.localizedDescription)")
             }
         }
 
@@ -551,11 +553,11 @@ struct RemovePack: LockedCommand {
                 let projectURL = URL(fileURLWithPath: projectPath)
                 var projectState = try ProjectState(projectRoot: projectURL)
                 let configurator = Configurator(
-                    environment: env,
-                    output: output,
-                    shell: shell,
+                    environment: ctx.env,
+                    output: ctx.output,
+                    shell: ctx.shell,
                     registry: techPackRegistry,
-                    strategy: ProjectSyncStrategy(projectPath: projectURL, environment: env)
+                    strategy: ProjectSyncStrategy(projectPath: projectURL, environment: ctx.env)
                 )
                 configurator.unconfigurePack(
                     identifier,
@@ -564,7 +566,7 @@ struct RemovePack: LockedCommand {
                 )
                 try projectState.save()
             } catch {
-                output.warn("Cleanup for \(projectPath) failed: \(error.localizedDescription)")
+                ctx.output.warn("Cleanup for \(projectPath) failed: \(error.localizedDescription)")
             }
         }
 
@@ -577,17 +579,17 @@ struct RemovePack: LockedCommand {
             }
             try indexFile.save(updatedIndex)
         } catch {
-            output.error("Could not update project index: \(error.localizedDescription)")
-            output.error("Run 'mcs sync' to reconcile, or manually edit ~/.mcs/projects.yaml")
+            ctx.output.error("Could not update project index: \(error.localizedDescription)")
+            ctx.output.error("Run 'mcs sync' to reconcile, or manually edit ~/.mcs/projects.yaml")
         }
 
         // 7. Remove from registry
         do {
             var data = registryData
-            registry.remove(identifier: identifier, from: &data)
-            try registry.save(data)
+            ctx.registry.remove(identifier: identifier, from: &data)
+            try ctx.registry.save(data)
         } catch {
-            output.error("Failed to update pack registry: \(error.localizedDescription)")
+            ctx.output.error("Failed to update pack registry: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
@@ -596,11 +598,11 @@ struct RemovePack: LockedCommand {
             do {
                 try fetcher.remove(packPath: packPath)
             } catch {
-                output.warn("Could not delete pack checkout: \(error.localizedDescription)")
+                ctx.output.warn("Could not delete pack checkout: \(error.localizedDescription)")
             }
         }
 
-        output.success("Pack '\(entry.displayName)' removed.")
+        ctx.output.success("Pack '\(entry.displayName)' removed.")
     }
 }
 
@@ -616,30 +618,21 @@ struct UpdatePack: LockedCommand {
     var identifier: String?
 
     func perform() throws {
-        let env = Environment()
-        let output = CLIOutput()
-        let shell = ShellRunner(environment: env)
+        let ctx = PackCommandContext()
 
-        let registry = PackRegistryFile(path: env.packsRegistry)
         let updater = PackUpdater(
-            fetcher: PackFetcher(shell: shell, output: output, packsDirectory: env.packsDirectory),
-            trustManager: PackTrustManager(output: output),
-            environment: env,
-            output: output
+            fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
+            trustManager: PackTrustManager(output: ctx.output),
+            environment: ctx.env,
+            output: ctx.output
         )
 
-        let registryData: PackRegistryFile.RegistryData
-        do {
-            registryData = try registry.load()
-        } catch {
-            output.error("Failed to read pack registry: \(error.localizedDescription)")
-            throw ExitCode.failure
-        }
+        let registryData = try ctx.loadRegistry()
 
         let packsToUpdate: [PackRegistryFile.PackEntry]
         if let identifier {
-            guard let entry = registry.pack(identifier: identifier, in: registryData) else {
-                output.error("Pack '\(identifier)' is not installed.")
+            guard let entry = ctx.registry.pack(identifier: identifier, in: registryData) else {
+                ctx.output.error("Pack '\(identifier)' is not installed.")
                 throw ExitCode.failure
             }
             packsToUpdate = [entry]
@@ -648,7 +641,7 @@ struct UpdatePack: LockedCommand {
         }
 
         if packsToUpdate.isEmpty {
-            output.info("No external packs installed.")
+            ctx.output.info("No external packs installed.")
             return
         }
 
@@ -658,43 +651,43 @@ struct UpdatePack: LockedCommand {
         for entry in packsToUpdate {
             if entry.isLocalPack {
                 if identifier != nil {
-                    output.info("\(entry.displayName) is a local pack — changes are picked up automatically on next sync.")
+                    ctx.output.info("\(entry.displayName) is a local pack — changes are picked up automatically on next sync.")
                 } else {
-                    output.dimmed("\(entry.displayName): local pack (always up to date)")
+                    ctx.output.dimmed("\(entry.displayName): local pack (always up to date)")
                 }
                 continue
             }
 
-            output.info("Checking \(entry.displayName)...")
+            ctx.output.info("Checking \(entry.displayName)...")
 
-            guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
-                output.error("Pack '\(entry.identifier)' has an invalid path — skipping")
+            guard let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
+                ctx.output.error("Pack '\(entry.identifier)' has an invalid path — skipping")
                 continue
             }
 
-            let result = updater.updateGitPack(entry: entry, packPath: packPath, registry: registry)
+            let result = updater.updateGitPack(entry: entry, packPath: packPath, registry: ctx.registry)
             switch result {
             case .alreadyUpToDate:
-                output.success("\(entry.displayName): already up to date")
+                ctx.output.success("\(entry.displayName): already up to date")
             case .updated(let updatedEntry):
-                registry.register(updatedEntry, in: &updatedData)
+                ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
-                output.success("\(entry.displayName): updated (\(updatedEntry.commitSHA.prefix(7)))")
+                ctx.output.success("\(entry.displayName): updated (\(updatedEntry.commitSHA.prefix(7)))")
             case .skipped(let reason):
-                output.warn("\(entry.identifier): \(reason)")
+                ctx.output.warn("\(entry.identifier): \(reason)")
             }
         }
 
         // Save all updates
         if updatedCount > 0 {
             do {
-                try registry.save(updatedData)
+                try ctx.registry.save(updatedData)
             } catch {
-                output.error("Failed to save registry: \(error.localizedDescription)")
+                ctx.output.error("Failed to save registry: \(error.localizedDescription)")
                 throw ExitCode.failure
             }
-            output.plain("")
-            output.info("Run 'mcs sync' to apply updated pack components.")
+            ctx.output.plain("")
+            ctx.output.info("Run 'mcs sync' to apply updated pack components.")
         }
     }
 }
@@ -708,35 +701,32 @@ struct ListPacks: ParsableCommand {
     )
 
     func run() throws {
-        let env = Environment()
-        let output = CLIOutput()
+        let ctx = PackCommandContext()
 
-        let registry = PackRegistryFile(path: env.packsRegistry)
-
-        output.header("Tech Packs")
+        ctx.output.header("Tech Packs")
 
         let registryData: PackRegistryFile.RegistryData
         do {
-            registryData = try registry.load()
+            registryData = try ctx.registry.load()
         } catch {
-            output.warn("Could not read pack registry: \(error.localizedDescription)")
+            ctx.output.warn("Could not read pack registry: \(error.localizedDescription)")
             return
         }
 
         if registryData.packs.isEmpty {
-            output.plain("")
-            output.dimmed("No packs installed.")
-            output.dimmed("Add one with: mcs pack add <source>")
+            ctx.output.plain("")
+            ctx.output.dimmed("No packs installed.")
+            ctx.output.dimmed("Add one with: mcs pack add <source>")
         } else {
-            output.plain("")
+            ctx.output.plain("")
             for entry in registryData.packs {
-                let status = packStatus(entry: entry, env: env)
+                let status = packStatus(entry: entry, env: ctx.env)
                 let authorLabel = entry.author.map { "  by \($0)" } ?? ""
-                output.plain("  \(entry.identifier)\(authorLabel)  \(status)")
+                ctx.output.plain("  \(entry.identifier)\(authorLabel)  \(status)")
             }
         }
 
-        output.plain("")
+        ctx.output.plain("")
     }
 
     func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
