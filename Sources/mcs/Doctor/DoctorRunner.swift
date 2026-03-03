@@ -37,7 +37,7 @@ struct DoctorRunner {
         skipConfirmation: Bool = false,
         packFilter: String? = nil,
         globalOnly: Bool = false,
-        registry: TechPackRegistry = .shared
+        registry: TechPackRegistry
     ) {
         self.fixMode = fixMode
         self.skipConfirmation = skipConfirmation
