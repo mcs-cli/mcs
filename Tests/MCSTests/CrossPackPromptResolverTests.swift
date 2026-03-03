@@ -18,7 +18,7 @@ struct CrossPackPromptResolverTests {
 
     private func makeMockPack(
         name: String,
-        prompts: [ExternalPromptDefinition]
+        prompts: [PromptDefinition]
     ) -> PromptMockPack {
         PromptMockPack(
             identifier: name,
@@ -32,14 +32,14 @@ struct CrossPackPromptResolverTests {
     @Test("Groups input prompts with the same key across packs")
     func groupsInputPrompts() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH_PREFIX", type: .input,
                 label: "Branch prefix from A", defaultValue: "feature",
                 options: nil, detectPatterns: nil, scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH_PREFIX", type: .input,
                 label: "Branch prefix from B", defaultValue: "feat",
                 options: nil, detectPatterns: nil, scriptCommand: nil
@@ -58,18 +58,18 @@ struct CrossPackPromptResolverTests {
     @Test("Groups select prompts with the same key across packs")
     func groupsSelectPrompts() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "PLATFORM", type: .select,
                 label: "Target platform", defaultValue: nil,
-                options: [ExternalPromptOption(value: "ios", label: "iOS")],
+                options: [PromptOption(value: "ios", label: "iOS")],
                 detectPatterns: nil, scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "PLATFORM", type: .select,
                 label: "Platform for B", defaultValue: nil,
-                options: [ExternalPromptOption(value: "macos", label: "macOS")],
+                options: [PromptOption(value: "macos", label: "macOS")],
                 detectPatterns: nil, scriptCommand: nil
             ),
         ])
@@ -84,14 +84,14 @@ struct CrossPackPromptResolverTests {
     @Test("Single-pack prompts are not grouped as shared")
     func singlePackNotShared() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "UNIQUE_KEY", type: .input,
                 label: "Only in A", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "OTHER_KEY", type: .input,
                 label: "Only in B", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
@@ -107,14 +107,14 @@ struct CrossPackPromptResolverTests {
     @Test("script prompts are excluded from deduplication")
     func scriptExcluded() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH", type: .script,
                 label: nil, defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: "git branch"
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH", type: .script,
                 label: nil, defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: "echo main"
@@ -130,14 +130,14 @@ struct CrossPackPromptResolverTests {
     @Test("fileDetect prompts are excluded from deduplication")
     func fileDetectExcluded() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "PROJECT", type: .fileDetect,
                 label: "Xcode project", defaultValue: nil,
                 options: nil, detectPatterns: ["*.xcodeproj"], scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "PROJECT", type: .fileDetect,
                 label: "Project file", defaultValue: nil,
                 options: nil, detectPatterns: ["*.xcworkspace"], scriptCommand: nil
@@ -154,7 +154,7 @@ struct CrossPackPromptResolverTests {
     func threePacksShared() {
         let packs = (1 ... 3).map { i in
             makeMockPack(name: "pack-\(i)", prompts: [
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "SHARED", type: .input,
                     label: "Pack \(i) label", defaultValue: nil,
                     options: nil, detectPatterns: nil, scriptCommand: nil
@@ -171,24 +171,24 @@ struct CrossPackPromptResolverTests {
     @Test("Mixed types across packs: only deduplicable types are grouped")
     func mixedTypes() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "VAL", type: .input,
                 label: "Input A", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
             ),
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "DETECT", type: .fileDetect,
                 label: "Detect A", defaultValue: nil,
                 options: nil, detectPatterns: ["*.txt"], scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "VAL", type: .input,
                 label: "Input B", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
             ),
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "DETECT", type: .fileDetect,
                 label: "Detect B", defaultValue: nil,
                 options: nil, detectPatterns: ["*.md"], scriptCommand: nil
@@ -206,14 +206,14 @@ struct CrossPackPromptResolverTests {
     @Test("Skips keys that are already in context.resolvedValues")
     func skipsAlreadyResolvedKeys() {
         let packA = makeMockPack(name: "pack-a", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH_PREFIX", type: .input,
                 label: "Prefix from A", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
             ),
         ])
         let packB = makeMockPack(name: "pack-b", prompts: [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "BRANCH_PREFIX", type: .input,
                 label: "Prefix from B", defaultValue: nil,
                 options: nil, detectPatterns: nil, scriptCommand: nil
@@ -245,12 +245,12 @@ struct CrossPackPromptResolverTests {
             components: [],
             templates: nil,
             prompts: [
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "PROJECT", type: .fileDetect,
                     label: "Xcode project", defaultValue: nil,
                     options: nil, detectPatterns: ["*.xcodeproj"], scriptCommand: nil
                 ),
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "PREFIX", type: .input,
                     label: "Branch prefix", defaultValue: "feature",
                     options: nil, detectPatterns: nil, scriptCommand: nil
@@ -619,12 +619,12 @@ private struct PromptMockPack: TechPack {
     let components: [ComponentDefinition]
     let templates: [TemplateContribution] = []
     let supplementaryDoctorChecks: [any DoctorCheck] = []
-    private let prompts: [ExternalPromptDefinition]
+    private let prompts: [PromptDefinition]
 
     init(
         identifier: String,
         displayName: String,
-        prompts: [ExternalPromptDefinition] = [],
+        prompts: [PromptDefinition] = [],
         components: [ComponentDefinition] = []
     ) {
         self.identifier = identifier
@@ -635,7 +635,7 @@ private struct PromptMockPack: TechPack {
 
     func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 
-    func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition] {
+    func declaredPrompts(context: ProjectConfigContext) -> [PromptDefinition] {
         context.isGlobalScope
             ? prompts.filter { $0.type != .fileDetect }
             : prompts

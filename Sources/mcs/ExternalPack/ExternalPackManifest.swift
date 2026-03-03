@@ -4,7 +4,7 @@ import Yams
 // MARK: - Manifest Root
 
 /// Codable model for `techpack.yaml` — the declarative manifest for external tech packs.
-struct ExternalPackManifest: Codable, Sendable {
+struct ExternalPackManifest: Codable {
     let schemaVersion: Int
     let identifier: String
     let displayName: String
@@ -13,7 +13,7 @@ struct ExternalPackManifest: Codable, Sendable {
     let minMCSVersion: String?
     let components: [ExternalComponentDefinition]?
     let templates: [ExternalTemplateDefinition]?
-    let prompts: [ExternalPromptDefinition]?
+    let prompts: [PromptDefinition]?
     let configureProject: ExternalConfigureProject?
     let supplementaryDoctorChecks: [ExternalDoctorCheckDefinition]?
 }
@@ -215,7 +215,7 @@ extension ExternalPackManifest {
 // MARK: - Errors
 
 /// Errors that can occur during manifest loading or validation.
-enum ManifestError: Error, Equatable, Sendable, LocalizedError {
+enum ManifestError: Error, Equatable, LocalizedError {
     case invalidEncoding
     case unsupportedSchemaVersion(Int)
     case invalidIdentifier(String)
@@ -282,7 +282,7 @@ enum ManifestError: Error, Equatable, Sendable, LocalizedError {
 ///
 /// Shorthand keys: `brew`, `mcp`, `plugin`, `shell`, `hook`, `command`,
 /// `skill`, `settingsFile`, `gitignore`. See `ShorthandKeys` for details.
-struct ExternalComponentDefinition: Codable, Sendable {
+struct ExternalComponentDefinition: Codable {
     var id: String
     let displayName: String
     let description: String
@@ -439,7 +439,7 @@ struct ExternalComponentDefinition: Codable, Sendable {
 
 /// Shorthand MCP server configuration — `name` defaults to the component id
 /// but can be overridden (e.g. when the server name uses mixed case).
-struct MCPShorthand: Codable, Sendable {
+struct MCPShorthand: Codable {
     let name: String?
     let command: String?
     let args: [String]?
@@ -461,7 +461,7 @@ struct MCPShorthand: Codable, Sendable {
 }
 
 /// Shorthand copy-file configuration — `fileType` is inferred from the shorthand key.
-struct CopyFileShorthand: Codable, Sendable {
+struct CopyFileShorthand: Codable {
     let source: String
     let destination: String
 
@@ -475,7 +475,7 @@ struct CopyFileShorthand: Codable, Sendable {
 }
 
 /// String-backed component type that maps to the internal `ComponentType`.
-enum ExternalComponentType: String, Codable, Sendable {
+enum ExternalComponentType: String, Codable {
     case mcpServer
     case plugin
     case skill
@@ -503,7 +503,7 @@ enum ExternalComponentType: String, Codable, Sendable {
 // MARK: - Install Actions
 
 /// String-backed install action type discriminator for YAML serialization.
-enum ExternalInstallActionType: String, Codable, Sendable {
+enum ExternalInstallActionType: String, Codable {
     case mcpServer
     case plugin
     case brewInstall
@@ -515,7 +515,7 @@ enum ExternalInstallActionType: String, Codable, Sendable {
 }
 
 /// Declarative install action types that can be expressed in YAML.
-enum ExternalInstallAction: Codable, Sendable {
+enum ExternalInstallAction: Codable {
     case mcpServer(ExternalMCPServerConfig)
     case plugin(name: String)
     case brewInstall(package: String)
@@ -606,7 +606,7 @@ enum ExternalInstallAction: Codable, Sendable {
 // MARK: - MCP Server Config
 
 /// Configuration for an MCP server declared in an external pack manifest.
-struct ExternalMCPServerConfig: Codable, Sendable {
+struct ExternalMCPServerConfig: Codable {
     let name: String
     let command: String?
     let args: [String]?
@@ -630,12 +630,12 @@ struct ExternalMCPServerConfig: Codable, Sendable {
     }
 }
 
-enum ExternalTransport: String, Codable, Sendable {
+enum ExternalTransport: String, Codable {
     case stdio
     case http
 }
 
-enum ExternalScope: String, Codable, Sendable {
+enum ExternalScope: String, Codable {
     case local
     case user
     case project
@@ -644,13 +644,13 @@ enum ExternalScope: String, Codable, Sendable {
 // MARK: - Copy Pack File Config
 
 /// Configuration for copying a file from the pack into the Claude directory.
-struct ExternalCopyPackFileConfig: Codable, Sendable {
+struct ExternalCopyPackFileConfig: Codable {
     let source: String
     let destination: String
     let fileType: ExternalCopyFileType?
 }
 
-enum ExternalCopyFileType: String, Codable, Sendable {
+enum ExternalCopyFileType: String, Codable {
     case skill
     case hook
     case command
@@ -661,101 +661,23 @@ enum ExternalCopyFileType: String, Codable, Sendable {
 // MARK: - Templates
 
 /// A template contribution declared in an external pack manifest.
-struct ExternalTemplateDefinition: Codable, Sendable {
+struct ExternalTemplateDefinition: Codable {
     var sectionIdentifier: String
     let placeholders: [String]?
     let contentFile: String
 }
 
-// MARK: - Prompts
-
-/// A prompt definition for gathering user input during install/configure.
-struct ExternalPromptDefinition: Codable, Sendable {
-    let key: String
-    let type: ExternalPromptType
-    let label: String?
-    let defaultValue: String?
-    let options: [ExternalPromptOption]?
-    /// File patterns to detect. Accepts a single string or an array in YAML.
-    /// Results are returned in pattern order (first pattern's matches first).
-    let detectPatterns: [String]?
-    let scriptCommand: String?
-
-    enum CodingKeys: String, CodingKey {
-        case key
-        case type
-        case label
-        case defaultValue = "default"
-        case options
-        case detectPatterns = "detectPattern"
-        case scriptCommand
-    }
-
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        key = try container.decode(String.self, forKey: .key)
-        type = try container.decode(ExternalPromptType.self, forKey: .type)
-        label = try container.decodeIfPresent(String.self, forKey: .label)
-        defaultValue = try container.decodeIfPresent(String.self, forKey: .defaultValue)
-        options = try container.decodeIfPresent([ExternalPromptOption].self, forKey: .options)
-        scriptCommand = try container.decodeIfPresent(String.self, forKey: .scriptCommand)
-
-        // detectPattern: accept String or [String]
-        if container.contains(.detectPatterns) {
-            if let array = try? container.decode([String].self, forKey: .detectPatterns) {
-                detectPatterns = array
-            } else if let single = try? container.decode(String.self, forKey: .detectPatterns) {
-                detectPatterns = [single]
-            } else {
-                detectPatterns = nil
-            }
-        } else {
-            detectPatterns = nil
-        }
-    }
-
-    init(
-        key: String,
-        type: ExternalPromptType,
-        label: String?,
-        defaultValue: String?,
-        options: [ExternalPromptOption]?,
-        detectPatterns: [String]?,
-        scriptCommand: String?
-    ) {
-        self.key = key
-        self.type = type
-        self.label = label
-        self.defaultValue = defaultValue
-        self.options = options
-        self.detectPatterns = detectPatterns
-        self.scriptCommand = scriptCommand
-    }
-}
-
-enum ExternalPromptType: String, Codable, Sendable {
-    case fileDetect
-    case input
-    case select
-    case script
-}
-
-struct ExternalPromptOption: Codable, Sendable, Equatable {
-    let value: String
-    let label: String
-}
-
 // MARK: - Configure Project
 
 /// Script-based project configuration hook.
-struct ExternalConfigureProject: Codable, Sendable {
+struct ExternalConfigureProject: Codable {
     let script: String
 }
 
 // MARK: - Doctor Checks
 
 /// A declarative doctor check definition for external packs.
-struct ExternalDoctorCheckDefinition: Codable, Sendable {
+struct ExternalDoctorCheckDefinition: Codable {
     let type: ExternalDoctorCheckType
     let name: String
     let section: String?
@@ -772,7 +694,7 @@ struct ExternalDoctorCheckDefinition: Codable, Sendable {
     let isOptional: Bool?
 }
 
-enum ExternalDoctorCheckType: String, Codable, Sendable {
+enum ExternalDoctorCheckType: String, Codable {
     case commandExists
     case fileExists
     case directoryExists
@@ -783,7 +705,7 @@ enum ExternalDoctorCheckType: String, Codable, Sendable {
     case settingsKeyEquals
 }
 
-enum ExternalDoctorCheckScope: String, Codable, Sendable {
+enum ExternalDoctorCheckScope: String, Codable {
     case global
     case project
 }

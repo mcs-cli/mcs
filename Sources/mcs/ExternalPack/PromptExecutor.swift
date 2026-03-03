@@ -2,12 +2,12 @@ import Foundation
 
 /// Executes declarative prompt definitions from external pack manifests,
 /// gathering user input during install or configure flows.
-struct PromptExecutor: Sendable {
+struct PromptExecutor {
     let output: CLIOutput
     let scriptRunner: ScriptRunner
 
     /// Errors specific to prompt execution.
-    enum PromptError: Error, Equatable, Sendable, LocalizedError {
+    enum PromptError: Error, Equatable, LocalizedError {
         case noFilesDetected(pattern: String)
         case scriptFailed(key: String, stderr: String)
 
@@ -29,7 +29,7 @@ struct PromptExecutor: Sendable {
     ///   - projectPath: Current project root directory
     /// - Returns: The resolved value string
     func execute(
-        prompt: ExternalPromptDefinition,
+        prompt: PromptDefinition,
         packPath: URL,
         projectPath: URL
     ) throws -> String {
@@ -53,7 +53,7 @@ struct PromptExecutor: Sendable {
     ///   - projectPath: Current project root directory
     /// - Returns: Dictionary of prompt key to resolved value
     func executeAll(
-        prompts: [ExternalPromptDefinition],
+        prompts: [PromptDefinition],
         packPath: URL,
         projectPath: URL
     ) throws -> [String: String] {
@@ -73,7 +73,7 @@ struct PromptExecutor: Sendable {
 
     /// Scan for files matching one or more patterns and present a selector.
     private func executeFileDetect(
-        prompt: ExternalPromptDefinition,
+        prompt: PromptDefinition,
         projectPath: URL
     ) throws -> String {
         let patterns = prompt.detectPatterns ?? ["*"]
@@ -166,7 +166,7 @@ struct PromptExecutor: Sendable {
     // MARK: - Input
 
     /// Free-text prompt with optional default value.
-    private func executeInput(prompt: ExternalPromptDefinition) -> String {
+    private func executeInput(prompt: PromptDefinition) -> String {
         let label = prompt.label ?? "Enter value for \(prompt.key)"
         return output.promptInline(label, default: prompt.defaultValue)
     }
@@ -174,7 +174,7 @@ struct PromptExecutor: Sendable {
     // MARK: - Select
 
     /// Single choice from a fixed list of options.
-    private func executeSelect(prompt: ExternalPromptDefinition) -> String {
+    private func executeSelect(prompt: PromptDefinition) -> String {
         guard let options = prompt.options, !options.isEmpty else {
             return prompt.defaultValue ?? ""
         }
@@ -191,7 +191,7 @@ struct PromptExecutor: Sendable {
 
     /// Run a script that outputs the resolved value to stdout.
     private func executeScript(
-        prompt: ExternalPromptDefinition,
+        prompt: PromptDefinition,
         packPath _: URL,
         projectPath _: URL
     ) throws -> String {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Context provided to tech packs during project configuration
-struct ProjectConfigContext: Sendable {
+struct ProjectConfigContext {
     let projectPath: URL
     let repoName: String
     let output: CLIOutput
@@ -26,7 +26,7 @@ struct ProjectConfigContext: Sendable {
 }
 
 /// Template contribution from a tech pack
-struct TemplateContribution: Sendable {
+struct TemplateContribution {
     let sectionIdentifier: String // e.g., "ios"
     let templateContent: String // The template content with placeholders
     let placeholders: [String] // Required placeholder names (e.g., ["__PROJECT__"])
@@ -55,7 +55,7 @@ protocol TechPack: Sendable {
 
     /// Return prompt definitions without executing them.
     /// Used by `CrossPackPromptResolver` to detect duplicate keys across packs.
-    func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition]
+    func declaredPrompts(context: ProjectConfigContext) -> [PromptDefinition]
 }
 
 extension TechPack {
@@ -70,7 +70,7 @@ extension TechPack {
         [:]
     }
 
-    func declaredPrompts(context _: ProjectConfigContext) -> [ExternalPromptDefinition] {
+    func declaredPrompts(context _: ProjectConfigContext) -> [PromptDefinition] {
         []
     }
 }
@@ -93,7 +93,7 @@ extension DoctorCheck {
     }
 }
 
-enum CheckResult: Sendable {
+enum CheckResult {
     case pass(String)
     case fail(String)
     case warn(String)
@@ -107,7 +107,7 @@ enum CheckResult: Sendable {
     }
 }
 
-enum FixResult: Sendable {
+enum FixResult {
     case fixed(String)
     case failed(String)
     case notFixable(String)

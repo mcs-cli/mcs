@@ -7,13 +7,13 @@ import Foundation
 /// `script` and `fileDetect` types are pack-specific and always run per-pack.
 enum CrossPackPromptResolver {
     /// A prompt definition paired with the pack that declares it.
-    struct PackPromptInfo: Sendable {
+    struct PackPromptInfo {
         let packName: String
-        let prompt: ExternalPromptDefinition
+        let prompt: PromptDefinition
     }
 
     /// Prompt types eligible for cross-pack deduplication.
-    static let deduplicableTypes: Set<ExternalPromptType> = [.input, .select]
+    static let deduplicableTypes: Set<PromptType> = [.input, .select]
 
     /// Collect prompts from all packs and group by key, skipping already-resolved keys.
     ///
@@ -76,7 +76,7 @@ enum CrossPackPromptResolver {
             if !hasTypeConflict, primaryType == .select {
                 // Merge unique options from all packs (first occurrence of each value wins)
                 var seenValues = Set<String>()
-                var mergedOptions: [ExternalPromptOption] = []
+                var mergedOptions: [PromptOption] = []
                 for info in infos {
                     for option in info.prompt.options ?? []
                         where seenValues.insert(option.value).inserted {

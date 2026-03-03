@@ -236,7 +236,7 @@ protocol TechPack: Sendable {
     var templates: [TemplateContribution] { get }
     var supplementaryDoctorChecks: [any DoctorCheck] { get }
     func templateValues(context: ProjectConfigContext) -> [String: String]
-    func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition]
+    func declaredPrompts(context: ProjectConfigContext) -> [PromptDefinition]
     func configureProject(at path: URL, context: ProjectConfigContext) throws
 }
 ```

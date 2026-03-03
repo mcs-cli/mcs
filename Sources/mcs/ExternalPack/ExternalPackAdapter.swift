@@ -80,7 +80,7 @@ struct ExternalPackAdapter: TechPack {
 
     // MARK: - Prompt Declaration & Execution
 
-    func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition] {
+    func declaredPrompts(context: ProjectConfigContext) -> [PromptDefinition] {
         guard let prompts = manifest.prompts, !prompts.isEmpty else { return [] }
         return context.isGlobalScope
             ? prompts.filter { $0.type != .fileDetect }
@@ -233,7 +233,7 @@ struct ExternalPackAdapter: TechPack {
 
 // MARK: - Errors
 
-enum PackAdapterError: Error, Equatable, Sendable, LocalizedError {
+enum PackAdapterError: Error, Equatable, LocalizedError {
     case pathTraversal(String)
     case configureScriptFailed(String)
 

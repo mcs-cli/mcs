@@ -227,7 +227,7 @@ struct PromptExecutorTests {
         let packDir = tmpDir.appendingPathComponent("pack")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
-        let prompt = ExternalPromptDefinition(
+        let prompt = PromptDefinition(
             key: "version",
             type: .script,
             label: "Detected version",
@@ -255,7 +255,7 @@ struct PromptExecutorTests {
         let packDir = tmpDir.appendingPathComponent("pack")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
-        let prompt = ExternalPromptDefinition(
+        let prompt = PromptDefinition(
             key: "broken",
             type: .script,
             label: "Broken script",
@@ -280,7 +280,7 @@ struct PromptExecutorTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let prompt = ExternalPromptDefinition(
+        let prompt = PromptDefinition(
             key: "fallback",
             type: .script,
             label: "No script",
@@ -311,7 +311,7 @@ struct PromptExecutorTests {
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
         let prompts = [
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "version",
                 type: .script,
                 label: nil,
@@ -320,7 +320,7 @@ struct PromptExecutorTests {
                 detectPatterns: nil,
                 scriptCommand: "echo 1.0.0"
             ),
-            ExternalPromptDefinition(
+            PromptDefinition(
                 key: "name",
                 type: .script,
                 label: nil,
@@ -349,7 +349,7 @@ struct PromptExecutorTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let prompt = ExternalPromptDefinition(
+        let prompt = PromptDefinition(
             key: "empty-select",
             type: .select,
             label: "Pick one",
@@ -374,7 +374,7 @@ struct PromptExecutorTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let prompt = ExternalPromptDefinition(
+        let prompt = PromptDefinition(
             key: "nil-select",
             type: .select,
             label: "Pick one",

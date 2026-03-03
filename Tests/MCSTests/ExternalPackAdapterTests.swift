@@ -518,7 +518,7 @@ struct ExternalPackAdapterTests {
             components: nil,
             templates: nil,
             prompts: [
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "ALREADY_RESOLVED", type: .input,
                     label: "This should be skipped", defaultValue: "default",
                     options: nil, detectPatterns: nil, scriptCommand: nil
@@ -555,12 +555,12 @@ struct ExternalPackAdapterTests {
             components: nil,
             templates: nil,
             prompts: [
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "PREFIX", type: .input,
                     label: "Branch prefix", defaultValue: "feature",
                     options: nil, detectPatterns: nil, scriptCommand: nil
                 ),
-                ExternalPromptDefinition(
+                PromptDefinition(
                     key: "PROJECT", type: .fileDetect,
                     label: "Xcode project", defaultValue: nil,
                     options: nil, detectPatterns: ["*.xcodeproj"], scriptCommand: nil

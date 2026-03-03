@@ -102,7 +102,7 @@ struct ManifestBuilder {
         options: BuildOptions
     ) -> ManifestBuildOutput {
         var components: [ExternalComponentDefinition] = []
-        var prompts: [ExternalPromptDefinition] = []
+        var prompts: [PromptDefinition] = []
         var filesToCopy: [FileCopy] = []
         var templateFiles: [TemplateFile] = []
         var settingsToWrite: Data?
@@ -128,7 +128,7 @@ struct ManifestBuilder {
                     seenPromptKeys[key] = count
                     let promptKey = count == 1 ? key : "\(key)_\(count)"
                     processedEnv[key] = "__\(promptKey)__"
-                    prompts.append(ExternalPromptDefinition(
+                    prompts.append(PromptDefinition(
                         key: promptKey,
                         type: .input,
                         label: "Enter value for \(key) (used by \(server.name) MCP server)",

@@ -1142,8 +1142,8 @@ struct ExternalPackManifestTests {
 
         #expect(prompts[2].type == .select)
         #expect(prompts[2].options?.count == 2)
-        #expect(prompts[2].options?[0] == ExternalPromptOption(value: "ios", label: "iOS"))
-        #expect(prompts[2].options?[1] == ExternalPromptOption(value: "macos", label: "macOS"))
+        #expect(prompts[2].options?[0] == PromptOption(value: "ios", label: "iOS"))
+        #expect(prompts[2].options?[1] == PromptOption(value: "macos", label: "macOS"))
 
         #expect(prompts[3].type == .script)
         #expect(prompts[3].scriptCommand == "cat VERSION")
