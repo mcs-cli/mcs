@@ -17,7 +17,7 @@ struct MCS: ParsableCommand {
             DoctorCommand.self,
             CleanupCommand.self,
             PackCommand.self,
-            ExportCommand.self
+            ExportCommand.self,
         ],
         defaultSubcommand: SyncCommand.self
     )

@@ -8,10 +8,10 @@ enum FileLockError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .acquireFailed(let path):
-            return "Another mcs process is running. Lock file: \(path)"
-        case .openFailed(let path, let code):
-            return "Could not open lock file at \(path): \(String(cString: strerror(code)))"
+        case let .acquireFailed(path):
+            "Another mcs process is running. Lock file: \(path)"
+        case let .openFailed(path, code):
+            "Could not open lock file at \(path): \(String(cString: strerror(code)))"
         }
     }
 }
@@ -38,7 +38,9 @@ protocol LockedCommand: ParsableCommand {
 }
 
 extension LockedCommand {
-    var skipLock: Bool { false }
+    var skipLock: Bool {
+        false
+    }
 
     mutating func run() throws {
         let env = Environment()

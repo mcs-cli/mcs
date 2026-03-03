@@ -50,7 +50,7 @@ struct DoctorRunner {
         output.header("Managed Claude Stack — Doctor")
 
         let env = Environment()
-        let registry = self.registry
+        let registry = registry
 
         // Resolve globally-configured pack IDs from global state.
         // This reflects packs actively synced to the global scope, not just
@@ -67,7 +67,7 @@ struct DoctorRunner {
                 // No global state file yet — fall back to registry for backward compat
                 let packRegistry = PackRegistryFile(path: env.packsRegistry)
                 do {
-                    globallyConfiguredPackIDs = Set((try packRegistry.load()).packs.map(\.identifier))
+                    globallyConfiguredPackIDs = try Set((packRegistry.load()).packs.map(\.identifier))
                 } catch {
                     output.warn("Could not read pack registry: \(error.localizedDescription) — no packs will be checked")
                     globallyConfiguredPackIDs = []
@@ -78,7 +78,7 @@ struct DoctorRunner {
             output.warn("Could not read global state: \(error.localizedDescription) — falling back to pack registry")
             let packRegistry = PackRegistryFile(path: env.packsRegistry)
             do {
-                globallyConfiguredPackIDs = Set((try packRegistry.load()).packs.map(\.identifier))
+                globallyConfiguredPackIDs = try Set((packRegistry.load()).packs.map(\.identifier))
             } catch {
                 output.warn("Could not read pack registry: \(error.localizedDescription) — no packs will be checked")
                 globallyConfiguredPackIDs = []
@@ -254,7 +254,7 @@ struct DoctorRunner {
         do {
             let state = try ProjectState(projectRoot: root)
             if state.exists, !state.configuredPacks.isEmpty {
-                let excludedIDs = Set(state.allExcludedComponents.values.flatMap { $0 })
+                let excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                 return CheckScope(
                     packIDs: state.configuredPacks,
                     effectiveProjectRoot: root,
@@ -326,16 +326,16 @@ struct DoctorRunner {
             }
 
             switch result {
-            case .pass(let msg):
+            case let .pass(msg):
                 docPass(name, msg)
-            case .fail(let msg):
+            case let .fail(msg):
                 docFail(name, msg)
                 if fixMode {
                     pendingFixes.append(entry.check)
                 }
-            case .warn(let msg):
+            case let .warn(msg):
                 docWarn(name, msg)
-            case .skip(let msg):
+            case let .skip(msg):
                 docSkip(name, msg)
             }
         }
@@ -352,7 +352,7 @@ struct DoctorRunner {
         // Show unfixable hints immediately (no confirmation needed)
         for check in unfixable {
             let result = check.fix()
-            if case .notFixable(let msg) = result {
+            if case let .notFixable(msg) = result {
                 output.warn("  ↳ \(check.name): \(msg)")
             }
         }
@@ -375,11 +375,11 @@ struct DoctorRunner {
 
         for check in fixable {
             switch check.fix() {
-            case .fixed(let msg):
+            case let .fixed(msg):
                 docFixed(check.name, msg)
-            case .failed(let msg):
+            case let .failed(msg):
                 docFixFailed(check.name, msg)
-            case .notFixable(let msg):
+            case let .notFixable(msg):
                 output.warn("  ↳ \(check.name): \(msg)")
             }
         }

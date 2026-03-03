@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("CLAUDEMDFreshnessCheck")
 struct CLAUDEMDFreshnessCheckTests {
@@ -94,7 +93,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .pass(let msg) = result {
+        if case let .pass(msg) = result {
             #expect(msg.contains("content verified"))
         } else {
             Issue.record("Expected pass but got \(result)")
@@ -125,7 +124,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .fail(let msg) = result {
+        if case let .fail(msg) = result {
             #expect(msg.contains("outdated sections"))
         } else {
             Issue.record("Expected fail but got \(result)")
@@ -153,7 +152,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg.contains("no stored values"))
         } else {
             Issue.record("Expected .warn but got \(result)")
@@ -171,7 +170,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .skip(let msg) = result {
+        if case let .skip(msg) = result {
             #expect(msg.contains("not found"))
         } else {
             Issue.record("Expected skip but got \(result)")
@@ -202,7 +201,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let fixResult = check.fix()
-        if case .fixed(let msg) = fixResult {
+        if case let .fixed(msg) = fixResult {
             #expect(msg.contains("re-rendered"))
         } else {
             Issue.record("Expected fixed but got \(fixResult)")
@@ -237,7 +236,7 @@ struct CLAUDEMDFreshnessCheckTests {
 
         let result = check.check()
         // With no expected sections, SectionValidator marks them as unmanaged (not outdated) → passes
-        if case .pass(let msg) = result {
+        if case let .pass(msg) = result {
             #expect(msg.contains("content verified"))
         } else {
             Issue.record("Expected pass but got \(result)")
@@ -284,7 +283,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg.contains("no stored values"))
         } else {
             Issue.record("Expected warn but got \(result)")
@@ -307,7 +306,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let fixResult = check.fix()
-        if case .notFixable(let msg) = fixResult {
+        if case let .notFixable(msg) = fixResult {
             #expect(msg.contains("no stored values"))
         } else {
             Issue.record("Expected notFixable but got \(fixResult)")
@@ -341,7 +340,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .fail(let msg) = result {
+        if case let .fail(msg) = result {
             #expect(msg.contains("pack-b"))
             #expect(!msg.contains("pack-a"))
         } else {
@@ -381,7 +380,7 @@ struct CLAUDEMDFreshnessCheckTests {
         )
 
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg.contains("bad-pack"))
             #expect(msg.contains("could not fully verify"))
         } else {
@@ -415,7 +414,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .fail(let msg) = result {
+        if case let .fail(msg) = result {
             // Each section appears on its own indented line
             #expect(msg.contains("↳ pack-a"))
             #expect(msg.contains("↳ pack-b"))
@@ -470,7 +469,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg.contains("unresolved placeholders"))
             #expect(msg.contains("__REPO_NAME__"))
         } else {
@@ -514,7 +513,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .pass(let msg) = result {
+        if case let .pass(msg) = result {
             #expect(msg.contains("content verified"))
         } else {
             Issue.record("Expected pass but got \(result)")
@@ -585,7 +584,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg.contains("could not read state"))
         } else {
             Issue.record("Expected warn but got \(result)")
@@ -610,7 +609,7 @@ struct CLAUDEMDFreshnessCheckTests {
         let check = makeProjectCheck(projectRoot: tmpDir, registry: registry)
 
         let fixResult = check.fix()
-        if case .failed(let msg) = fixResult {
+        if case let .failed(msg) = fixResult {
             #expect(msg.contains("could not read state"))
         } else {
             Issue.record("Expected failed but got \(fixResult)")
@@ -628,7 +627,7 @@ private struct StubTechPack: TechPack {
     let templates: [TemplateContribution]
     let supplementaryDoctorChecks: [any DoctorCheck] = []
 
-    func configureProject(at path: URL, context: ProjectConfigContext) throws {}
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 }
 
 private struct ThrowingTechPack: TechPack {
@@ -639,12 +638,15 @@ private struct ThrowingTechPack: TechPack {
     var templates: [TemplateContribution] {
         get throws { throw TestError.templateLoadFailed }
     }
+
     let supplementaryDoctorChecks: [any DoctorCheck] = []
 
-    func configureProject(at path: URL, context: ProjectConfigContext) throws {}
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 
     private enum TestError: Error, LocalizedError {
         case templateLoadFailed
-        var errorDescription: String? { "simulated template load failure" }
+        var errorDescription: String? {
+            "simulated template load failure"
+        }
     }
 }

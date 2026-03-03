@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("Settings deep-merge")
 struct SettingsMergeTests {
@@ -24,7 +23,7 @@ struct SettingsMergeTests {
     @Test("Merging into empty settings copies all fields")
     func mergeIntoEmpty() throws {
         var base = Settings()
-        let other = Settings(
+        let other = try Settings(
             hooks: [
                 "PreToolUse": [
                     Settings.HookGroup(
@@ -35,21 +34,26 @@ struct SettingsMergeTests {
             ],
             enabledPlugins: ["my-plugin": true],
             extraJSON: [
-                "env": try Self.jsonFragment(["KEY": "value"]),
-                "permissions": try Self.jsonFragment(["defaultMode": "allowEdits"]),
-                "alwaysThinkingEnabled": try Self.jsonFragment(true),
+                "env": Self.jsonFragment(["KEY": "value"]),
+                "permissions": Self.jsonFragment(["defaultMode": "allowEdits"]),
+                "alwaysThinkingEnabled": Self.jsonFragment(true),
             ]
         )
 
         base.merge(with: other)
 
-        let env = try JSONSerialization.jsonObject(with: base.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(base.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "value")
-        let perms = try JSONSerialization.jsonObject(with: base.extraJSON["permissions"]!) as! [String: Any]
+        let permsData = try #require(base.extraJSON["permissions"])
+        let perms = try #require(JSONSerialization.jsonObject(with: permsData) as? [String: Any])
         #expect(perms["defaultMode"] as? String == "allowEdits")
         #expect(base.hooks?["PreToolUse"]?.count == 1)
         #expect(base.enabledPlugins?["my-plugin"] == true)
-        let thinking = try JSONSerialization.jsonObject(with: base.extraJSON["alwaysThinkingEnabled"]!, options: .fragmentsAllowed) as! Bool
+        let thinkingData = try #require(base.extraJSON["alwaysThinkingEnabled"])
+        let thinking = try #require(
+            JSONSerialization.jsonObject(with: thinkingData, options: .fragmentsAllowed) as? Bool
+        )
         #expect(thinking == true)
     }
 
@@ -57,16 +61,17 @@ struct SettingsMergeTests {
 
     @Test("Existing env vars are preserved during merge")
     func envPreserveExisting() throws {
-        var base = Settings(extraJSON: [
-            "env": try Self.jsonFragment(["EXISTING": "keep", "SHARED": "original"]),
+        var base = try Settings(extraJSON: [
+            "env": Self.jsonFragment(["EXISTING": "keep", "SHARED": "original"]),
         ])
-        let other = Settings(extraJSON: [
-            "env": try Self.jsonFragment(["SHARED": "overwrite-attempt", "NEW": "added"]),
+        let other = try Settings(extraJSON: [
+            "env": Self.jsonFragment(["SHARED": "overwrite-attempt", "NEW": "added"]),
         ])
 
         base.merge(with: other)
 
-        let env = try JSONSerialization.jsonObject(with: base.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(base.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["EXISTING"] == "keep")
         #expect(env["SHARED"] == "original") // existing NOT overwritten
         #expect(env["NEW"] == "added")
@@ -148,40 +153,40 @@ struct SettingsMergeTests {
 
         #expect(base.enabledPlugins?["a"] == true)
         #expect(base.enabledPlugins?["b"] == false) // original kept
-        #expect(base.enabledPlugins?["c"] == true)  // new added
+        #expect(base.enabledPlugins?["c"] == true) // new added
     }
 
     // MARK: - alwaysThinkingEnabled merge
 
     @Test("Scalar extraJSON only set if base is nil")
     func scalarMergeExistingWins() throws {
-        var base = Settings(extraJSON: [
-            "alwaysThinkingEnabled": try Self.jsonFragment(false),
+        var base = try Settings(extraJSON: [
+            "alwaysThinkingEnabled": Self.jsonFragment(false),
         ])
-        let other = Settings(extraJSON: [
-            "alwaysThinkingEnabled": try Self.jsonFragment(true),
+        let other = try Settings(extraJSON: [
+            "alwaysThinkingEnabled": Self.jsonFragment(true),
         ])
 
         base.merge(with: other)
 
-        let result = try JSONSerialization.jsonObject(
-            with: base.extraJSON["alwaysThinkingEnabled"]!, options: .fragmentsAllowed
-        ) as! Bool
+        let result = try #require(JSONSerialization.jsonObject(
+            with: #require(base.extraJSON["alwaysThinkingEnabled"]), options: .fragmentsAllowed
+        ) as? Bool)
         #expect(result == false) // existing preserved
     }
 
     @Test("Scalar extraJSON adopted from other when base is nil")
     func scalarMergeFromNil() throws {
         var base = Settings()
-        let other = Settings(extraJSON: [
-            "alwaysThinkingEnabled": try Self.jsonFragment(true),
+        let other = try Settings(extraJSON: [
+            "alwaysThinkingEnabled": Self.jsonFragment(true),
         ])
 
         base.merge(with: other)
 
-        let result = try JSONSerialization.jsonObject(
-            with: base.extraJSON["alwaysThinkingEnabled"]!, options: .fragmentsAllowed
-        ) as! Bool
+        let result = try #require(JSONSerialization.jsonObject(
+            with: #require(base.extraJSON["alwaysThinkingEnabled"]), options: .fragmentsAllowed
+        ) as? Bool)
         #expect(result == true)
     }
 
@@ -193,26 +198,28 @@ struct SettingsMergeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let file = tmpDir.appendingPathComponent("settings.json")
-        let original = Settings(
+        let original = try Settings(
             enabledPlugins: ["p": true],
             extraJSON: [
-                "env": try Self.jsonFragment(["FOO": "bar"]),
-                "permissions": try Self.jsonFragment(["defaultMode": "allowEdits"]),
-                "alwaysThinkingEnabled": try Self.jsonFragment(true),
+                "env": Self.jsonFragment(["FOO": "bar"]),
+                "permissions": Self.jsonFragment(["defaultMode": "allowEdits"]),
+                "alwaysThinkingEnabled": Self.jsonFragment(true),
             ]
         )
 
         try original.save(to: file)
         let loaded = try Settings.load(from: file)
 
-        let env = try JSONSerialization.jsonObject(with: loaded.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(loaded.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["FOO"] == "bar")
-        let perms = try JSONSerialization.jsonObject(with: loaded.extraJSON["permissions"]!) as! [String: Any]
+        let permsData = try #require(loaded.extraJSON["permissions"])
+        let perms = try #require(JSONSerialization.jsonObject(with: permsData) as? [String: Any])
         #expect(perms["defaultMode"] as? String == "allowEdits")
         #expect(loaded.enabledPlugins?["p"] == true)
-        let thinking = try JSONSerialization.jsonObject(
-            with: loaded.extraJSON["alwaysThinkingEnabled"]!, options: .fragmentsAllowed
-        ) as! Bool
+        let thinking = try #require(JSONSerialization.jsonObject(
+            with: #require(loaded.extraJSON["alwaysThinkingEnabled"]), options: .fragmentsAllowed
+        ) as? Bool)
         #expect(thinking == true)
     }
 
@@ -257,7 +264,7 @@ struct SettingsMergeTests {
 
         // Read raw JSON to verify unknown keys survived
         let savedData = try Data(contentsOf: file)
-        let savedJSON = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        let savedJSON = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
 
         #expect(savedJSON["unknownField"] as? String == "important-data")
         #expect(savedJSON["anotherUnknown"] as? Int == 42)
@@ -271,14 +278,15 @@ struct SettingsMergeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let file = tmpDir.appendingPathComponent("settings.json")
-        let settings = Settings(extraJSON: [
-            "env": try Self.jsonFragment(["KEY": "val"]),
-            "alwaysThinkingEnabled": try Self.jsonFragment(true),
+        let settings = try Settings(extraJSON: [
+            "env": Self.jsonFragment(["KEY": "val"]),
+            "alwaysThinkingEnabled": Self.jsonFragment(true),
         ])
         try settings.save(to: file)
 
         let loaded = try Settings.load(from: file)
-        let env = try JSONSerialization.jsonObject(with: loaded.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(loaded.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "val")
         #expect(loaded.extraJSON["alwaysThinkingEnabled"] != nil)
     }
@@ -309,7 +317,8 @@ struct SettingsMergeTests {
 
         // All non-typed keys captured in extraJSON
         #expect(settings.extraJSON["env"] != nil)
-        let env = try JSONSerialization.jsonObject(with: settings.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "value")
         #expect(settings.extraJSON["attribution"] != nil)
         #expect(settings.extraJSON["customFeature"] != nil)
@@ -331,7 +340,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Dict-level merge: existing "commit" preserved, "newField" added
-        let merged = try JSONSerialization.jsonObject(with: base.extraJSON["attribution"]!) as! [String: Any]
+        let mergedData = try #require(base.extraJSON["attribution"])
+        let merged = try #require(JSONSerialization.jsonObject(with: mergedData) as? [String: Any])
         #expect(merged["commit"] as? String == "tool-a")
         #expect(merged["newField"] as? String == "x")
 
@@ -349,7 +359,8 @@ struct SettingsMergeTests {
 
         base.merge(with: other)
 
-        let result = try JSONSerialization.jsonObject(with: base.extraJSON["flag"]!, options: .fragmentsAllowed) as! Bool
+        let resultData = try #require(base.extraJSON["flag"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData, options: .fragmentsAllowed) as? Bool)
         #expect(result == false) // existing wins
     }
 
@@ -380,7 +391,7 @@ struct SettingsMergeTests {
 
         // Verify the unknown key survived the full pipeline
         let savedData = try Data(contentsOf: destFile)
-        let savedJSON = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        let savedJSON = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
         #expect(savedJSON["attribution"] != nil)
         let attr = savedJSON["attribution"] as? [String: Any]
         #expect(attr?["commit"] as? String == "")
@@ -390,7 +401,7 @@ struct SettingsMergeTests {
 
     @Test("removeKeys removes from extraJSON")
     func removeExtraKeys() throws {
-        var settings = Settings(extraJSON: ["attribution": try Self.jsonFragment(["commit": "x"])])
+        var settings = try Settings(extraJSON: ["attribution": Self.jsonFragment(["commit": "x"])])
 
         settings.removeKeys(["attribution"])
 
@@ -399,19 +410,20 @@ struct SettingsMergeTests {
 
     @Test("removeKeys handles dotted paths in extraJSON")
     func removeExtraSubKeys() throws {
-        var settings = Settings(extraJSON: ["env": try Self.jsonFragment(["FOO": "bar", "BAZ": "qux"])])
+        var settings = try Settings(extraJSON: ["env": Self.jsonFragment(["FOO": "bar", "BAZ": "qux"])])
 
         settings.removeKeys(["env.FOO"])
 
         // "FOO" removed, "BAZ" preserved
-        let result = try JSONSerialization.jsonObject(with: settings.extraJSON["env"]!) as! [String: String]
+        let resultData = try #require(settings.extraJSON["env"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: String])
         #expect(result["FOO"] == nil)
         #expect(result["BAZ"] == "qux")
     }
 
     @Test("removeKeys removes extraJSON entry when last sub-key removed")
     func removeExtraLastSubKey() throws {
-        var settings = Settings(extraJSON: ["env": try Self.jsonFragment(["FOO": "bar"])])
+        var settings = try Settings(extraJSON: ["env": Self.jsonFragment(["FOO": "bar"])])
 
         settings.removeKeys(["env.FOO"])
 
@@ -431,14 +443,14 @@ struct SettingsMergeTests {
             .write(to: file)
 
         // Save settings that don't include userSetting
-        let settings = Settings(extraJSON: [
-            "env": try Self.jsonFragment(["KEY": "val"]),
+        let settings = try Settings(extraJSON: [
+            "env": Self.jsonFragment(["KEY": "val"]),
         ])
         try settings.save(to: file)
 
         // User-written key preserved
         let savedData = try Data(contentsOf: file)
-        let savedJSON = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        let savedJSON = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
         #expect(savedJSON["userSetting"] as? String == "keep-me")
     }
 
@@ -462,7 +474,7 @@ struct SettingsMergeTests {
         try settings.save(to: file, dropKeys: ["attribution"])
 
         let savedData = try Data(contentsOf: file)
-        let savedJSON = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        let savedJSON = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
         #expect(savedJSON["attribution"] == nil) // dropped
         #expect(savedJSON["userSetting"] as? String == "keep-me") // preserved
     }
@@ -478,7 +490,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Existing "defaultMode" preserved, "newField" added via dict-level merge
-        let rawPerms = try JSONSerialization.jsonObject(with: base.extraJSON["permissions"]!) as! [String: Any]
+        let rawPermsData = try #require(base.extraJSON["permissions"])
+        let rawPerms = try #require(JSONSerialization.jsonObject(with: rawPermsData) as? [String: Any])
         #expect(rawPerms["defaultMode"] as? String == "plan")
         #expect(rawPerms["newField"] as? String == "x")
     }
@@ -537,8 +550,8 @@ struct SettingsMergeTests {
             .write(to: file)
 
         // Settings struct also carries "attribution" in extraJSON (from a pack merge)
-        let settings = Settings(extraJSON: [
-            "attribution": try Self.jsonFragment(["commit": "new-pack"]),
+        let settings = try Settings(extraJSON: [
+            "attribution": Self.jsonFragment(["commit": "new-pack"]),
         ])
 
         // Save with dropKeys containing "attribution" — should still write the
@@ -546,7 +559,7 @@ struct SettingsMergeTests {
         try settings.save(to: file, dropKeys: ["attribution"])
 
         let savedData = try Data(contentsOf: file)
-        let savedJSON = try JSONSerialization.jsonObject(with: savedData) as! [String: Any]
+        let savedJSON = try #require(JSONSerialization.jsonObject(with: savedData) as? [String: Any])
         let attr = savedJSON["attribution"] as? [String: Any]
         #expect(attr?["commit"] as? String == "new-pack") // Layer 2 wins
     }
@@ -560,12 +573,12 @@ struct SettingsMergeTests {
 
         let file = tmpDir.appendingPathComponent("settings.json")
         // Settings with typed hooks AND a rogue "hooks" entry in extraJSON
-        let settings = Settings(
+        let settings = try Settings(
             hooks: ["SessionStart": [
                 Settings.HookGroup(matcher: nil, hooks: [Settings.HookEntry(type: "command", command: "echo real")]),
             ]],
             extraJSON: [
-                "hooks": try Self.jsonFragment(["Rogue": [["hooks": [["type": "command", "command": "echo rogue"]]]]]),
+                "hooks": Self.jsonFragment(["Rogue": [["hooks": [["type": "command", "command": "echo rogue"]]]]]),
             ]
         )
 
@@ -579,17 +592,17 @@ struct SettingsMergeTests {
 
     @Test("removeKeys dotted path on scalar extraJSON is a no-op")
     func removeSubKeyFromScalar() throws {
-        var settings = Settings(extraJSON: [
-            "alwaysThinkingEnabled": try Self.jsonFragment(true),
+        var settings = try Settings(extraJSON: [
+            "alwaysThinkingEnabled": Self.jsonFragment(true),
         ])
 
         // Attempting to remove a sub-key from a non-dict value should be a no-op
         settings.removeKeys(["alwaysThinkingEnabled.subKey"])
 
         // Original scalar value preserved
-        let val = try JSONSerialization.jsonObject(
-            with: settings.extraJSON["alwaysThinkingEnabled"]!, options: .fragmentsAllowed
-        ) as! Bool
+        let val = try #require(JSONSerialization.jsonObject(
+            with: #require(settings.extraJSON["alwaysThinkingEnabled"]), options: .fragmentsAllowed
+        ) as? Bool)
         #expect(val == true)
     }
 
@@ -605,7 +618,8 @@ struct SettingsMergeTests {
         base.merge(with: other)
 
         // Existing dict preserved (neither is overwritten)
-        let result = try JSONSerialization.jsonObject(with: base.extraJSON["config"]!) as! [String: String]
+        let resultData = try #require(base.extraJSON["config"])
+        let result = try #require(JSONSerialization.jsonObject(with: resultData) as? [String: String])
         #expect(result["key"] == "val")
     }
 }

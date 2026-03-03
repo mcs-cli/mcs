@@ -57,24 +57,22 @@ struct ExportCommand: ParsableCommand {
         printDiscoverySummary(config, output: output)
 
         // 3. Select artifacts
-        let selection: Selection
-        if nonInteractive {
-            selection = selectAll(from: config)
+        let selection: Selection = if nonInteractive {
+            selectAll(from: config)
         } else {
-            selection = interactiveSelect(config: config, output: output)
+            interactiveSelect(config: config, output: output)
         }
 
         // 4. Gather metadata
-        let metadata: ManifestBuilder.Metadata
-        if nonInteractive {
-            metadata = ManifestBuilder.Metadata(
+        let metadata: ManifestBuilder.Metadata = if nonInteractive {
+            ManifestBuilder.Metadata(
                 identifier: identifier ?? "exported-pack",
                 displayName: identifier?.replacingOccurrences(of: "-", with: " ").capitalized ?? "Exported Pack",
                 description: "Exported Claude Code configuration",
                 author: gitAuthorName(environment: env)
             )
         } else {
-            metadata = gatherMetadata(environment: env, output: output)
+            gatherMetadata(environment: env, output: output)
         }
 
         // 5. Build manifest
@@ -254,7 +252,10 @@ struct ExportCommand: ParsableCommand {
         // CLAUDE.md sections + user content
         var claudeItems: [SelectableItem] = []
         if !config.claudeSections.isEmpty {
-            claudeItems += appendItems(config.claudeSections.map { (name: $0.sectionIdentifier, description: "Managed section") }, category: .sections)
+            claudeItems += appendItems(
+                config.claudeSections.map { (name: $0.sectionIdentifier, description: "Managed section") },
+                category: .sections
+            )
         }
         if config.claudeUserContent != nil {
             claudeItems.append(appendSentinel(name: "User content", description: "Content outside managed sections", key: .userContent))
@@ -266,7 +267,9 @@ struct ExportCommand: ParsableCommand {
         // Gitignore + Settings
         var extraItems: [SelectableItem] = []
         if !config.gitignoreEntries.isEmpty {
-            extraItems.append(appendSentinel(name: "Gitignore entries", description: "\(config.gitignoreEntries.count) entries", key: .gitignore))
+            extraItems.append(
+                appendSentinel(name: "Gitignore entries", description: "\(config.gitignoreEntries.count) entries", key: .gitignore)
+            )
         }
         if config.remainingSettingsData != nil {
             extraItems.append(appendSentinel(name: "Additional settings", description: "env vars, permissions, etc.", key: .settings))

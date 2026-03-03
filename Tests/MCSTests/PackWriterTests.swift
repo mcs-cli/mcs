@@ -1,10 +1,9 @@
-import Testing
 import Foundation
 @testable import mcs
+import Testing
 
 @Suite("PackWriter")
 struct PackWriterTests {
-
     // MARK: - Helpers
 
     private let output = CLIOutput(colorsEnabled: false)

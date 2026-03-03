@@ -9,16 +9,18 @@ struct PackRegistryFile: Sendable {
         let identifier: String
         let displayName: String
         let author: String?
-        let sourceURL: String           // Git clone URL or original local path
-        let ref: String?                // Git tag/branch/commit
-        let commitSHA: String           // Exact commit (git) or "local" (local packs)
-        let localPath: String           // Relative to ~/.mcs/packs/ (git) or absolute path (local)
-        let addedAt: String             // ISO 8601 date
-        let trustedScriptHashes: [String: String]  // relativePath -> SHA-256
-        let isLocal: Bool?              // nil/false = git pack, true = local filesystem pack
+        let sourceURL: String // Git clone URL or original local path
+        let ref: String? // Git tag/branch/commit
+        let commitSHA: String // Exact commit (git) or "local" (local packs)
+        let localPath: String // Relative to ~/.mcs/packs/ (git) or absolute path (local)
+        let addedAt: String // ISO 8601 date
+        let trustedScriptHashes: [String: String] // relativePath -> SHA-256
+        let isLocal: Bool? // nil/false = git pack, true = local filesystem pack
 
         /// Whether this pack is a local filesystem pack (not cloned via git).
-        var isLocalPack: Bool { isLocal ?? false }
+        var isLocalPack: Bool {
+            isLocal ?? false
+        }
 
         /// Resolve the on-disk path for this pack entry.
         /// Local packs store an absolute path; git packs store a path relative to `packsDirectory`.
@@ -38,10 +40,6 @@ struct PackRegistryFile: Sendable {
         init(packs: [PackEntry] = []) {
             self.packs = packs
         }
-    }
-
-    init(path: URL) {
-        self.path = path
     }
 
     // MARK: - Load / Save
@@ -182,9 +180,9 @@ extension PackRegistryFile.CollisionInput {
             for component in components {
                 componentIDs.append(component.id)
                 switch component.installAction {
-                case .mcpServer(let config):
+                case let .mcpServer(config):
                     mcpNames.append(config.name)
-                case .copyPackFile(let config) where config.fileType == .skill:
+                case let .copyPackFile(config) where config.fileType == .skill:
                     skillDirs.append(config.destination)
                 default:
                     break

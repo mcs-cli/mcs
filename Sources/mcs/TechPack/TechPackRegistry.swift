@@ -22,14 +22,14 @@ struct TechPackRegistry: Sendable {
 
     /// Get all components from all packs.
     var allPackComponents: [ComponentDefinition] {
-        availablePacks.flatMap { $0.components }
+        availablePacks.flatMap(\.components)
     }
 
     /// Get supplementary doctor checks only for installed packs.
     /// These are pack-level checks that cannot be auto-derived from components.
     func supplementaryDoctorChecks(installedPacks ids: Set<String>) -> [any DoctorCheck] {
         availablePacks.filter { ids.contains($0.identifier) }
-            .flatMap { $0.supplementaryDoctorChecks }
+            .flatMap(\.supplementaryDoctorChecks)
     }
 
     /// Get template contributions for a specific pack.

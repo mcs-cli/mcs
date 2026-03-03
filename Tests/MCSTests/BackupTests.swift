@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("Backup")
 struct BackupTests {
@@ -26,10 +25,10 @@ struct BackupTests {
         let backupURL = try backup.backupFile(at: original)
 
         #expect(backupURL != nil)
-        #expect(backupURL!.lastPathComponent.contains(".backup."))
-        #expect(FileManager.default.fileExists(atPath: backupURL!.path))
+        #expect(try #require(backupURL?.lastPathComponent.contains(".backup.")))
+        #expect(try FileManager.default.fileExists(atPath: #require(backupURL?.path)))
 
-        let backupContent = try String(contentsOf: backupURL!, encoding: .utf8)
+        let backupContent = try String(contentsOf: #require(backupURL), encoding: .utf8)
         #expect(backupContent == "content")
     }
 
@@ -76,7 +75,7 @@ struct BackupTests {
 
         #expect(first != nil)
         #expect(second != nil)
-        #expect(first!.path != second!.path)
+        #expect(try #require(first?.path) != second!.path)
     }
 
     // MARK: - findBackups

@@ -26,9 +26,9 @@ struct ConfigurationDiscovery: Sendable {
 
         var isEmpty: Bool {
             mcpServers.isEmpty && hookFiles.isEmpty && skillFiles.isEmpty
-            && commandFiles.isEmpty && agentFiles.isEmpty && plugins.isEmpty && claudeSections.isEmpty
-            && claudeUserContent == nil && gitignoreEntries.isEmpty
-            && remainingSettingsData == nil
+                && commandFiles.isEmpty && agentFiles.isEmpty && plugins.isEmpty && claudeSections.isEmpty
+                && claudeUserContent == nil && gitignoreEntries.isEmpty
+                && remainingSettingsData == nil
         }
     }
 
@@ -40,7 +40,9 @@ struct ConfigurationDiscovery: Sendable {
         let url: String?
         let scope: String
 
-        var isHTTP: Bool { url != nil }
+        var isHTTP: Bool {
+            url != nil
+        }
     }
 
     struct DiscoveredFile: Sendable {
@@ -89,7 +91,7 @@ struct ConfigurationDiscovery: Sendable {
             skillsDir = environment.skillsDirectory
             commandsDir = environment.commandsDirectory
             agentsDir = environment.agentsDirectory
-        case .project(let projectRoot):
+        case let .project(projectRoot):
             let claudeDir = projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory)
             settingsPath = claudeDir.appendingPathComponent("settings.local.json")
             claudeFilePath = projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD)
@@ -158,7 +160,7 @@ struct ConfigurationDiscovery: Sendable {
                     }
                 }
             }
-        case .project(let projectRoot):
+        case let .project(projectRoot):
             // Read project-scoped servers from projects[path].mcpServers
             if let projects = json[Constants.JSONKeys.projects] as? [String: Any],
                let projectEntry = projects[projectRoot.path] as? [String: Any],
@@ -205,7 +207,7 @@ struct ConfigurationDiscovery: Sendable {
 
         // Extract plugins
         if let plugins = settings.enabledPlugins {
-            config.plugins = plugins.filter { $0.value }.map(\.key).sorted()
+            config.plugins = plugins.filter(\.value).map(\.key).sorted()
         }
 
         // Build remaining settings (excluding hooks and enabledPlugins, which
@@ -273,13 +275,9 @@ struct ConfigurationDiscovery: Sendable {
             }
 
             // Try to match this file to a hook event via settings commands
-            var matchedEvent: String?
-            for (command, event) in commandToEvent {
-                if command.contains(filename) {
-                    matchedEvent = event
-                    break
-                }
-            }
+            let matchedEvent = commandToEvent.first { command, _ in
+                command.contains(filename)
+            }?.value
 
             config.hookFiles.append(DiscoveredFile(
                 filename: filename,
@@ -295,7 +293,10 @@ struct ConfigurationDiscovery: Sendable {
 
         let files: [URL]
         do {
-            files = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey])
+            files = try fm.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey]
+            )
         } catch {
             output.warn("Could not read directory \(directory.lastPathComponent): \(error.localizedDescription)")
             return []
@@ -318,7 +319,7 @@ struct ConfigurationDiscovery: Sendable {
                     }
                 }
                 // Skip non-file, non-directory entries (sockets, device files, etc.)
-                if vals.isRegularFile != true && vals.isDirectory != true {
+                if vals.isRegularFile != true, vals.isDirectory != true {
                     return false
                 }
                 return true

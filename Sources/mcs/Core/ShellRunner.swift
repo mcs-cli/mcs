@@ -6,16 +6,14 @@ struct ShellResult: Sendable {
     let stdout: String
     let stderr: String
 
-    var succeeded: Bool { exitCode == 0 }
+    var succeeded: Bool {
+        exitCode == 0
+    }
 }
 
 /// Runs shell commands and captures output.
 struct ShellRunner: Sendable {
     let environment: Environment
-
-    init(environment: Environment) {
-        self.environment = environment
-    }
 
     /// Check if a command exists on PATH.
     func commandExists(_ command: String) -> Bool {

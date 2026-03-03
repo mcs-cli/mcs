@@ -26,9 +26,17 @@ struct ExternalPackAdapter: TechPack {
 
     // MARK: - TechPack Identity
 
-    var identifier: String { manifest.identifier }
-    var displayName: String { manifest.displayName }
-    var description: String { manifest.description }
+    var identifier: String {
+        manifest.identifier
+    }
+
+    var displayName: String {
+        manifest.displayName
+    }
+
+    var description: String {
+        manifest.description
+    }
 
     // MARK: - Components
 
@@ -168,32 +176,32 @@ struct ExternalPackAdapter: TechPack {
 
     private func convertInstallAction(_ ext: ExternalInstallAction) -> ComponentInstallAction? {
         switch ext {
-        case .mcpServer(let config):
+        case let .mcpServer(config):
             return .mcpServer(config.toMCPServerConfig())
 
-        case .plugin(let name):
+        case let .plugin(name):
             return .plugin(name: name)
 
-        case .brewInstall(let package):
+        case let .brewInstall(package):
             return .brewInstall(package: package)
 
-        case .shellCommand(let command):
+        case let .shellCommand(command):
             return .shellCommand(command: command)
 
-        case .gitignoreEntries(let entries):
+        case let .gitignoreEntries(entries):
             return .gitignoreEntries(entries: entries)
 
         case .settingsMerge:
             return .settingsMerge(source: nil)
 
-        case .settingsFile(let source):
+        case let .settingsFile(source):
             guard let sourceURL = resolvePackPath(source) else {
                 output.warn("Source '\(source)' escapes pack directory — skipping component")
                 return nil
             }
             return .settingsMerge(source: sourceURL)
 
-        case .copyPackFile(let config):
+        case let .copyPackFile(config):
             guard let sourceURL = resolvePackPath(config.source) else {
                 output.warn("Source '\(config.source)' escapes pack directory — skipping component")
                 return nil
@@ -231,10 +239,10 @@ enum PackAdapterError: Error, Equatable, Sendable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .pathTraversal(let path):
-            return "Path traversal attempt: '\(path)' escapes pack directory"
-        case .configureScriptFailed(let message):
-            return "Configure script failed: \(message)"
+        case let .pathTraversal(path):
+            "Path traversal attempt: '\(path)' escapes pack directory"
+        case let .configureScriptFailed(message):
+            "Configure script failed: \(message)"
         }
     }
 }

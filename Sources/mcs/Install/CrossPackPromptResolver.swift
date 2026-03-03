@@ -6,7 +6,6 @@ import Foundation
 /// Only `input` and `select` prompt types are eligible for deduplication.
 /// `script` and `fileDetect` types are pack-specific and always run per-pack.
 enum CrossPackPromptResolver {
-
     /// A prompt definition paired with the pack that declares it.
     struct PackPromptInfo: Sendable {
         let packName: String
@@ -74,15 +73,14 @@ enum CrossPackPromptResolver {
             // Use the first non-nil default value
             let defaultValue = infos.compactMap(\.prompt.defaultValue).first
 
-            if !hasTypeConflict && primaryType == .select {
+            if !hasTypeConflict, primaryType == .select {
                 // Merge unique options from all packs (first occurrence of each value wins)
                 var seenValues = Set<String>()
                 var mergedOptions: [ExternalPromptOption] = []
                 for info in infos {
-                    for option in info.prompt.options ?? [] {
-                        if seenValues.insert(option.value).inserted {
-                            mergedOptions.append(option)
-                        }
+                    for option in info.prompt.options ?? []
+                        where seenValues.insert(option.value).inserted {
+                        mergedOptions.append(option)
                     }
                 }
                 guard !mergedOptions.isEmpty else {

@@ -11,8 +11,26 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install linters
+        run: |
+          brew install swiftformat swiftlint || true
+          brew upgrade swiftformat swiftlint || true
+
+      - name: SwiftFormat
+        run: swiftformat --lint --strict .
+
+      - name: SwiftLint
+        run: swiftlint --strict --reporter github-actions-logging
+
   resolve:
     name: Resolve Dependencies
+    needs: lint
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6

@@ -48,11 +48,10 @@ struct Homebrew: Sendable {
             let binPath = "\(prefix)/bin/\(basename)"
             guard let dest = try? fm.destinationOfSymbolicLink(atPath: binPath) else { continue }
 
-            let resolved: String
-            if dest.hasPrefix("/") {
-                resolved = dest
+            let resolved: String = if dest.hasPrefix("/") {
+                dest
             } else {
-                resolved = URL(fileURLWithPath: "\(prefix)/bin")
+                URL(fileURLWithPath: "\(prefix)/bin")
                     .appendingPathComponent(dest).standardized.path
             }
 

@@ -1,13 +1,11 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 // MARK: - Argument Parsing
 
 @Suite("PackCommand argument parsing")
 struct PackCommandParsingTests {
-
     // MARK: - AddPack
 
     @Test("AddPack parses source argument")
@@ -113,7 +111,6 @@ struct PackCommandParsingTests {
 
 @Suite("ListPacks pack status")
 struct ListPacksStatusTests {
-
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mcs-packstatus-test-\(UUID().uuidString)")

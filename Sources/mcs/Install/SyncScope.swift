@@ -60,7 +60,7 @@ struct SyncScope: Sendable {
 
 extension SyncScope {
     /// Create a project-scoped sync context.
-    static func project(at projectPath: URL, environment: Environment) -> SyncScope {
+    static func project(at projectPath: URL, environment _: Environment) -> SyncScope {
         let claudeDir = projectPath.appendingPathComponent(Constants.FileNames.claudeDirectory)
         return SyncScope(
             label: "Project",

@@ -4,7 +4,6 @@
 /// multi-use siblings. Single-file constants should remain local
 /// to their type.
 enum Constants {
-
     // MARK: - File Names
 
     enum FileNames {

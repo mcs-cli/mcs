@@ -1,10 +1,8 @@
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("DoctorCommand argument parsing")
 struct DoctorCommandTests {
-
     @Test("Parses with no arguments (defaults)")
     func parsesDefaults() throws {
         let cmd = try DoctorCommand.parse([])

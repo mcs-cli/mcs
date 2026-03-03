@@ -10,13 +10,13 @@ struct GlobalSyncStrategy: SyncStrategy {
     let environment: Environment
 
     init(environment: Environment) {
-        self.scope = .global(environment: environment)
+        scope = .global(environment: environment)
         self.environment = environment
     }
 
     // MARK: - Template Values
 
-    func resolveBuiltInValues(shell: ShellRunner, output: CLIOutput) -> [String: String] {
+    func resolveBuiltInValues(shell _: ShellRunner, output _: CLIOutput) -> [String: String] {
         [:]
     }
 
@@ -59,7 +59,7 @@ struct GlobalSyncStrategy: SyncStrategy {
             }
 
             switch component.installAction {
-            case .brewInstall(let package):
+            case let .brewInstall(package):
                 output.dimmed("  Installing \(component.displayName)...")
                 if executor.installBrewPackage(package) {
                     artifacts.recordBrewPackage(package)
@@ -68,7 +68,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     output.warn("  \(component.displayName) failed to install")
                 }
 
-            case .mcpServer(let config):
+            case let .mcpServer(config):
                 let resolved = config.substituting(resolvedValues)
                 let globalConfig = MCPServerConfig(
                     name: resolved.name,
@@ -85,7 +85,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     output.success("  \(component.displayName) registered (scope: user)")
                 }
 
-            case .plugin(let name):
+            case let .plugin(name):
                 output.dimmed("  Installing plugin \(component.displayName)...")
                 if executor.installPlugin(name) {
                     artifacts.recordPlugin(name)
@@ -94,7 +94,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     output.warn("  \(component.displayName) failed to install")
                 }
 
-            case .copyPackFile(let source, let destination, let fileType):
+            case let .copyPackFile(source, destination, fileType):
                 if executor.installCopyPackFile(
                     source: source,
                     destination: destination,
@@ -116,12 +116,12 @@ struct GlobalSyncStrategy: SyncStrategy {
                     output.success("  \(component.displayName) installed")
                 }
 
-            case .gitignoreEntries(let entries):
+            case let .gitignoreEntries(entries):
                 if executor.addGitignoreEntries(entries) {
                     artifacts.gitignoreEntries.append(contentsOf: entries)
                 }
 
-            case .shellCommand(let command):
+            case let .shellCommand(command):
                 output.dimmed("  Running \(component.displayName)...")
                 let result = shell.shell(command)
                 if result.succeeded {

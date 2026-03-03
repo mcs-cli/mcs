@@ -90,7 +90,7 @@ struct Settings: Codable, Sendable {
     mutating func merge(with other: Settings) {
         // Hooks: deduplicate by command
         if let otherHooks = other.hooks {
-            var merged = self.hooks ?? [:]
+            var merged = hooks ?? [:]
             for (event, otherGroups) in otherHooks {
                 var existing = merged[event] ?? []
                 let existingCommands = Set(
@@ -104,20 +104,20 @@ struct Settings: Codable, Sendable {
                 }
                 merged[event] = existing
             }
-            self.hooks = merged
+            hooks = merged
         }
 
         // Plugins: merge without replacing (existing keys win)
         if let otherPlugins = other.enabledPlugins {
-            var merged = self.enabledPlugins ?? [:]
+            var merged = enabledPlugins ?? [:]
             merged.merge(otherPlugins) { existing, _ in existing }
-            self.enabledPlugins = merged
+            enabledPlugins = merged
         }
 
         // Extra JSON: generic merge for all non-typed keys (env, permissions,
         // alwaysThinkingEnabled, attribution, and any future keys).
         for (key, valueData) in other.extraJSON {
-            if let existingData = self.extraJSON[key] {
+            if let existingData = extraJSON[key] {
                 // Both have the key — attempt dict-level merge if both are JSON objects
                 if let selfDict = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
                    let otherDict = try? JSONSerialization.jsonObject(with: valueData) as? [String: Any] {
@@ -126,13 +126,13 @@ struct Settings: Codable, Sendable {
                         merged[k] = v
                     }
                     if let data = try? JSONSerialization.data(withJSONObject: merged) {
-                        self.extraJSON[key] = data
+                        extraJSON[key] = data
                     }
                     // Re-serialization failure: keep existing value (no-op)
                 }
                 // Non-dict: existing wins (no action)
             } else {
-                self.extraJSON[key] = valueData
+                extraJSON[key] = valueData
             }
         }
     }
@@ -215,7 +215,8 @@ struct Settings: Codable, Sendable {
         for (key, value) in values {
             let data = try encoder.encode(value)
             guard let jsonString = String(data: data, encoding: .utf8),
-                  jsonString.count >= 2 else {
+                  jsonString.count >= 2
+            else {
                 escaped[key] = value
                 continue
             }
@@ -257,8 +258,7 @@ struct Settings: Codable, Sendable {
         // Read existing JSON to preserve user-written unknown top-level keys
         var preserved: [String: Any] = [:]
         if let existingData = try? Data(contentsOf: url),
-           let existingJSON = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any]
-        {
+           let existingJSON = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any] {
             for (key, value) in existingJSON where !Self.knownTopLevelKeys.contains(key) {
                 preserved[key] = value
             }
@@ -283,7 +283,7 @@ struct Settings: Codable, Sendable {
 
         // Layer 3: Preserve destination file unknown keys, except dropped ones
         for (key, value) in preserved {
-            if json[key] == nil && !dropKeys.contains(key) {
+            if json[key] == nil, !dropKeys.contains(key) {
                 json[key] = value
             }
         }
@@ -300,7 +300,8 @@ struct Settings: Codable, Sendable {
     /// Remove a sub-key from an extraJSON entry that holds a JSON object.
     private mutating func removeExtraJSONSubKey(topLevel: String, subKey: String) {
         guard let data = extraJSON[topLevel],
-              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
             return
         }
         dict.removeValue(forKey: subKey)

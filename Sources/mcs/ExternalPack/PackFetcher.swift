@@ -7,9 +7,9 @@ struct PackFetcher: Sendable {
     let packsDirectory: URL // ~/.mcs/packs/
 
     struct FetchResult: Sendable {
-        let localPath: URL     // Where the pack was cloned to
-        let commitSHA: String  // The checked-out commit
-        let ref: String?       // The tag/branch if specified
+        let localPath: URL // Where the pack was cloned to
+        let commitSHA: String // The checked-out commit
+        let ref: String? // The tag/branch if specified
     }
 
     // MARK: - Fetch (Clone)
@@ -207,23 +207,23 @@ enum PackFetchError: Error, LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .gitNotInstalled:
-            return "Git is not installed. Please install git to manage external packs."
-        case .cloneFailed(let url, let stderr):
-            return "Failed to clone '\(url)': \(stderr)"
-        case .fetchFailed(let path, let stderr):
-            return "Failed to fetch updates for '\(path)': \(stderr)"
-        case .refNotFound(let ref, let stderr):
-            return "Ref '\(ref)' not found: \(stderr)"
-        case .updateFailed(let path, let stderr):
-            return "Failed to update '\(path)': \(stderr)"
-        case .commitResolutionFailed(let path, let stderr):
-            return "Failed to resolve commit at '\(path)': \(stderr)"
-        case .invalidIdentifier(let id):
-            return "Invalid pack identifier '\(id)': must not contain '..', '/', or start with '-'"
-        case .invalidRef(let ref):
-            return "Invalid git ref '\(ref)': contains unsafe characters"
-        case .pathEscapesPacksDirectory(let path):
-            return "Path '\(path)' escapes packs directory"
+            "Git is not installed. Please install git to manage external packs."
+        case let .cloneFailed(url, stderr):
+            "Failed to clone '\(url)': \(stderr)"
+        case let .fetchFailed(path, stderr):
+            "Failed to fetch updates for '\(path)': \(stderr)"
+        case let .refNotFound(ref, stderr):
+            "Ref '\(ref)' not found: \(stderr)"
+        case let .updateFailed(path, stderr):
+            "Failed to update '\(path)': \(stderr)"
+        case let .commitResolutionFailed(path, stderr):
+            "Failed to resolve commit at '\(path)': \(stderr)"
+        case let .invalidIdentifier(id):
+            "Invalid pack identifier '\(id)': must not contain '..', '/', or start with '-'"
+        case let .invalidRef(ref):
+            "Invalid git ref '\(ref)': contains unsafe characters"
+        case let .pathEscapesPacksDirectory(path):
+            "Path '\(path)' escapes packs directory"
         }
     }
 }

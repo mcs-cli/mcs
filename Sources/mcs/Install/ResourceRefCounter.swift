@@ -19,8 +19,8 @@ struct ResourceRefCounter {
 
         var displayName: String {
             switch self {
-            case .brewPackage(let name): return "brew package '\(name)'"
-            case .plugin(let name): return "plugin '\(PluginRef(name).bareName)'"
+            case let .brewPackage(name): "brew package '\(name)'"
+            case let .plugin(name): "plugin '\(PluginRef(name).bareName)'"
             }
         }
     }
@@ -57,17 +57,17 @@ struct ResourceRefCounter {
 
         for otherPackID in globalState.configuredPacks {
             // Skip the pack being removed if we're in the global scope or removing the pack entirely
-            if (scopePath == ProjectIndex.globalSentinel || scopePath == ProjectIndex.packRemoveSentinel)
-                && otherPackID == packID {
+            if scopePath == ProjectIndex.globalSentinel || scopePath == ProjectIndex.packRemoveSentinel,
+               otherPackID == packID {
                 continue
             }
 
             guard let artifacts = globalState.artifacts(for: otherPackID) else { continue }
 
             switch resource {
-            case .brewPackage(let name):
+            case let .brewPackage(name):
                 if artifacts.brewPackages.contains(name) { return true }
-            case .plugin(let name):
+            case let .plugin(name):
                 let refBareName = PluginRef(name).bareName
                 if artifacts.plugins.contains(where: { PluginRef($0).bareName == refBareName }) {
                     return true
@@ -108,7 +108,7 @@ struct ResourceRefCounter {
             // Check each pack in this scope
             for otherPackID in entry.packs {
                 // When removing a pack entirely, skip that pack in every scope
-                if scopePath == ProjectIndex.packRemoveSentinel && otherPackID == packID { continue }
+                if scopePath == ProjectIndex.packRemoveSentinel, otherPackID == packID { continue }
                 if packDeclaresResource(packID: otherPackID, resource: resource) {
                     // Clean up stale entries we found along the way before returning
                     pruneStaleEntries(stalePaths, in: &indexData, indexFile: indexFile)
@@ -134,9 +134,9 @@ struct ResourceRefCounter {
 
         for component in pack.components {
             switch (resource, component.installAction) {
-            case (.brewPackage(let name), .brewInstall(let pkg)):
+            case let (.brewPackage(name), .brewInstall(pkg)):
                 if pkg == name { return true }
-            case (.plugin(let name), .plugin(let pluginName)):
+            case let (.plugin(name), .plugin(pluginName)):
                 if PluginRef(pluginName).bareName == PluginRef(name).bareName { return true }
             default:
                 break

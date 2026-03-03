@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("PathContainment")
 struct PathContainmentTests {

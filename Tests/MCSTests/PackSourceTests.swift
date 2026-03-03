@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("PackSourceResolver")
 struct PackSourceResolverTests {
@@ -104,7 +103,7 @@ struct PackSourceResolverTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let result = try PackSourceResolver().resolve(tmpDir.path)
-        guard case .localPath(let url) = result else {
+        guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
         }
@@ -117,7 +116,7 @@ struct PackSourceResolverTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let result = try PackSourceResolver().resolve("file://\(tmpDir.path)")
-        guard case .localPath(let url) = result else {
+        guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
         }
@@ -130,7 +129,7 @@ struct PackSourceResolverTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let result = try PackSourceResolver().resolve("file://localhost\(tmpDir.path)")
-        guard case .localPath(let url) = result else {
+        guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
         }
@@ -175,7 +174,7 @@ struct PackSourceResolverTests {
         defer { FileManager.default.changeCurrentDirectoryPath(originalDir) }
 
         let result = try PackSourceResolver().resolve("org/pack")
-        guard case .localPath(let url) = result else {
+        guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
         }

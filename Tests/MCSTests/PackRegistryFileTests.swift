@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("PackRegistryFile")
 struct PackRegistryFileTests {
@@ -115,7 +114,7 @@ struct PackRegistryFileTests {
     // MARK: - Register
 
     @Test("Register adds a new entry")
-    func registerNew() throws {
+    func registerNew() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
         var data = PackRegistryFile.RegistryData()
 
@@ -127,7 +126,7 @@ struct PackRegistryFileTests {
     }
 
     @Test("Register replaces existing entry with same identifier")
-    func registerReplaces() throws {
+    func registerReplaces() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
         var data = PackRegistryFile.RegistryData()
 
@@ -140,7 +139,7 @@ struct PackRegistryFileTests {
     // MARK: - Remove
 
     @Test("Remove deletes entry by identifier")
-    func removeEntry() throws {
+    func removeEntry() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
         var data = PackRegistryFile.RegistryData()
 
@@ -154,7 +153,7 @@ struct PackRegistryFileTests {
     }
 
     @Test("Remove is no-op for unknown identifier")
-    func removeUnknown() throws {
+    func removeUnknown() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
         var data = PackRegistryFile.RegistryData()
 
@@ -166,7 +165,7 @@ struct PackRegistryFileTests {
     // MARK: - Queries
 
     @Test("Look up pack by identifier")
-    func lookupByIdentifier() throws {
+    func lookupByIdentifier() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
         var data = PackRegistryFile.RegistryData()
 
@@ -183,7 +182,7 @@ struct PackRegistryFileTests {
     // MARK: - Collision Detection
 
     @Test("No collisions when packs have distinct artifacts")
-    func noCollisions() throws {
+    func noCollisions() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
 
         let existing = PackRegistryFile.CollisionInput(
@@ -206,7 +205,7 @@ struct PackRegistryFileTests {
     }
 
     @Test("Detect MCP server name collision")
-    func mcpServerCollision() throws {
+    func mcpServerCollision() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
 
         let existing = PackRegistryFile.CollisionInput(
@@ -233,7 +232,7 @@ struct PackRegistryFileTests {
     }
 
     @Test("Detect multiple collision types")
-    func multipleCollisionTypes() throws {
+    func multipleCollisionTypes() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
 
         let existing = PackRegistryFile.CollisionInput(
@@ -300,16 +299,16 @@ struct PackRegistryFileTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let yaml = """
-            packs:
-              - identifier: old-pack
-                displayName: Old Pack
-                version: "1.0.0"
-                sourceURL: "https://github.com/user/old-pack.git"
-                commitSHA: abc123
-                localPath: old-pack
-                addedAt: "2026-01-01T00:00:00Z"
-                trustedScriptHashes: {}
-            """
+        packs:
+          - identifier: old-pack
+            displayName: Old Pack
+            version: "1.0.0"
+            sourceURL: "https://github.com/user/old-pack.git"
+            commitSHA: abc123
+            localPath: old-pack
+            addedAt: "2026-01-01T00:00:00Z"
+            trustedScriptHashes: {}
+        """
         let file = tmpDir.appendingPathComponent("registry.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
@@ -357,16 +356,16 @@ struct PackRegistryFileTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let yaml = """
-            packs:
-              - identifier: old-pack
-                displayName: Old Pack
-                version: "1.0.0"
-                sourceURL: "https://github.com/user/old-pack.git"
-                commitSHA: abc123
-                localPath: old-pack
-                addedAt: "2026-01-01T00:00:00Z"
-                trustedScriptHashes: {}
-            """
+        packs:
+          - identifier: old-pack
+            displayName: Old Pack
+            version: "1.0.0"
+            sourceURL: "https://github.com/user/old-pack.git"
+            commitSHA: abc123
+            localPath: old-pack
+            addedAt: "2026-01-01T00:00:00Z"
+            trustedScriptHashes: {}
+        """
         let file = tmpDir.appendingPathComponent("registry.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
@@ -407,7 +406,7 @@ struct PackRegistryFileTests {
     }
 
     @Test("Skip collision check against same identifier")
-    func skipSelfCollision() throws {
+    func skipSelfCollision() {
         let registry = PackRegistryFile(path: URL(fileURLWithPath: "/tmp/unused"))
 
         let pack = PackRegistryFile.CollisionInput(

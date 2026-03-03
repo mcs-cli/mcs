@@ -31,40 +31,40 @@ struct Environment: Sendable {
 
     init(home: URL? = nil) {
         let home = home ?? URL(fileURLWithPath: NSHomeDirectory())
-        self.homeDirectory = home
+        homeDirectory = home
 
         let claudeDir = home.appendingPathComponent(Constants.FileNames.claudeDirectory)
-        self.claudeDirectory = claudeDir
-        self.claudeJSON = home.appendingPathComponent(Constants.FileNames.claudeJSON)
-        self.claudeSettings = claudeDir.appendingPathComponent("settings.json")
-        self.hooksDirectory = claudeDir.appendingPathComponent("hooks")
-        self.skillsDirectory = claudeDir.appendingPathComponent("skills")
-        self.commandsDirectory = claudeDir.appendingPathComponent("commands")
-        self.agentsDirectory = claudeDir.appendingPathComponent("agents")
+        claudeDirectory = claudeDir
+        claudeJSON = home.appendingPathComponent(Constants.FileNames.claudeJSON)
+        claudeSettings = claudeDir.appendingPathComponent("settings.json")
+        hooksDirectory = claudeDir.appendingPathComponent("hooks")
+        skillsDirectory = claudeDir.appendingPathComponent("skills")
+        commandsDirectory = claudeDir.appendingPathComponent("commands")
+        agentsDirectory = claudeDir.appendingPathComponent("agents")
 
-        self.mcsDirectory = home.appendingPathComponent(".mcs")
+        mcsDirectory = home.appendingPathComponent(".mcs")
 
         #if arch(arm64)
-        self.architecture = .arm64
+            architecture = .arm64
         #else
-        self.architecture = .x86_64
+            architecture = .x86_64
         #endif
 
         if let resolvedBrew = Self.resolvedBrewPath {
-            self.brewPath = resolvedBrew
-            self.brewPrefix = URL(fileURLWithPath: resolvedBrew)
+            brewPath = resolvedBrew
+            brewPrefix = URL(fileURLWithPath: resolvedBrew)
                 .resolvingSymlinksInPath()
                 .deletingLastPathComponent().deletingLastPathComponent().path
         } else {
             #if arch(arm64)
-            self.brewPrefix = "/opt/homebrew"
+                brewPrefix = "/opt/homebrew"
             #else
-            self.brewPrefix = "/usr/local"
+                brewPrefix = "/usr/local"
             #endif
-            self.brewPath = "\(self.brewPrefix)/bin/brew"
+            brewPath = "\(brewPrefix)/bin/brew"
         }
 
-        self.gitPath = Self.resolvedGitPath
+        gitPath = Self.resolvedGitPath
     }
 
     /// Directory where external tech pack checkouts live (`~/.mcs/packs/`).
@@ -132,7 +132,7 @@ struct Environment: Sendable {
         guard process.terminationStatus == 0 else { return nil }
         guard let path = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-              !path.isEmpty else { return nil }
+            !path.isEmpty else { return nil }
         return path
     }
 }

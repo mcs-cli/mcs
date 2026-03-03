@@ -1,6 +1,5 @@
-import Testing
-
 @testable import mcs
+import Testing
 
 @Test func mcsPackageBuilds() {
     // Verifies the package compiles and the test target can link against mcs

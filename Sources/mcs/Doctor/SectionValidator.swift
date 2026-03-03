@@ -24,7 +24,7 @@ struct SectionValidator: Sendable {
         }
 
         var outdatedSections: [SectionStatus] {
-            sections.filter { $0.isOutdated }
+            sections.filter(\.isOutdated)
         }
     }
 
@@ -70,14 +70,13 @@ struct SectionValidator: Sendable {
         }
 
         // Check for expected sections that are missing from the file
-        for (identifier, _) in expectedSections {
-            if !installedSections.contains(where: { $0.identifier == identifier }) {
-                statuses.append(SectionStatus(
-                    identifier: identifier,
-                    isOutdated: true,
-                    detail: "section not found in file"
-                ))
-            }
+        for (identifier, _) in expectedSections
+            where !installedSections.contains(where: { $0.identifier == identifier }) {
+            statuses.append(SectionStatus(
+                identifier: identifier,
+                isOutdated: true,
+                detail: "section not found in file"
+            ))
         }
 
         return ValidationResult(filePath: fileURL, sections: statuses)
@@ -145,11 +144,21 @@ struct CLAUDEMDFreshnessCheck: DoctorCheck, Sendable {
     let displayName: String
     let syncHint: String
 
-    var name: String { displayName }
-    var section: String { "Templates" }
-    var fixCommandPreview: String? { "re-render outdated sections from stored values" }
+    var name: String {
+        displayName
+    }
 
-    private var fileName: String { fileURL.lastPathComponent }
+    var section: String {
+        "Templates"
+    }
+
+    var fixCommandPreview: String? {
+        "re-render outdated sections from stored values"
+    }
+
+    private var fileName: String {
+        fileURL.lastPathComponent
+    }
 
     func check() -> CheckResult {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -186,7 +195,7 @@ struct CLAUDEMDFreshnessCheck: DoctorCheck, Sendable {
 
         let result = SectionValidator.validate(fileURL: fileURL, expectedSections: expectedSections)
 
-        if result.sections.isEmpty && !expectedSections.isEmpty {
+        if result.sections.isEmpty, !expectedSections.isEmpty {
             return .fail("could not validate sections — file may have changed during check")
         }
 

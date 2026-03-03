@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("ExternalDoctorCheck")
 struct ExternalDoctorCheckTests {
@@ -354,7 +353,7 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.check()
-        if case .pass(let msg) = result {
+        if case let .pass(msg) = result {
             #expect(msg == "all good")
         } else {
             Issue.record("Expected .pass, got \(result)")
@@ -380,7 +379,7 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.check()
-        if case .fail(let msg) = result {
+        if case let .fail(msg) = result {
             #expect(msg == "something wrong")
         } else {
             Issue.record("Expected .fail, got \(result)")
@@ -406,7 +405,7 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.check()
-        if case .warn(let msg) = result {
+        if case let .warn(msg) = result {
             #expect(msg == "heads up")
         } else {
             Issue.record("Expected .warn, got \(result)")
@@ -432,7 +431,7 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.check()
-        if case .skip(let msg) = result {
+        if case let .skip(msg) = result {
             #expect(msg == "not applicable")
         } else {
             Issue.record("Expected .skip, got \(result)")

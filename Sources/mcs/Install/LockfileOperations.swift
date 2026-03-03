@@ -115,10 +115,10 @@ struct LockfileOperations {
             switch result {
             case .alreadyUpToDate:
                 output.dimmed("  \(entry.identifier): already up to date")
-            case .updated(let updatedEntry):
+            case let .updated(updatedEntry):
                 registryFile.register(updatedEntry, in: &updatedData)
                 output.success("  \(entry.identifier): updated (\(String(updatedEntry.commitSHA.prefix(7))))")
-            case .skipped(let reason):
+            case let .skipped(reason):
                 output.warn("  \(entry.identifier): \(reason)")
             }
         }
@@ -140,7 +140,9 @@ struct LockfileOperations {
             let mismatches = existing.detectMismatches(registryEntries: registryData.packs)
             for mismatch in mismatches {
                 if let currentSHA = mismatch.currentSHA {
-                    output.warn("Pack '\(mismatch.identifier)' is at \(String(currentSHA.prefix(7))) but lockfile expected \(String(mismatch.lockedSHA.prefix(7))).")
+                    let current = String(currentSHA.prefix(7))
+                    let expected = String(mismatch.lockedSHA.prefix(7))
+                    output.warn("Pack '\(mismatch.identifier)' is at \(current) but lockfile expected \(expected).")
                 }
             }
         }

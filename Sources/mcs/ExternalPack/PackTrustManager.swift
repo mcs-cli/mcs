@@ -23,7 +23,7 @@ struct PackTrustManager: Sendable {
         if let components = manifest.components {
             for component in components {
                 switch component.installAction {
-                case .shellCommand(let command):
+                case let .shellCommand(command):
                     items.append(TrustableItem(
                         type: .shellCommand,
                         relativePath: nil,
@@ -31,7 +31,7 @@ struct PackTrustManager: Sendable {
                         description: "\(component.displayName) — runs during install"
                     ))
 
-                case .mcpServer(let config):
+                case let .mcpServer(config):
                     let serverDesc: String
                     if config.transport == .http, let url = config.url {
                         serverDesc = "\(config.name): \(url) (HTTP)"
@@ -46,7 +46,7 @@ struct PackTrustManager: Sendable {
                         description: "MCP server — runs on every Claude Code session"
                     ))
 
-                case .copyPackFile(let config):
+                case let .copyPackFile(config):
                     // Hook and command files are executed by Claude Code — require trust review
                     let fileType = config.fileType ?? .generic
                     if fileType == .hook || fileType == .command {
@@ -396,18 +396,18 @@ struct PackTrustManager: Sendable {
 /// An executable artifact within a pack that requires user trust approval.
 struct TrustableItem: Sendable {
     let type: TrustableType
-    let relativePath: String?  // For script files
-    let content: String        // The actual content to display
-    let description: String    // Human-readable description
+    let relativePath: String? // For script files
+    let content: String // The actual content to display
+    let description: String // Human-readable description
 
     enum TrustableType: Sendable {
-        case shellCommand      // From component install actions
-        case hookFragment      // From hook component files (runs on every session)
-        case configureScript   // From configureProject
-        case doctorCommand     // From commandExists doctor checks (runs during doctor)
-        case doctorScript      // From shellScript doctor checks
-        case fixScript         // From fix scripts / fix commands
-        case mcpServerCommand  // MCP server command (runs with user privs)
-        case commandFile       // Command file copied into .claude/commands/ (invoked by Claude)
+        case shellCommand // From component install actions
+        case hookFragment // From hook component files (runs on every session)
+        case configureScript // From configureProject
+        case doctorCommand // From commandExists doctor checks (runs during doctor)
+        case doctorScript // From shellScript doctor checks
+        case fixScript // From fix scripts / fix commands
+        case mcpServerCommand // MCP server command (runs with user privs)
+        case commandFile // Command file copied into .claude/commands/ (invoked by Claude)
     }
 }

@@ -1,11 +1,9 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("CrossPackPromptResolver")
 struct CrossPackPromptResolverTests {
-
     // MARK: - Helpers
 
     private func makeContext() -> ProjectConfigContext {
@@ -154,7 +152,7 @@ struct CrossPackPromptResolverTests {
 
     @Test("Three packs sharing a key produces a group of 3")
     func threePacksShared() {
-        let packs = (1...3).map { i in
+        let packs = (1 ... 3).map { i in
             makeMockPack(name: "pack-\(i)", prompts: [
                 ExternalPromptDefinition(
                     key: "SHARED", type: .input,
@@ -384,7 +382,8 @@ struct SettingsLoadSubstitutionTests {
 
         let settings = try Settings.load(from: url, substituting: ["USER_API_KEY": "secret123"])
 
-        let env = try JSONSerialization.jsonObject(with: settings.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["API_KEY"] == "secret123")
         #expect(env["STATIC"] == "unchanged")
     }
@@ -406,7 +405,8 @@ struct SettingsLoadSubstitutionTests {
 
         let settings = try Settings.load(from: url, substituting: [:])
 
-        let env = try JSONSerialization.jsonObject(with: settings.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY"] == "__PLACEHOLDER__")
     }
 
@@ -431,7 +431,8 @@ struct SettingsLoadSubstitutionTests {
             substituting: ["SOME_PATH": #"C:\Users\me "quoted""#]
         )
 
-        let env = try JSONSerialization.jsonObject(with: settings.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(settings.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["PATH_VAR"] == #"C:\Users\me "quoted""#)
     }
 
@@ -632,7 +633,7 @@ private struct PromptMockPack: TechPack {
         self.components = components
     }
 
-    func configureProject(at path: URL, context: ProjectConfigContext) throws {}
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 
     func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition] {
         context.isGlobalScope

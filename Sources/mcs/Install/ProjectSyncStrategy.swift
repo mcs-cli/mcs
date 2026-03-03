@@ -12,7 +12,7 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     init(projectPath: URL, environment: Environment) {
         self.projectPath = projectPath
-        self.scope = .project(at: projectPath, environment: environment)
+        scope = .project(at: projectPath, environment: environment)
         self.environment = environment
     }
 
@@ -40,7 +40,7 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     func installArtifacts(
         _ pack: any TechPack,
-        previousArtifacts: PackArtifactRecord?,
+        previousArtifacts _: PackArtifactRecord?,
         excludedIDs: Set<String>,
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
@@ -62,7 +62,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             }
 
             switch component.installAction {
-            case .mcpServer(let config):
+            case let .mcpServer(config):
                 let resolved = config.substituting(resolvedValues)
                 if executor.installMCPServer(resolved) {
                     artifacts.mcpServers.append(MCPServerRef(
@@ -72,7 +72,7 @@ struct ProjectSyncStrategy: SyncStrategy {
                     output.success("  \(component.displayName) registered")
                 }
 
-            case .copyPackFile(let source, let destination, let fileType):
+            case let .copyPackFile(source, destination, fileType):
                 let paths = executor.installProjectFile(
                     source: source,
                     destination: destination,
@@ -90,7 +90,7 @@ struct ProjectSyncStrategy: SyncStrategy {
                     output.success("  \(component.displayName) installed")
                 }
 
-            case .gitignoreEntries(let entries):
+            case let .gitignoreEntries(entries):
                 if executor.addGitignoreEntries(entries) {
                     artifacts.gitignoreEntries.append(contentsOf: entries)
                 }
@@ -98,7 +98,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             case .brewInstall, .plugin:
                 break
 
-            case .shellCommand(let command):
+            case let .shellCommand(command):
                 let result = shell.shell(command)
                 if !result.succeeded {
                     output.warn("  \(component.displayName) failed: \(String(result.stderr.prefix(200)))")
@@ -241,7 +241,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             }
             output.warn(
                 "Could not parse repo name from remote URL '\(remoteResult.stdout)'"
-                + " — falling back to directory name"
+                    + " — falling back to directory name"
             )
         }
         return resolveProjectDirName(shell: shell)

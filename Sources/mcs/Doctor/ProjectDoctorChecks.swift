@@ -32,8 +32,13 @@ enum ProjectDoctorChecks {
 struct ProjectStateFileCheck: DoctorCheck, Sendable {
     let projectRoot: URL
 
-    var name: String { "Project state file" }
-    var section: String { "Project" }
+    var name: String {
+        "Project state file"
+    }
+
+    var section: String {
+        "Project"
+    }
 
     func check() -> CheckResult {
         let claudeLocal = projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD)

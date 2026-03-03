@@ -8,10 +8,10 @@ struct PackCommandContext {
     let registry: PackRegistryFile
 
     init() {
-        self.env = Environment()
-        self.output = CLIOutput()
-        self.shell = ShellRunner(environment: env)
-        self.registry = PackRegistryFile(path: env.packsRegistry)
+        env = Environment()
+        output = CLIOutput()
+        shell = ShellRunner(environment: env)
+        registry = PackRegistryFile(path: env.packsRegistry)
     }
 
     func loadRegistry() throws -> PackRegistryFile.RegistryData {
@@ -49,7 +49,9 @@ struct AddPack: LockedCommand {
     @Flag(name: .long, help: "Preview pack contents without installing")
     var preview: Bool = false
 
-    var skipLock: Bool { preview }
+    var skipLock: Bool {
+        preview
+    }
 
     func perform() throws {
         let ctx = PackCommandContext()
@@ -63,15 +65,15 @@ struct AddPack: LockedCommand {
             throw ExitCode.failure
         }
 
-        if case .gitURL(let expanded) = packSource,
+        if case let .gitURL(expanded) = packSource,
            source.range(of: PackSourceResolver.shorthandPattern, options: .regularExpression) != nil {
             ctx.output.info("Interpreting '\(source)' as GitHub shorthand: \(expanded)")
         }
 
         switch packSource {
-        case .gitURL(let gitURL):
+        case let .gitURL(gitURL):
             try performGitAdd(gitURL: gitURL, ctx: ctx)
-        case .localPath(let path):
+        case let .localPath(path):
             if ref != nil {
                 ctx.output.warn("--ref is ignored for local packs")
             }
@@ -669,11 +671,11 @@ struct UpdatePack: LockedCommand {
             switch result {
             case .alreadyUpToDate:
                 ctx.output.success("\(entry.displayName): already up to date")
-            case .updated(let updatedEntry):
+            case let .updated(updatedEntry):
                 ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
                 ctx.output.success("\(entry.displayName): updated (\(updatedEntry.commitSHA.prefix(7)))")
-            case .skipped(let reason):
+            case let .skipped(reason):
                 ctx.output.warn("\(entry.identifier): \(reason)")
             }
         }

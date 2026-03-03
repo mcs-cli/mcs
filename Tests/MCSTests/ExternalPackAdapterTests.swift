@@ -37,7 +37,7 @@ struct ExternalPackAdapterTests {
                     scope: nil
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         let components = adapter.components
@@ -78,7 +78,7 @@ struct ExternalPackAdapterTests {
                     scope: nil
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
@@ -105,7 +105,7 @@ struct ExternalPackAdapterTests {
                 hookEvent: nil,
                 installAction: .brewInstall(package: "node"),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
@@ -129,7 +129,7 @@ struct ExternalPackAdapterTests {
                 hookEvent: nil,
                 installAction: .shellCommand(command: "echo hello"),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
@@ -157,7 +157,7 @@ struct ExternalPackAdapterTests {
                     fileType: .skill
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, packPath) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
@@ -187,7 +187,7 @@ struct ExternalPackAdapterTests {
                     fileType: .agent
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, packPath) = try makeAdapter(manifest: manifest)
         let component = adapter.components[0]
@@ -214,7 +214,7 @@ struct ExternalPackAdapterTests {
                 hookEvent: nil,
                 installAction: .gitignoreEntries(entries: [".test"]),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         #expect(adapter.components[0].packIdentifier == "test-pack")
@@ -234,7 +234,7 @@ struct ExternalPackAdapterTests {
                 hookEvent: nil,
                 installAction: .shellCommand(command: "echo a"),
                 doctorChecks: nil
-            )
+            ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         #expect(adapter.components[0].dependencies == ["core.node"])
@@ -268,7 +268,7 @@ struct ExternalPackAdapterTests {
                     sectionIdentifier: "test-pack",
                     placeholders: ["__PROJECT__"],
                     contentFile: "templates/ios.md"
-                )
+                ),
             ],
             prompts: nil,
             configureProject: nil,
@@ -310,7 +310,7 @@ struct ExternalPackAdapterTests {
                     sectionIdentifier: "evil",
                     placeholders: nil,
                     contentFile: "../secret.md"
-                )
+                ),
             ],
             prompts: nil,
             configureProject: nil,
@@ -354,7 +354,7 @@ struct ExternalPackAdapterTests {
                     sectionIdentifier: "evil",
                     placeholders: nil,
                     contentFile: "templates/link.md"
-                )
+                ),
             ],
             prompts: nil,
             configureProject: nil,
@@ -391,7 +391,7 @@ struct ExternalPackAdapterTests {
                     fileType: .generic
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let adapter = ExternalPackAdapter(manifest: manifest, packPath: packDir)
         #expect(adapter.components.isEmpty)
@@ -431,7 +431,7 @@ struct ExternalPackAdapterTests {
                     fileType: .generic
                 )),
                 doctorChecks: nil
-            )
+            ),
         ])
         let adapter = ExternalPackAdapter(manifest: manifest, packPath: packDir)
         #expect(adapter.components.isEmpty)
@@ -458,7 +458,7 @@ struct ExternalPackAdapterTests {
                 hookEvent: nil,
                 installAction: .settingsFile(source: "../../etc/passwd"),
                 doctorChecks: nil
-            )
+            ),
         ])
         let adapter = ExternalPackAdapter(manifest: manifest, packPath: packDir)
         #expect(adapter.components.isEmpty)
@@ -491,7 +491,7 @@ struct ExternalPackAdapterTests {
                     sectionIdentifier: "test-section",
                     placeholders: nil,
                     contentFile: "templates/section.md"
-                )
+                ),
             ],
             prompts: nil,
             configureProject: nil,
@@ -522,7 +522,7 @@ struct ExternalPackAdapterTests {
                     key: "ALREADY_RESOLVED", type: .input,
                     label: "This should be skipped", defaultValue: "default",
                     options: nil, detectPatterns: nil, scriptCommand: nil
-                )
+                ),
             ],
             configureProject: nil,
             supplementaryDoctorChecks: nil
@@ -564,7 +564,7 @@ struct ExternalPackAdapterTests {
                     key: "PROJECT", type: .fileDetect,
                     label: "Xcode project", defaultValue: nil,
                     options: nil, detectPatterns: ["*.xcodeproj"], scriptCommand: nil
-                )
+                ),
             ],
             configureProject: nil,
             supplementaryDoctorChecks: nil

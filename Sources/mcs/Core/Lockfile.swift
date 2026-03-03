@@ -102,6 +102,6 @@ struct Lockfile: Codable, Equatable, Sendable {
     struct Mismatch: Equatable, Sendable {
         let identifier: String
         let lockedSHA: String
-        let currentSHA: String?    // nil if pack not registered
+        let currentSHA: String? // nil if pack not registered
     }
 }

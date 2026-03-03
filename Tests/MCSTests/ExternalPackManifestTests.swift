@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("ExternalPackManifest")
 struct ExternalPackManifestTests {
@@ -18,66 +17,66 @@ struct ExternalPackManifestTests {
     @Test("Parse a complete manifest with all fields")
     func parseCompleteManifest() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: A test tech pack
-            version: "1.0.0"
-            minMCSVersion: "2.0.0"
-            peerDependencies:
-              - pack: ios
-                minVersion: "1.0.0"
-            components:
-              - id: my-pack.server
-                displayName: My Server
-                description: An MCP server
-                type: mcpServer
-                dependencies:
-                  - my-pack.dep
-                isRequired: false
-                installAction:
-                  type: mcpServer
-                  name: my-server
-                  command: npx
-                  args:
-                    - "-y"
-                    - "my-server@latest"
-                  env:
-                    MY_VAR: "1"
-              - id: my-pack.dep
-                displayName: My Dependency
-                description: A brew package
-                type: brewPackage
-                isRequired: true
-                installAction:
-                  type: brewInstall
-                  package: my-pkg
-            templates:
-              - sectionIdentifier: my-pack
-                placeholders:
-                  - __PROJECT__
-                contentFile: templates/section.md
-            prompts:
-              - key: project_name
-                type: input
-                label: "Project name"
-                default: "MyProject"
-              - key: framework
-                type: select
-                label: "Select framework"
-                options:
-                  - value: uikit
-                    label: UIKit
-                  - value: swiftui
-                    label: SwiftUI
-            configureProject:
-              script: scripts/configure.sh
-            supplementaryDoctorChecks:
-              - type: commandExists
-                name: My Tool
-                section: Dependencies
-                command: my-tool
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: A test tech pack
+        version: "1.0.0"
+        minMCSVersion: "2.0.0"
+        peerDependencies:
+          - pack: ios
+            minVersion: "1.0.0"
+        components:
+          - id: my-pack.server
+            displayName: My Server
+            description: An MCP server
+            type: mcpServer
+            dependencies:
+              - my-pack.dep
+            isRequired: false
+            installAction:
+              type: mcpServer
+              name: my-server
+              command: npx
+              args:
+                - "-y"
+                - "my-server@latest"
+              env:
+                MY_VAR: "1"
+          - id: my-pack.dep
+            displayName: My Dependency
+            description: A brew package
+            type: brewPackage
+            isRequired: true
+            installAction:
+              type: brewInstall
+              package: my-pkg
+        templates:
+          - sectionIdentifier: my-pack
+            placeholders:
+              - __PROJECT__
+            contentFile: templates/section.md
+        prompts:
+          - key: project_name
+            type: input
+            label: "Project name"
+            default: "MyProject"
+          - key: framework
+            type: select
+            label: "Select framework"
+            options:
+              - value: uikit
+                label: UIKit
+              - value: swiftui
+                label: SwiftUI
+        configureProject:
+          script: scripts/configure.sh
+        supplementaryDoctorChecks:
+          - type: commandExists
+            name: My Tool
+            section: Dependencies
+            command: my-tool
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -95,13 +94,13 @@ struct ExternalPackManifestTests {
 
         // Components
         #expect(manifest.components?.count == 2)
-        let server = manifest.components![0]
+        let server = try #require(manifest.components?[0])
         #expect(server.id == "my-pack.server")
         #expect(server.type == .mcpServer)
         #expect(server.dependencies == ["my-pack.dep"])
         #expect(server.isRequired == false)
 
-        let dep = manifest.components![1]
+        let dep = try #require(manifest.components?[1])
         #expect(dep.id == "my-pack.dep")
         #expect(dep.type == .brewPackage)
         #expect(dep.isRequired == true)
@@ -136,12 +135,12 @@ struct ExternalPackManifestTests {
     @Test("Parse minimal manifest with only required fields")
     func parseMinimalManifest() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: minimal
-            displayName: Minimal Pack
-            description: Just the basics
-            version: "0.1.0"
-            """
+        schemaVersion: 1
+        identifier: minimal
+        displayName: Minimal Pack
+        description: Just the basics
+        version: "0.1.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -171,13 +170,13 @@ struct ExternalPackManifestTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let yaml = """
-            schemaVersion: 1
-            identifier: authored-pack
-            displayName: Authored Pack
-            description: A pack with author
-            version: "1.0.0"
-            author: "Jane Doe"
-            """
+        schemaVersion: 1
+        identifier: authored-pack
+        displayName: Authored Pack
+        description: A pack with author
+        version: "1.0.0"
+        author: "Jane Doe"
+        """
         let file = tmpDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
         let manifest = try ExternalPackManifest.load(from: file)
@@ -192,13 +191,13 @@ struct ExternalPackManifestTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: A pack
-            version: "1.0.0"
-            author: "John Smith"
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: A pack
+        version: "1.0.0"
+        author: "John Smith"
+        """
         let file = tmpDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
         let manifest = try ExternalPackManifest.load(from: file)
@@ -212,12 +211,12 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects unsupported schema version")
     func rejectBadSchemaVersion() throws {
         let yaml = """
-            schemaVersion: 99
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 99
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -234,12 +233,12 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects invalid identifier with uppercase")
     func rejectUppercaseIdentifier() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: MyPack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 1
+        identifier: MyPack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -256,12 +255,12 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects empty identifier")
     func rejectEmptyIdentifier() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: ""
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 1
+        identifier: ""
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -278,12 +277,12 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects identifier starting with hyphen")
     func rejectHyphenStartIdentifier() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: "-bad"
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 1
+        identifier: "-bad"
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -300,22 +299,22 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects component ID without pack prefix")
     func rejectComponentIDPrefixViolation() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: wrong-prefix.server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: wrong-prefix.server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -335,31 +334,31 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects duplicate component IDs")
     func rejectDuplicateComponentIDs() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.server
-                displayName: Server 1
-                description: First
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-              - id: my-pack.server
-                displayName: Server 2
-                description: Duplicate
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server2
-                  command: npx
-                  args: ["-y", "server2@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.server
+            displayName: Server 1
+            description: First
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+          - id: my-pack.server
+            displayName: Server 2
+            description: Duplicate
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server2
+              command: npx
+              args: ["-y", "server2@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -376,15 +375,15 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects template section not matching pack identifier")
     func rejectTemplateSectionMismatch() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            templates:
-              - sectionIdentifier: other-pack
-                contentFile: templates/section.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: other-pack
+            contentFile: templates/section.md
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -404,15 +403,15 @@ struct ExternalPackManifestTests {
     @Test("Validation accepts template section with pack identifier prefix")
     func acceptTemplateSectionWithPrefix() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            templates:
-              - sectionIdentifier: my-pack.extra
-                contentFile: templates/extra.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: my-pack.extra
+            contentFile: templates/extra.md
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -427,22 +426,22 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects duplicate prompt keys")
     func rejectDuplicatePromptKeys() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            prompts:
-              - key: project
-                type: input
-                label: "Project"
-              - key: project
-                type: select
-                label: "Project again"
-                options:
-                  - value: a
-                    label: A
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        prompts:
+          - key: project
+            type: input
+            label: "Project"
+          - key: project
+            type: select
+            label: "Project again"
+            options:
+              - value: a
+                label: A
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -459,12 +458,12 @@ struct ExternalPackManifestTests {
     @Test("Validation accepts valid identifier with hyphens and numbers")
     func acceptValidIdentifier() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack-2
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 1
+        identifier: my-pack-2
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -479,16 +478,16 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects hookEventExists without event")
     func rejectHookEventExistsNoEvent() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: hookEventExists
-                name: Bad hook check
-                section: Hooks
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: hookEventExists
+            name: Bad hook check
+            section: Hooks
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -505,17 +504,17 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects hookEventExists with unknown event")
     func rejectHookEventExistsUnknownEvent() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: hookEventExists
-                name: Bad hook check
-                section: Hooks
-                event: BogusEvent
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: hookEventExists
+            name: Bad hook check
+            section: Hooks
+            event: BogusEvent
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -532,17 +531,17 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects settingsKeyEquals without keyPath")
     func rejectSettingsKeyEqualsNoKeyPath() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: settingsKeyEquals
-                name: Bad settings check
-                section: Settings
-                expectedValue: plan
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: settingsKeyEquals
+            name: Bad settings check
+            section: Settings
+            expectedValue: plan
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -559,17 +558,17 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects settingsKeyEquals without expectedValue")
     func rejectSettingsKeyEqualsNoExpectedValue() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: settingsKeyEquals
-                name: Bad settings check
-                section: Settings
-                keyPath: permissions.defaultMode
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: settingsKeyEquals
+            name: Bad settings check
+            section: Settings
+            keyPath: permissions.defaultMode
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -588,27 +587,27 @@ struct ExternalPackManifestTests {
     @Test("Deserialize mcpServer install action with stdio transport")
     func mcpServerStdioAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.server
-                displayName: Server
-                description: An MCP server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: my-server
-                  command: npx
-                  args:
-                    - "-y"
-                    - "my-server@latest"
-                  env:
-                    DISABLE_TELEMETRY: "1"
-                  transport: stdio
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.server
+            displayName: Server
+            description: An MCP server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: my-server
+              command: npx
+              args:
+                - "-y"
+                - "my-server@latest"
+              env:
+                DISABLE_TELEMETRY: "1"
+              transport: stdio
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -617,7 +616,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .mcpServer(let config) = manifest.components?[0].installAction else {
+        guard case let .mcpServer(config) = manifest.components?[0].installAction else {
             Issue.record("Expected mcpServer install action")
             return
         }
@@ -632,22 +631,22 @@ struct ExternalPackManifestTests {
     @Test("Deserialize mcpServer install action with http transport")
     func mcpServerHTTPAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.http-server
-                displayName: HTTP Server
-                description: An HTTP MCP server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: my-http-server
-                  transport: http
-                  url: https://example.com/mcp
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.http-server
+            displayName: HTTP Server
+            description: An HTTP MCP server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: my-http-server
+              transport: http
+              url: https://example.com/mcp
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -656,7 +655,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .mcpServer(let config) = manifest.components?[0].installAction else {
+        guard case let .mcpServer(config) = manifest.components?[0].installAction else {
             Issue.record("Expected mcpServer install action")
             return
         }
@@ -675,20 +674,20 @@ struct ExternalPackManifestTests {
     @Test("Deserialize plugin install action")
     func pluginAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.plugin
-                displayName: Plugin
-                description: A plugin
-                type: plugin
-                installAction:
-                  type: plugin
-                  name: my-plugin@1.0.0
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.plugin
+            displayName: Plugin
+            description: A plugin
+            type: plugin
+            installAction:
+              type: plugin
+              name: my-plugin@1.0.0
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -697,7 +696,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .plugin(let name) = manifest.components?[0].installAction else {
+        guard case let .plugin(name) = manifest.components?[0].installAction else {
             Issue.record("Expected plugin install action")
             return
         }
@@ -707,20 +706,20 @@ struct ExternalPackManifestTests {
     @Test("Deserialize brewInstall install action")
     func brewInstallAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.brew
-                displayName: Brew Pkg
-                description: A brew package
-                type: brewPackage
-                installAction:
-                  type: brewInstall
-                  package: my-package
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.brew
+            displayName: Brew Pkg
+            description: A brew package
+            type: brewPackage
+            installAction:
+              type: brewInstall
+              package: my-package
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -729,7 +728,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .brewInstall(let package) = manifest.components?[0].installAction else {
+        guard case let .brewInstall(package) = manifest.components?[0].installAction else {
             Issue.record("Expected brewInstall install action")
             return
         }
@@ -739,20 +738,20 @@ struct ExternalPackManifestTests {
     @Test("Deserialize shellCommand install action")
     func shellCommandAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.skill
-                displayName: Skill
-                description: A skill via shell command
-                type: skill
-                installAction:
-                  type: shellCommand
-                  command: "npx -y skills add my-skill -g -a claude-code -y"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.skill
+            displayName: Skill
+            description: A skill via shell command
+            type: skill
+            installAction:
+              type: shellCommand
+              command: "npx -y skills add my-skill -g -a claude-code -y"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -761,7 +760,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .shellCommand(let command) = manifest.components?[0].installAction else {
+        guard case let .shellCommand(command) = manifest.components?[0].installAction else {
             Issue.record("Expected shellCommand install action")
             return
         }
@@ -771,22 +770,22 @@ struct ExternalPackManifestTests {
     @Test("Deserialize gitignoreEntries install action")
     func gitignoreEntriesAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.gitignore
-                displayName: Gitignore
-                description: Gitignore entries
-                type: configuration
-                installAction:
-                  type: gitignoreEntries
-                  entries:
-                    - .my-dir
-                    - "*.generated"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.gitignore
+            displayName: Gitignore
+            description: Gitignore entries
+            type: configuration
+            installAction:
+              type: gitignoreEntries
+              entries:
+                - .my-dir
+                - "*.generated"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -795,7 +794,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .gitignoreEntries(let entries) = manifest.components?[0].installAction else {
+        guard case let .gitignoreEntries(entries) = manifest.components?[0].installAction else {
             Issue.record("Expected gitignoreEntries install action")
             return
         }
@@ -805,19 +804,19 @@ struct ExternalPackManifestTests {
     @Test("Deserialize settingsMerge install action")
     func settingsMergeAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.settings
-                displayName: Settings
-                description: Settings merge
-                type: configuration
-                installAction:
-                  type: settingsMerge
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.settings
+            displayName: Settings
+            description: Settings merge
+            type: configuration
+            installAction:
+              type: settingsMerge
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -835,20 +834,20 @@ struct ExternalPackManifestTests {
     @Test("Deserialize settingsFile install action")
     func settingsFileAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.settings-file
-                displayName: Settings File
-                description: Custom settings file
-                type: configuration
-                installAction:
-                  type: settingsFile
-                  source: config/settings.json
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.settings-file
+            displayName: Settings File
+            description: Custom settings file
+            type: configuration
+            installAction:
+              type: settingsFile
+              source: config/settings.json
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -857,7 +856,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .settingsFile(let source) = manifest.components?[0].installAction else {
+        guard case let .settingsFile(source) = manifest.components?[0].installAction else {
             Issue.record("Expected settingsFile install action")
             return
         }
@@ -867,22 +866,22 @@ struct ExternalPackManifestTests {
     @Test("Deserialize copyPackFile install action")
     func copyPackFileAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.hook
-                displayName: Hook
-                description: A hook file
-                type: hookFile
-                installAction:
-                  type: copyPackFile
-                  source: hooks/my-hook.sh
-                  destination: hooks/my-hook.sh
-                  fileType: hook
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.hook
+            displayName: Hook
+            description: A hook file
+            type: hookFile
+            installAction:
+              type: copyPackFile
+              source: hooks/my-hook.sh
+              destination: hooks/my-hook.sh
+              fileType: hook
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -891,7 +890,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .copyPackFile(let config) = manifest.components?[0].installAction else {
+        guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
         }
@@ -903,22 +902,22 @@ struct ExternalPackManifestTests {
     @Test("Deserialize copyPackFile install action with agent fileType")
     func copyPackFileAgentAction() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.agent
-                displayName: Code Reviewer
-                description: A subagent file
-                type: agent
-                installAction:
-                  type: copyPackFile
-                  source: agents/code-reviewer.md
-                  destination: code-reviewer.md
-                  fileType: agent
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.agent
+            displayName: Code Reviewer
+            description: A subagent file
+            type: agent
+            installAction:
+              type: copyPackFile
+              source: agents/code-reviewer.md
+              destination: code-reviewer.md
+              fileType: agent
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -927,7 +926,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .copyPackFile(let config) = manifest.components?[0].installAction else {
+        guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
         }
@@ -941,40 +940,40 @@ struct ExternalPackManifestTests {
     @Test("Deserialize all doctor check types")
     func allDoctorCheckTypes() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: commandExists
-                name: Tool check
-                section: Dependencies
-                command: my-tool
-              - type: fileExists
-                name: Config file
-                section: Configuration
-                path: ~/.config/my-tool.json
-              - type: directoryExists
-                name: Data dir
-                section: Configuration
-                path: ~/.my-tool
-              - type: fileContains
-                name: Config has key
-                section: Configuration
-                path: ~/.config/my-tool.json
-                pattern: "api_key"
-              - type: fileNotContains
-                name: No debug flag
-                section: Configuration
-                path: ~/.config/my-tool.json
-                pattern: "debug: true"
-              - type: shellScript
-                name: Custom check
-                section: Custom
-                command: "test -f /tmp/ready"
-                fixCommand: "touch /tmp/ready"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: commandExists
+            name: Tool check
+            section: Dependencies
+            command: my-tool
+          - type: fileExists
+            name: Config file
+            section: Configuration
+            path: ~/.config/my-tool.json
+          - type: directoryExists
+            name: Data dir
+            section: Configuration
+            path: ~/.my-tool
+          - type: fileContains
+            name: Config has key
+            section: Configuration
+            path: ~/.config/my-tool.json
+            pattern: "api_key"
+          - type: fileNotContains
+            name: No debug flag
+            section: Configuration
+            path: ~/.config/my-tool.json
+            pattern: "debug: true"
+          - type: shellScript
+            name: Custom check
+            section: Custom
+            command: "test -f /tmp/ready"
+            fixCommand: "touch /tmp/ready"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -983,7 +982,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        let checks = manifest.supplementaryDoctorChecks!
+        let checks = try #require(manifest.supplementaryDoctorChecks)
 
         #expect(checks.count == 6)
         #expect(checks[0].type == .commandExists)
@@ -1002,19 +1001,19 @@ struct ExternalPackManifestTests {
     @Test("Deserialize doctor check with scope and fixScript")
     func doctorCheckWithScopeAndFixScript() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: fileExists
-                name: Project config
-                section: Project
-                path: .my-tool/config.yaml
-                scope: project
-                fixScript: scripts/fix-config.sh
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: fileExists
+            name: Project config
+            section: Project
+            path: .my-tool/config.yaml
+            scope: project
+            fixScript: scripts/fix-config.sh
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1023,7 +1022,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        let check = manifest.supplementaryDoctorChecks![0]
+        let check = try #require(manifest.supplementaryDoctorChecks?[0])
 
         #expect(check.scope == .project)
         #expect(check.fixScript == "scripts/fix-config.sh")
@@ -1032,18 +1031,18 @@ struct ExternalPackManifestTests {
     @Test("Deserialize hookEventExists doctor check")
     func hookEventExistsDoctorCheck() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: hookEventExists
-                name: SessionStart hook
-                section: Hooks
-                event: SessionStart
-                isOptional: false
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: hookEventExists
+            name: SessionStart hook
+            section: Hooks
+            event: SessionStart
+            isOptional: false
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1054,7 +1053,7 @@ struct ExternalPackManifestTests {
         let manifest = try ExternalPackManifest.load(from: file)
         try manifest.validate()
 
-        let check = manifest.supplementaryDoctorChecks![0]
+        let check = try #require(manifest.supplementaryDoctorChecks?[0])
         #expect(check.type == .hookEventExists)
         #expect(check.event == "SessionStart")
         #expect(check.isOptional == false)
@@ -1063,18 +1062,18 @@ struct ExternalPackManifestTests {
     @Test("Deserialize settingsKeyEquals doctor check")
     func settingsKeyEqualsDoctorCheck() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            supplementaryDoctorChecks:
-              - type: settingsKeyEquals
-                name: Plan mode
-                section: Settings
-                keyPath: permissions.defaultMode
-                expectedValue: plan
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: settingsKeyEquals
+            name: Plan mode
+            section: Settings
+            keyPath: permissions.defaultMode
+            expectedValue: plan
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1085,7 +1084,7 @@ struct ExternalPackManifestTests {
         let manifest = try ExternalPackManifest.load(from: file)
         try manifest.validate()
 
-        let check = manifest.supplementaryDoctorChecks![0]
+        let check = try #require(manifest.supplementaryDoctorChecks?[0])
         #expect(check.type == .settingsKeyEquals)
         #expect(check.keyPath == "permissions.defaultMode")
         #expect(check.expectedValue == "plan")
@@ -1096,33 +1095,33 @@ struct ExternalPackManifestTests {
     @Test("Deserialize all prompt types")
     func allPromptTypes() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            prompts:
-              - key: project_file
-                type: fileDetect
-                label: "Xcode project"
-                detectPattern: "*.xcodeproj"
-              - key: name
-                type: input
-                label: "Project name"
-                default: "MyApp"
-              - key: platform
-                type: select
-                label: "Target platform"
-                options:
-                  - value: ios
-                    label: iOS
-                  - value: macos
-                    label: macOS
-              - key: version
-                type: script
-                label: "Detected version"
-                scriptCommand: "cat VERSION"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        prompts:
+          - key: project_file
+            type: fileDetect
+            label: "Xcode project"
+            detectPattern: "*.xcodeproj"
+          - key: name
+            type: input
+            label: "Project name"
+            default: "MyApp"
+          - key: platform
+            type: select
+            label: "Target platform"
+            options:
+              - value: ios
+                label: iOS
+              - value: macos
+                label: macOS
+          - key: version
+            type: script
+            label: "Detected version"
+            scriptCommand: "cat VERSION"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1131,7 +1130,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        let prompts = manifest.prompts!
+        let prompts = try #require(manifest.prompts)
 
         #expect(prompts.count == 4)
 
@@ -1251,27 +1250,27 @@ struct ExternalPackManifestTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let file = tmpDir.appendingPathComponent("techpack.yaml")
         let yaml = """
-            schemaVersion: 1
-            identifier: scope-test
-            displayName: Scope Test
-            description: Test scope
-            version: "1.0.0"
-            components:
-              - id: scope-test.server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: test-mcp
-                  command: node
-                  args: ["server.js"]
-                  scope: local
-            """
+        schemaVersion: 1
+        identifier: scope-test
+        displayName: Scope Test
+        description: Test scope
+        version: "1.0.0"
+        components:
+          - id: scope-test.server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: test-mcp
+              command: node
+              args: ["server.js"]
+              scope: local
+        """
         try yaml.write(to: file, atomically: true, encoding: .utf8)
         let manifest = try ExternalPackManifest.load(from: file)
-        let component = manifest.components!.first!
-        if case .mcpServer(let config) = component.installAction {
+        let component = try #require(manifest.components?.first)
+        if case let .mcpServer(config) = component.installAction {
             #expect(config.scope == .local)
         } else {
             Issue.record("Expected mcpServer action")
@@ -1283,27 +1282,27 @@ struct ExternalPackManifestTests {
     @Test("Component with inline doctor checks deserializes correctly")
     func componentWithDoctorChecks() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-                doctorChecks:
-                  - type: fileExists
-                    name: Server config
-                    section: Configuration
-                    path: ~/.server/config.json
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+            doctorChecks:
+              - type: fileExists
+                name: Server config
+                section: Configuration
+                path: ~/.server/config.json
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1312,7 +1311,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        let component = manifest.components![0]
+        let component = try #require(manifest.components?[0])
 
         #expect(component.doctorChecks?.count == 1)
         #expect(component.doctorChecks?[0].type == .fileExists)
@@ -1324,19 +1323,19 @@ struct ExternalPackManifestTests {
     @Test("Component defaults: dependencies is nil, isRequired is nil")
     func componentDefaults() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: test.basic
-                displayName: Basic
-                description: A basic component
-                type: configuration
-                installAction:
-                  type: settingsMerge
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: test.basic
+            displayName: Basic
+            description: A basic component
+            type: configuration
+            installAction:
+              type: settingsMerge
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1345,7 +1344,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        let component = manifest.components![0]
+        let component = try #require(manifest.components?[0])
 
         #expect(component.dependencies == nil)
         #expect(component.isRequired == nil)
@@ -1359,29 +1358,29 @@ struct ExternalPackManifestTests {
     @Test("normalized() auto-prefixes short component IDs with pack identifier")
     func normalizeShortIDs() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-              - id: brew
-                displayName: Brew
-                description: A package
-                type: brewPackage
-                installAction:
-                  type: brewInstall
-                  package: my-pkg
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+          - id: brew
+            displayName: Brew
+            description: A package
+            type: brewPackage
+            installAction:
+              type: brewInstall
+              package: my-pkg
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1399,22 +1398,22 @@ struct ExternalPackManifestTests {
     @Test("normalized() rejects component IDs containing dots")
     func normalizeRejectsDottedComponentIDs() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1431,31 +1430,31 @@ struct ExternalPackManifestTests {
     @Test("normalized() auto-prefixes intra-pack dependencies")
     func normalizeIntraPackDeps() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: brew
-                displayName: Brew
-                description: A package
-                type: brewPackage
-                installAction:
-                  type: brewInstall
-                  package: my-pkg
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                dependencies:
-                  - brew
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: brew
+            displayName: Brew
+            description: A package
+            type: brewPackage
+            installAction:
+              type: brewInstall
+              package: my-pkg
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            dependencies:
+              - brew
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1472,25 +1471,25 @@ struct ExternalPackManifestTests {
     @Test("normalized() leaves cross-pack dependencies unchanged")
     func normalizeCrossPackDeps() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                dependencies:
-                  - other-pack.tool
-                  - brew
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            dependencies:
+              - other-pack.tool
+              - brew
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1507,12 +1506,12 @@ struct ExternalPackManifestTests {
     @Test("normalized() with no components returns manifest unchanged")
     func normalizeNoComponents() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1530,22 +1529,22 @@ struct ExternalPackManifestTests {
     @Test("normalized() then validate() accepts short IDs")
     func normalizeAndValidate() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1565,17 +1564,17 @@ struct ExternalPackManifestTests {
     @Test("normalized() auto-prefixes short template section identifiers")
     func normalizeTemplateSections() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            templates:
-              - sectionIdentifier: ios
-                contentFile: templates/ios.md
-              - sectionIdentifier: git
-                contentFile: templates/git.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: ios
+            contentFile: templates/ios.md
+          - sectionIdentifier: git
+            contentFile: templates/git.md
+        """
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let file = tmpDir.appendingPathComponent("techpack.yaml")
@@ -1591,15 +1590,15 @@ struct ExternalPackManifestTests {
     @Test("normalized() rejects template sectionIdentifiers containing dots")
     func normalizeRejectsDottedSectionIDs() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            templates:
-              - sectionIdentifier: my-pack.ios
-                contentFile: templates/ios.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: my-pack.ios
+            contentFile: templates/ios.md
+        """
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let file = tmpDir.appendingPathComponent("techpack.yaml")
@@ -1614,15 +1613,15 @@ struct ExternalPackManifestTests {
     @Test("normalized() then validate() accepts short template section identifiers")
     func normalizeAndValidateTemplateSections() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            templates:
-              - sectionIdentifier: ios
-                contentFile: templates/ios.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: ios
+            contentFile: templates/ios.md
+        """
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let file = tmpDir.appendingPathComponent("techpack.yaml")
@@ -1640,24 +1639,24 @@ struct ExternalPackManifestTests {
     @Test("validate() throws unresolvedDependency for nonexistent intra-pack dep")
     func validateUnresolvedIntraPackDep() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                dependencies:
-                  - nonexistent
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            dependencies:
+              - nonexistent
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1679,24 +1678,24 @@ struct ExternalPackManifestTests {
     @Test("validate() passes for cross-pack dependencies")
     func validateCrossPackDepsPass() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                dependencies:
-                  - other-pack.tool
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            dependencies:
+              - other-pack.tool
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1714,31 +1713,31 @@ struct ExternalPackManifestTests {
     @Test("validate() passes when all intra-pack deps resolve")
     func validateResolvedIntraPackDeps() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: brew
-                displayName: Brew
-                description: A package
-                type: brewPackage
-                installAction:
-                  type: brewInstall
-                  package: my-pkg
-              - id: server
-                displayName: Server
-                description: A server
-                type: mcpServer
-                dependencies:
-                  - brew
-                installAction:
-                  type: mcpServer
-                  name: server
-                  command: npx
-                  args: ["-y", "server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: brew
+            displayName: Brew
+            description: A package
+            type: brewPackage
+            installAction:
+              type: brewInstall
+              package: my-pkg
+          - id: server
+            displayName: Server
+            description: A server
+            type: mcpServer
+            dependencies:
+              - brew
+            installAction:
+              type: mcpServer
+              name: server
+              command: npx
+              args: ["-y", "server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1771,7 +1770,7 @@ struct ExternalPackManifestTests {
                     sectionIdentifier: "my-pack",
                     placeholders: nil,
                     contentFile: "t.md"
-                )
+                ),
             ],
             prompts: nil,
             configureProject: nil,
@@ -1791,19 +1790,19 @@ struct ExternalPackManifestTests {
     @Test("Validation rejects unknown hookEvent on component")
     func rejectUnknownHookEvent() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: hook
-                description: A hook
-                hookEvent: BogusEvent
-                hook:
-                  source: hooks/test.sh
-                  destination: test.sh
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: hook
+            description: A hook
+            hookEvent: BogusEvent
+            hook:
+              source: hooks/test.sh
+              destination: test.sh
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1826,19 +1825,19 @@ struct ExternalPackManifestTests {
     func acceptKnownHookEvents() throws {
         for event in Constants.Hooks.validEvents.sorted() {
             let yaml = """
-                schemaVersion: 1
-                identifier: my-pack
-                displayName: My Pack
-                description: Test
-                version: "1.0.0"
-                components:
-                  - id: hook
-                    description: A hook
-                    hookEvent: \(event)
-                    hook:
-                      source: hooks/test.sh
-                      destination: test.sh
-                """
+            schemaVersion: 1
+            identifier: my-pack
+            displayName: My Pack
+            description: Test
+            version: "1.0.0"
+            components:
+              - id: hook
+                description: A hook
+                hookEvent: \(event)
+                hook:
+                  source: hooks/test.sh
+                  destination: test.sh
+            """
 
             let tmpDir = try makeTmpDir()
             defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1857,16 +1856,16 @@ struct ExternalPackManifestTests {
     @Test("Shorthand brew: infers brewPackage type and brewInstall action")
     func shorthandBrew() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.node
-                description: JavaScript runtime
-                brew: node
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.node
+            description: JavaScript runtime
+            brew: node
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1879,7 +1878,7 @@ struct ExternalPackManifestTests {
 
         #expect(comp.type == .brewPackage)
         #expect(comp.displayName == "my-pack.node")
-        guard case .brewInstall(let package) = comp.installAction else {
+        guard case let .brewInstall(package) = comp.installAction else {
             Issue.record("Expected brewInstall"); return
         }
         #expect(package == "node")
@@ -1890,23 +1889,23 @@ struct ExternalPackManifestTests {
     @Test("Shorthand mcp: with command infers mcpServer type and stdio config")
     func shorthandMCPStdio() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.serena
-                description: Semantic navigation
-                mcp:
-                  command: uvx
-                  args:
-                    - "--from"
-                    - "git+https://github.com/oraios/serena"
-                  env:
-                    KEY: value
-                  scope: local
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.serena
+            description: Semantic navigation
+            mcp:
+              command: uvx
+              args:
+                - "--from"
+                - "git+https://github.com/oraios/serena"
+              env:
+                KEY: value
+              scope: local
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1918,7 +1917,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .mcpServer)
-        guard case .mcpServer(let config) = comp.installAction else {
+        guard case let .mcpServer(config) = comp.installAction else {
             Issue.record("Expected mcpServer"); return
         }
         #expect(config.name == "serena")
@@ -1933,17 +1932,17 @@ struct ExternalPackManifestTests {
     @Test("Shorthand mcp: with url infers HTTP transport")
     func shorthandMCPHTTP() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.sosumi
-                description: Apple docs
-                mcp:
-                  url: https://sosumi.ai/mcp
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.sosumi
+            description: Apple docs
+            mcp:
+              url: https://sosumi.ai/mcp
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1955,7 +1954,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .mcpServer)
-        guard case .mcpServer(let config) = comp.installAction else {
+        guard case let .mcpServer(config) = comp.installAction else {
             Issue.record("Expected mcpServer"); return
         }
         #expect(config.name == "sosumi")
@@ -1972,18 +1971,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand mcp: strips pack prefix from component id for server name")
     func shorthandMCPNameFromPrefixedID() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.docs-mcp-server
-                description: Docs search
-                mcp:
-                  command: npx
-                  args: ["-y", "docs-mcp-server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.docs-mcp-server
+            description: Docs search
+            mcp:
+              command: npx
+              args: ["-y", "docs-mcp-server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -1992,7 +1991,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .mcpServer(let config) = manifest.components?.first?.installAction else {
+        guard case let .mcpServer(config) = manifest.components?.first?.installAction else {
             Issue.record("Expected mcpServer"); return
         }
         #expect(config.name == "docs-mcp-server")
@@ -2003,16 +2002,16 @@ struct ExternalPackManifestTests {
     @Test("Shorthand plugin: infers plugin type and name")
     func shorthandPlugin() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.pr-review
-                description: PR review toolkit
-                plugin: "pr-review-toolkit@claude-plugins-official"
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.pr-review
+            description: PR review toolkit
+            plugin: "pr-review-toolkit@claude-plugins-official"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2024,7 +2023,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .plugin)
-        guard case .plugin(let name) = comp.installAction else {
+        guard case let .plugin(name) = comp.installAction else {
             Issue.record("Expected plugin"); return
         }
         #expect(name == "pr-review-toolkit@claude-plugins-official")
@@ -2035,17 +2034,17 @@ struct ExternalPackManifestTests {
     @Test("Shorthand shell: requires explicit type field")
     func shorthandShell() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.xcode-skill
-                description: Install via shell
-                type: skill
-                shell: "npx -y skills add xcodebuildmcp -g"
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.xcode-skill
+            description: Install via shell
+            type: skill
+            shell: "npx -y skills add xcodebuildmcp -g"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2057,7 +2056,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .skill)
-        guard case .shellCommand(let command) = comp.installAction else {
+        guard case let .shellCommand(command) = comp.installAction else {
             Issue.record("Expected shellCommand"); return
         }
         #expect(command == "npx -y skills add xcodebuildmcp -g")
@@ -2068,19 +2067,19 @@ struct ExternalPackManifestTests {
     @Test("Shorthand hook: infers hookFile type and copyPackFile action")
     func shorthandHook() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.session-start
-                description: Session start hook
-                hookEvent: SessionStart
-                hook:
-                  source: hooks/session_start.sh
-                  destination: session_start.sh
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.session-start
+            description: Session start hook
+            hookEvent: SessionStart
+            hook:
+              source: hooks/session_start.sh
+              destination: session_start.sh
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2093,7 +2092,7 @@ struct ExternalPackManifestTests {
 
         #expect(comp.type == .hookFile)
         #expect(comp.hookEvent == "SessionStart")
-        guard case .copyPackFile(let config) = comp.installAction else {
+        guard case let .copyPackFile(config) = comp.installAction else {
             Issue.record("Expected copyPackFile"); return
         }
         #expect(config.source == "hooks/session_start.sh")
@@ -2106,18 +2105,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand command: infers command type and copyPackFile action")
     func shorthandCommand() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.pr
-                description: PR command
-                command:
-                  source: commands/pr.md
-                  destination: pr.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.pr
+            description: PR command
+            command:
+              source: commands/pr.md
+              destination: pr.md
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2129,7 +2128,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .command)
-        guard case .copyPackFile(let config) = comp.installAction else {
+        guard case let .copyPackFile(config) = comp.installAction else {
             Issue.record("Expected copyPackFile"); return
         }
         #expect(config.source == "commands/pr.md")
@@ -2141,18 +2140,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand skill: infers skill type and copyPackFile action")
     func shorthandSkill() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.learning
-                description: Continuous learning
-                skill:
-                  source: skills/continuous-learning
-                  destination: continuous-learning
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.learning
+            description: Continuous learning
+            skill:
+              source: skills/continuous-learning
+              destination: continuous-learning
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2164,7 +2163,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .skill)
-        guard case .copyPackFile(let config) = comp.installAction else {
+        guard case let .copyPackFile(config) = comp.installAction else {
             Issue.record("Expected copyPackFile"); return
         }
         #expect(config.source == "skills/continuous-learning")
@@ -2176,18 +2175,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand agent: infers agent type and copyPackFile action")
     func shorthandAgent() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.code-reviewer
-                description: Expert code reviewer subagent
-                agent:
-                  source: agents/code-reviewer.md
-                  destination: code-reviewer.md
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.code-reviewer
+            description: Expert code reviewer subagent
+            agent:
+              source: agents/code-reviewer.md
+              destination: code-reviewer.md
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2199,7 +2198,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .agent)
-        guard case .copyPackFile(let config) = comp.installAction else {
+        guard case let .copyPackFile(config) = comp.installAction else {
             Issue.record("Expected copyPackFile"); return
         }
         #expect(config.source == "agents/code-reviewer.md")
@@ -2211,16 +2210,16 @@ struct ExternalPackManifestTests {
     @Test("Shorthand settingsFile: infers configuration type and settingsFile action")
     func shorthandSettingsFile() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.settings
-                description: Settings
-                settingsFile: config/settings.json
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.settings
+            description: Settings
+            settingsFile: config/settings.json
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2232,7 +2231,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .configuration)
-        guard case .settingsFile(let source) = comp.installAction else {
+        guard case let .settingsFile(source) = comp.installAction else {
             Issue.record("Expected settingsFile"); return
         }
         #expect(source == "config/settings.json")
@@ -2243,18 +2242,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand gitignore: infers configuration type and gitignoreEntries action")
     func shorthandGitignore() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.gitignore
-                description: Gitignore entries
-                gitignore:
-                  - .claude/memories
-                  - .xcodebuildmcp
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.gitignore
+            description: Gitignore entries
+            gitignore:
+              - .claude/memories
+              - .xcodebuildmcp
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2266,7 +2265,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .configuration)
-        guard case .gitignoreEntries(let entries) = comp.installAction else {
+        guard case let .gitignoreEntries(entries) = comp.installAction else {
             Issue.record("Expected gitignoreEntries"); return
         }
         #expect(entries == [".claude/memories", ".xcodebuildmcp"])
@@ -2277,16 +2276,16 @@ struct ExternalPackManifestTests {
     @Test("displayName defaults to id when omitted")
     func shorthandDisplayNameDefault() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.gh
-                description: GitHub CLI
-                brew: gh
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.gh
+            description: GitHub CLI
+            brew: gh
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2303,17 +2302,17 @@ struct ExternalPackManifestTests {
     @Test("displayName can be overridden in shorthand form")
     func shorthandDisplayNameOverride() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.gh
-                displayName: GitHub CLI
-                description: GitHub CLI for PR operations
-                brew: gh
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.gh
+            displayName: GitHub CLI
+            description: GitHub CLI for PR operations
+            brew: gh
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2332,19 +2331,19 @@ struct ExternalPackManifestTests {
     @Test("displayName defaults to id when omitted in verbose form")
     func verboseDisplayNameDefault() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.node
-                description: Node.js runtime
-                type: brewPackage
-                installAction:
-                  type: brewInstall
-                  package: node
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.node
+            description: Node.js runtime
+            type: brewPackage
+            installAction:
+              type: brewInstall
+              package: node
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2363,29 +2362,29 @@ struct ExternalPackManifestTests {
     @Test("Mixed verbose and shorthand components in same manifest")
     func mixedVerboseAndShorthand() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.homebrew
-                displayName: Homebrew
-                description: macOS package manager
-                type: brewPackage
-                installAction:
-                  type: shellCommand
-                  command: '/bin/bash -c "$(curl -fsSL https://brew.sh)"'
-              - id: my-pack.node
-                description: Node.js
-                dependencies: [my-pack.homebrew]
-                brew: node
-              - id: my-pack.my-server
-                description: MCP server
-                mcp:
-                  command: npx
-                  args: ["-y", "my-server@latest"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.homebrew
+            displayName: Homebrew
+            description: macOS package manager
+            type: brewPackage
+            installAction:
+              type: shellCommand
+              command: '/bin/bash -c "$(curl -fsSL https://brew.sh)"'
+          - id: my-pack.node
+            description: Node.js
+            dependencies: [my-pack.homebrew]
+            brew: node
+          - id: my-pack.my-server
+            description: MCP server
+            mcp:
+              command: npx
+              args: ["-y", "my-server@latest"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2405,14 +2404,14 @@ struct ExternalPackManifestTests {
 
         // Shorthand: node
         #expect(comps[1].type == .brewPackage)
-        guard case .brewInstall(let package) = comps[1].installAction else {
+        guard case let .brewInstall(package) = comps[1].installAction else {
             Issue.record("Expected brewInstall"); return
         }
         #expect(package == "node")
 
         // Shorthand: my-server
         #expect(comps[2].type == .mcpServer)
-        guard case .mcpServer(let config) = comps[2].installAction else {
+        guard case let .mcpServer(config) = comps[2].installAction else {
             Issue.record("Expected mcpServer"); return
         }
         #expect(config.name == "my-server")
@@ -2423,21 +2422,21 @@ struct ExternalPackManifestTests {
     @Test("Shorthand components with short IDs normalize correctly")
     func shorthandNormalization() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: node
-                description: Node.js
-                dependencies: [homebrew]
-                brew: node
-              - id: homebrew
-                description: Homebrew
-                type: brewPackage
-                shell: "brew --version"
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: node
+            description: Node.js
+            dependencies: [homebrew]
+            brew: node
+          - id: homebrew
+            description: Homebrew
+            type: brewPackage
+            shell: "brew --version"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2459,18 +2458,18 @@ struct ExternalPackManifestTests {
     @Test("Shorthand mcp: derives name from short id before normalization")
     func shorthandMCPNameFromShortID() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: serena
-                description: Code nav
-                mcp:
-                  command: uvx
-                  args: ["serena", "start-mcp-server"]
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: serena
+            description: Code nav
+            mcp:
+              command: uvx
+              args: ["serena", "start-mcp-server"]
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -2479,7 +2478,7 @@ struct ExternalPackManifestTests {
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
         let manifest = try ExternalPackManifest.load(from: file)
-        guard case .mcpServer(let config) = manifest.components?.first?.installAction else {
+        guard case let .mcpServer(config) = manifest.components?.first?.installAction else {
             Issue.record("Expected mcpServer"); return
         }
         // Short id "serena" → name "serena"
@@ -2488,7 +2487,7 @@ struct ExternalPackManifestTests {
         // After normalization, id becomes "my-pack.serena" but name stays "serena"
         let normalized = try manifest.normalized()
         #expect(normalized.components?.first?.id == "my-pack.serena")
-        guard case .mcpServer(let normalizedConfig) = normalized.components?.first?.installAction else {
+        guard case let .mcpServer(normalizedConfig) = normalized.components?.first?.installAction else {
             Issue.record("Expected mcpServer"); return
         }
         #expect(normalizedConfig.name == "serena")
@@ -2499,25 +2498,25 @@ struct ExternalPackManifestTests {
     @Test("Shorthand component with dependencies, isRequired, and doctorChecks")
     func shorthandWithOptionalFields() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: my-pack
-            displayName: My Pack
-            description: Test
-            version: "1.0.0"
-            components:
-              - id: my-pack.session-hook
-                description: Session start hook
-                dependencies: [my-pack.jq]
-                isRequired: true
-                hookEvent: SessionStart
-                hook:
-                  source: hooks/session_start.sh
-                  destination: session_start.sh
-                doctorChecks:
-                  - type: hookEventExists
-                    name: SessionStart hook
-                    event: SessionStart
-            """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.session-hook
+            description: Session start hook
+            dependencies: [my-pack.jq]
+            isRequired: true
+            hookEvent: SessionStart
+            hook:
+              source: hooks/session_start.sh
+              destination: session_start.sh
+            doctorChecks:
+              - type: hookEventExists
+                name: SessionStart hook
+                event: SessionStart
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }

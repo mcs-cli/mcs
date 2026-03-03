@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("SectionValidator")
 struct SectionValidatorTests {
@@ -22,10 +21,10 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS instructions
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS instructions
+        <!-- mcs:end ios -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let result = SectionValidator.validate(
@@ -48,10 +47,10 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            Old content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        Old content
+        <!-- mcs:end ios -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let result = SectionValidator.validate(
@@ -72,10 +71,10 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS only
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS only
+        <!-- mcs:end ios -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let result = SectionValidator.validate(
@@ -101,12 +100,12 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            My custom notes
-            <!-- mcs:begin ios v1.0.0 -->
-            Old iOS content
-            <!-- mcs:end ios -->
-            More custom notes
-            """
+        My custom notes
+        <!-- mcs:begin ios v1.0.0 -->
+        Old iOS content
+        <!-- mcs:end ios -->
+        More custom notes
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let updated = try SectionValidator.fix(
@@ -132,10 +131,10 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            Stale content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        Stale content
+        <!-- mcs:end ios -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let updated = try SectionValidator.fix(
@@ -159,10 +158,10 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            Current content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        Current content
+        <!-- mcs:end ios -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let updated = try SectionValidator.fix(
@@ -214,14 +213,14 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web v1.0.0 -->
-            Web content
-            <!-- mcs:end web -->
-            """
+        <!-- mcs:begin web v1.0.0 -->
+        Web content
+        <!-- mcs:end web -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let result = SectionValidator.validate(
@@ -248,14 +247,14 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web v1.0.0 -->
-            Old Web
-            <!-- mcs:end web -->
-            """
+        <!-- mcs:begin web v1.0.0 -->
+        Old Web
+        <!-- mcs:end web -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let updated = try SectionValidator.fix(
@@ -286,14 +285,14 @@ struct SectionValidatorTests {
 
         let file = tmpDir.appendingPathComponent("CLAUDE.local.md")
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin custom-pack v0.1.0 -->
-            Custom stuff
-            <!-- mcs:end custom-pack -->
-            """
+        <!-- mcs:begin custom-pack v0.1.0 -->
+        Custom stuff
+        <!-- mcs:end custom-pack -->
+        """
         try content.write(to: file, atomically: true, encoding: .utf8)
 
         let result = SectionValidator.validate(

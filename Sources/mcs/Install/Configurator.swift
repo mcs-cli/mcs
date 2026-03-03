@@ -12,7 +12,9 @@ struct Configurator {
     var registry: TechPackRegistry = .shared
     let strategy: any SyncStrategy
 
-    private var scope: SyncScope { strategy.scope }
+    private var scope: SyncScope {
+        strategy.scope
+    }
 
     // MARK: - Interactive Flow
 
@@ -59,14 +61,14 @@ struct Configurator {
             selectedNumbers.contains(index + 1) ? pack : nil
         }
 
-        if selectedPacks.isEmpty && previousPacks.isEmpty {
+        if selectedPacks.isEmpty, previousPacks.isEmpty {
             output.plain("")
             output.info("No packs selected. Nothing to configure.")
             return
         }
 
         var excludedComponents: [String: Set<String>] = [:]
-        if customize && !selectedPacks.isEmpty {
+        if customize, !selectedPacks.isEmpty {
             excludedComponents = ConfiguratorSupport.selectComponentExclusions(
                 packs: selectedPacks,
                 previousState: previousState,
@@ -122,7 +124,7 @@ struct Configurator {
         let additions = selectedIDs.subtracting(previousIDs)
 
         // 1. Confirm and unconfigure removed packs
-        if confirmRemovals && !removals.isEmpty {
+        if confirmRemovals, !removals.isEmpty {
             output.plain("")
             let suffix = scope.labelSuffix
             output.warn("The following packs will be removed\(suffix):")
@@ -369,20 +371,18 @@ struct Configurator {
         remaining.plugins = []
 
         // Remove MCP servers
-        for server in artifacts.mcpServers {
-            if exec.removeMCPServer(name: server.name, scope: server.scope) {
-                removedServers.insert(server)
-                output.dimmed("  Removed MCP server: \(server.name)")
-            }
+        for server in artifacts.mcpServers
+            where exec.removeMCPServer(name: server.name, scope: server.scope) {
+            removedServers.insert(server)
+            output.dimmed("  Removed MCP server: \(server.name)")
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
 
         // Remove files via strategy (project vs global have different removal logic)
         var removedFiles: Set<String> = []
-        for path in artifacts.files {
-            if strategy.removeFileArtifact(relativePath: path, output: output) {
-                removedFiles.insert(path)
-            }
+        for path in artifacts.files
+            where strategy.removeFileArtifact(relativePath: path, output: output) {
+            removedFiles.insert(path)
         }
         remaining.files.removeAll { removedFiles.contains($0) }
 
@@ -494,10 +494,10 @@ struct Configurator {
             guard !ComponentExecutor.isAlreadyInstalled(component) else { continue }
 
             switch component.installAction {
-            case .brewInstall(let package):
+            case let .brewInstall(package):
                 output.dimmed("  Installing \(component.displayName)...")
                 _ = exec.installBrewPackage(package)
-            case .plugin(let name):
+            case let .plugin(name):
                 output.dimmed("  Installing plugin \(component.displayName)...")
                 _ = exec.installPlugin(name)
             default:

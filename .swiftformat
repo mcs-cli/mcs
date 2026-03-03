@@ -1,0 +1,4 @@
+--swiftversion 6.0
+--indent 4
+--exclude .build,.swiftpm
+--disable wrapMultilineStatementBraces

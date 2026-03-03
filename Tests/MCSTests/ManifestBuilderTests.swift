@@ -1,10 +1,9 @@
-import Testing
 import Foundation
 @testable import mcs
+import Testing
 
 @Suite("ManifestBuilder")
 struct ManifestBuilderTests {
-
     // MARK: - Helpers
 
     private func makeTmpDir() throws -> URL {
@@ -144,7 +143,7 @@ struct ManifestBuilderTests {
 
         // Stdio server with sensitive env var → placeholder
         let stdioComp = try #require(mcpComps.first { $0.id.contains("docs-server") })
-        guard case .mcpServer(let stdioConfig) = stdioComp.installAction else {
+        guard case let .mcpServer(stdioConfig) = stdioComp.installAction else {
             Issue.record("Expected mcpServer install action for docs-server")
             return
         }
@@ -155,7 +154,7 @@ struct ManifestBuilderTests {
 
         // HTTP server with user scope
         let httpComp = try #require(mcpComps.first { $0.id.contains("remote") })
-        guard case .mcpServer(let httpConfig) = httpComp.installAction else {
+        guard case let .mcpServer(httpConfig) = httpComp.installAction else {
             Issue.record("Expected mcpServer install action for remote")
             return
         }
@@ -165,7 +164,7 @@ struct ManifestBuilderTests {
         // 5. Verify hook with hookEvent
         let hookComp = try #require(components.first { $0.type == .hookFile })
         #expect(hookComp.hookEvent == "PreToolUse")
-        guard case .copyPackFile(let hookFile) = hookComp.installAction else {
+        guard case let .copyPackFile(hookFile) = hookComp.installAction else {
             Issue.record("Expected copyPackFile for hook")
             return
         }
@@ -175,7 +174,7 @@ struct ManifestBuilderTests {
 
         // 6. Verify skill
         let skillComp = try #require(components.first { $0.type == .skill })
-        guard case .copyPackFile(let skillFile) = skillComp.installAction else {
+        guard case let .copyPackFile(skillFile) = skillComp.installAction else {
             Issue.record("Expected copyPackFile for skill")
             return
         }
@@ -183,7 +182,7 @@ struct ManifestBuilderTests {
 
         // 7. Verify command
         let cmdComp = try #require(components.first { $0.type == .command })
-        guard case .copyPackFile(let cmdFile) = cmdComp.installAction else {
+        guard case let .copyPackFile(cmdFile) = cmdComp.installAction else {
             Issue.record("Expected copyPackFile for command")
             return
         }
@@ -191,7 +190,7 @@ struct ManifestBuilderTests {
 
         // 8. Verify agent
         let agentComp = try #require(components.first { $0.type == .agent })
-        guard case .copyPackFile(let agentFile) = agentComp.installAction else {
+        guard case let .copyPackFile(agentFile) = agentComp.installAction else {
             Issue.record("Expected copyPackFile for agent")
             return
         }
@@ -200,7 +199,7 @@ struct ManifestBuilderTests {
 
         // 9. Verify plugin
         let pluginComp = try #require(components.first { $0.type == .plugin })
-        guard case .plugin(let pluginName) = pluginComp.installAction else {
+        guard case let .plugin(pluginName) = pluginComp.installAction else {
             Issue.record("Expected plugin install action")
             return
         }
@@ -213,7 +212,7 @@ struct ManifestBuilderTests {
         #expect(settingsComp?.isRequired == true)
         let gitignoreComp = configComps.first { $0.id.contains("gitignore") }
         #expect(gitignoreComp?.isRequired == true)
-        guard case .gitignoreEntries(let entries) = gitignoreComp?.installAction else {
+        guard case let .gitignoreEntries(entries) = gitignoreComp?.installAction else {
             Issue.record("Expected gitignoreEntries install action")
             return
         }
@@ -320,7 +319,7 @@ struct ManifestBuilderTests {
 
         // MCP server should have TOKEN replaced with placeholder
         let mcpComp = try #require(components.first { $0.type == .mcpServer })
-        guard case .mcpServer(let mcpConfig) = mcpComp.installAction else {
+        guard case let .mcpServer(mcpConfig) = mcpComp.installAction else {
             Issue.record("Expected mcpServer action")
             return
         }
@@ -329,7 +328,7 @@ struct ManifestBuilderTests {
 
         // Plugin
         let pluginComp = try #require(components.first { $0.type == .plugin })
-        guard case .plugin(let name) = pluginComp.installAction else {
+        guard case let .plugin(name) = pluginComp.installAction else {
             Issue.record("Expected plugin action")
             return
         }
@@ -388,14 +387,14 @@ struct ManifestBuilderTests {
         // Each server's env uses the correct placeholder
         let components = try #require(result.manifest.components)
         let figmaComp = try #require(components.first { $0.id.contains("figma") })
-        guard case .mcpServer(let figmaConfig) = figmaComp.installAction else {
+        guard case let .mcpServer(figmaConfig) = figmaComp.installAction else {
             Issue.record("Expected mcpServer install action for figma")
             return
         }
         #expect(figmaConfig.env?["API_KEY"] == "__API_KEY__")
 
         let atlassianComp = try #require(components.first { $0.id.contains("atlassian") })
-        guard case .mcpServer(let atlassianConfig) = atlassianComp.installAction else {
+        guard case let .mcpServer(atlassianConfig) = atlassianComp.installAction else {
             Issue.record("Expected mcpServer install action for atlassian")
             return
         }
@@ -491,7 +490,7 @@ struct ManifestBuilderTests {
         let normalized = try loaded.normalized()
 
         let mcpComp = try #require(normalized.components?.first { $0.type == .mcpServer })
-        guard case .mcpServer(let mcpConfig) = mcpComp.installAction else {
+        guard case let .mcpServer(mcpConfig) = mcpComp.installAction else {
             Issue.record("Expected mcpServer install action")
             return
         }

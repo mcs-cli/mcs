@@ -32,7 +32,9 @@ struct ExternalCommandExistsCheck: DoctorCheck, Sendable {
     let fixCommand: String?
     let scriptRunner: ScriptRunner
 
-    var fixCommandPreview: String? { fixCommand }
+    var fixCommandPreview: String? {
+        fixCommand
+    }
 
     func check() -> CheckResult {
         let shell = ShellRunner(environment: Environment())
@@ -92,7 +94,7 @@ struct ExternalFileExistsCheck: ScopedPathCheck, Sendable {
             return .skip("no project root for project-scoped check")
         case .pathTraversal:
             return .fail("path '\(path)' escapes project root — possible path traversal")
-        case .resolved(let path):
+        case let .resolved(path):
             resolved = path
         }
         if FileManager.default.fileExists(atPath: resolved) {
@@ -119,7 +121,7 @@ struct ExternalDirectoryExistsCheck: ScopedPathCheck, Sendable {
             return .skip("no project root for project-scoped check")
         case .pathTraversal:
             return .fail("path '\(path)' escapes project root — possible path traversal")
-        case .resolved(let path):
+        case let .resolved(path):
             resolved = path
         }
         var isDir: ObjCBool = false
@@ -148,7 +150,7 @@ struct ExternalFileContainsCheck: ScopedPathCheck, Sendable {
             return .skip("no project root for project-scoped check")
         case .pathTraversal:
             return .fail("path '\(path)' escapes project root — possible path traversal")
-        case .resolved(let path):
+        case let .resolved(path):
             resolved = path
         }
         guard let content = try? String(contentsOfFile: resolved, encoding: .utf8) else {
@@ -179,7 +181,7 @@ struct ExternalFileNotContainsCheck: ScopedPathCheck, Sendable {
             return .skip("no project root for project-scoped check")
         case .pathTraversal:
             return .fail("path '\(path)' escapes project root — possible path traversal")
-        case .resolved(let path):
+        case let .resolved(path):
             resolved = path
         }
         guard let content = try? String(contentsOfFile: resolved, encoding: .utf8) else {
@@ -424,7 +426,8 @@ enum ExternalDoctorCheckFactory {
 
         case .fileContains:
             guard let path = definition.path, !path.isEmpty,
-                  let pattern = definition.pattern, !pattern.isEmpty else {
+                  let pattern = definition.pattern, !pattern.isEmpty
+            else {
                 return MisconfiguredDoctorCheck(
                     name: definition.name, section: section,
                     reason: "fileContains requires non-empty 'path' and 'pattern'"
@@ -441,7 +444,8 @@ enum ExternalDoctorCheckFactory {
 
         case .fileNotContains:
             guard let path = definition.path, !path.isEmpty,
-                  let pattern = definition.pattern, !pattern.isEmpty else {
+                  let pattern = definition.pattern, !pattern.isEmpty
+            else {
                 return MisconfiguredDoctorCheck(
                     name: definition.name, section: section,
                     reason: "fileNotContains requires non-empty 'path' and 'pattern'"
@@ -488,7 +492,8 @@ enum ExternalDoctorCheckFactory {
 
         case .settingsKeyEquals:
             guard let keyPath = definition.keyPath, !keyPath.isEmpty,
-                  let expectedValue = definition.expectedValue, !expectedValue.isEmpty else {
+                  let expectedValue = definition.expectedValue, !expectedValue.isEmpty
+            else {
                 return MisconfiguredDoctorCheck(
                     name: definition.name, section: section,
                     reason: "settingsKeyEquals requires non-empty 'keyPath' and 'expectedValue'"

@@ -8,13 +8,13 @@ extension ComponentDefinition {
     /// (e.g. .shellCommand, .settingsMerge, .gitignoreEntries).
     func deriveDoctorCheck(projectRoot: URL? = nil) -> (any DoctorCheck)? {
         switch installAction {
-        case .mcpServer(let config):
+        case let .mcpServer(config):
             return MCPServerCheck(name: displayName, serverName: config.name, projectRoot: projectRoot)
 
-        case .plugin(let pluginName):
+        case let .plugin(pluginName):
             return PluginCheck(pluginRef: PluginRef(pluginName))
 
-        case .brewInstall(let package):
+        case let .brewInstall(package):
             return CommandCheck(
                 name: displayName,
                 section: type.doctorSection,
@@ -22,7 +22,7 @@ extension ComponentDefinition {
                 isOptional: !isRequired
             )
 
-        case .copyPackFile(_, let destination, let fileType):
+        case let .copyPackFile(_, destination, fileType):
             let globalURL = fileType.destinationURL(in: Environment(), destination: destination)
             if let projectRoot {
                 let projectURL = fileType.projectBaseDirectory(projectPath: projectRoot)

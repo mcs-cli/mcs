@@ -80,7 +80,7 @@ extension ExternalPackManifest {
             // Validate intra-pack dependency references resolve to existing component IDs
             for component in components {
                 for dep in component.dependencies ?? [] {
-                    if dep.hasPrefix(expectedPrefix) && !seenIDs.contains(dep) {
+                    if dep.hasPrefix(expectedPrefix), !seenIDs.contains(dep) {
                         throw ManifestError.unresolvedDependency(
                             componentID: component.id,
                             dependency: dep
@@ -231,27 +231,27 @@ enum ManifestError: Error, Equatable, Sendable, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidEncoding:
-            return "Manifest file is not valid UTF-8"
-        case .unsupportedSchemaVersion(let version):
-            return "Unsupported schema version: \(version) (expected 1)"
-        case .invalidIdentifier(let id):
-            return "Invalid pack identifier '\(id)': must be non-empty, lowercase alphanumeric with hyphens"
-        case .componentIDPrefixViolation(let componentID, let expectedPrefix):
-            return "Component ID '\(componentID)' must start with '\(expectedPrefix)'"
-        case .duplicateComponentID(let id):
-            return "Duplicate component ID: '\(id)'"
-        case .templateSectionMismatch(let section, let pack):
-            return "Template section '\(section)' must be prefixed with '\(pack).' (e.g. '\(pack).main')"
-        case .duplicatePromptKey(let key):
-            return "Duplicate prompt key: '\(key)'"
-        case .invalidDoctorCheck(let name, let reason):
-            return "Invalid doctor check '\(name)': \(reason)"
-        case .dotInRawID(let id):
-            return "ID '\(id)' must not contain dots — use a short name and the pack prefix will be added automatically"
-        case .unresolvedDependency(let componentID, let dependency):
-            return "Component '\(componentID)' depends on '\(dependency)' which does not exist in the pack"
-        case .invalidHookEvent(let componentID, let hookEvent):
-            return "Component '\(componentID)' has unknown hookEvent '\(hookEvent)'"
+            "Manifest file is not valid UTF-8"
+        case let .unsupportedSchemaVersion(version):
+            "Unsupported schema version: \(version) (expected 1)"
+        case let .invalidIdentifier(id):
+            "Invalid pack identifier '\(id)': must be non-empty, lowercase alphanumeric with hyphens"
+        case let .componentIDPrefixViolation(componentID, expectedPrefix):
+            "Component ID '\(componentID)' must start with '\(expectedPrefix)'"
+        case let .duplicateComponentID(id):
+            "Duplicate component ID: '\(id)'"
+        case let .templateSectionMismatch(section, pack):
+            "Template section '\(section)' must be prefixed with '\(pack).' (e.g. '\(pack).main')"
+        case let .duplicatePromptKey(key):
+            "Duplicate prompt key: '\(key)'"
+        case let .invalidDoctorCheck(name, reason):
+            "Invalid doctor check '\(name)': \(reason)"
+        case let .dotInRawID(id):
+            "ID '\(id)' must not contain dots — use a short name and the pack prefix will be added automatically"
+        case let .unresolvedDependency(componentID, dependency):
+            "Component '\(componentID)' depends on '\(dependency)' which does not exist in the pack"
+        case let .invalidHookEvent(componentID, hookEvent):
+            "Component '\(componentID)' has unknown hookEvent '\(hookEvent)'"
         }
     }
 }
@@ -304,16 +304,16 @@ struct ExternalComponentDefinition: Codable, Sendable {
 
     /// Shorthand install-action keys that replace `type` + `installAction`.
     enum ShorthandKeys: String, CodingKey {
-        case brew          // String — brew package name
-        case mcp           // Map — MCPShorthand (name inferred from id)
-        case plugin        // String — plugin full name
-        case shell         // String — shell command (requires explicit `type`)
-        case hook          // Map — CopyFileShorthand (fileType: .hook)
-        case command       // Map — CopyFileShorthand (fileType: .command)
-        case skill         // Map — CopyFileShorthand (fileType: .skill)
-        case agent         // Map — CopyFileShorthand (fileType: .agent)
-        case settingsFile  // String — source path
-        case gitignore     // [String] — gitignore entries
+        case brew // String — brew package name
+        case mcp // Map — MCPShorthand (name inferred from id)
+        case plugin // String — plugin full name
+        case shell // String — shell command (requires explicit `type`)
+        case hook // Map — CopyFileShorthand (fileType: .hook)
+        case command // Map — CopyFileShorthand (fileType: .command)
+        case skill // Map — CopyFileShorthand (fileType: .skill)
+        case agent // Map — CopyFileShorthand (fileType: .agent)
+        case settingsFile // String — source path
+        case gitignore // [String] — gitignore entries
     }
 
     // MARK: Memberwise init
@@ -488,14 +488,14 @@ enum ExternalComponentType: String, Codable, Sendable {
     /// Convert to the internal `ComponentType`.
     var componentType: ComponentType {
         switch self {
-        case .mcpServer: return .mcpServer
-        case .plugin: return .plugin
-        case .skill: return .skill
-        case .hookFile: return .hookFile
-        case .command: return .command
-        case .agent: return .agent
-        case .brewPackage: return .brewPackage
-        case .configuration: return .configuration
+        case .mcpServer: .mcpServer
+        case .plugin: .plugin
+        case .skill: .skill
+        case .hookFile: .hookFile
+        case .command: .command
+        case .agent: .agent
+        case .brewPackage: .brewPackage
+        case .configuration: .configuration
         }
     }
 }
@@ -576,27 +576,27 @@ enum ExternalInstallAction: Codable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
-        case .mcpServer(let config):
+        case let .mcpServer(config):
             try container.encode(ExternalInstallActionType.mcpServer, forKey: .type)
             try config.encode(to: encoder)
-        case .plugin(let name):
+        case let .plugin(name):
             try container.encode(ExternalInstallActionType.plugin, forKey: .type)
             try container.encode(name, forKey: .name)
-        case .brewInstall(let package):
+        case let .brewInstall(package):
             try container.encode(ExternalInstallActionType.brewInstall, forKey: .type)
             try container.encode(package, forKey: .package)
-        case .shellCommand(let command):
+        case let .shellCommand(command):
             try container.encode(ExternalInstallActionType.shellCommand, forKey: .type)
             try container.encode(command, forKey: .command)
-        case .gitignoreEntries(let entries):
+        case let .gitignoreEntries(entries):
             try container.encode(ExternalInstallActionType.gitignoreEntries, forKey: .type)
             try container.encode(entries, forKey: .entries)
         case .settingsMerge:
             try container.encode(ExternalInstallActionType.settingsMerge, forKey: .type)
-        case .settingsFile(let source):
+        case let .settingsFile(source):
             try container.encode(ExternalInstallActionType.settingsFile, forKey: .type)
             try container.encode(source, forKey: .source)
-        case .copyPackFile(let config):
+        case let .copyPackFile(config):
             try container.encode(ExternalInstallActionType.copyPackFile, forKey: .type)
             try config.encode(to: encoder)
         }

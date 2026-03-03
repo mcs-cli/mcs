@@ -15,6 +15,7 @@ Bullet list of what changed. Focus on the "what" — the summary covers the "why
 ## Test plan
 
 - [ ] `swift test` passes locally
+- [ ] `swiftformat --lint .` and `swiftlint` pass without violations
 - [ ] Affected commands verified with a real pack (e.g. `mcs sync`, `mcs doctor`)
 
 <details>

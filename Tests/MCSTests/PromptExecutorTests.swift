@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("PromptExecutor")
 struct PromptExecutorTests {
@@ -169,17 +168,17 @@ struct PromptExecutorTests {
     @Test("detectPattern YAML string deserializes to single-element array")
     func detectPatternYAMLString() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            prompts:
-              - key: project
-                type: fileDetect
-                label: "Project"
-                detectPattern: "*.xcodeproj"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        prompts:
+          - key: project
+            type: fileDetect
+            label: "Project"
+            detectPattern: "*.xcodeproj"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -194,19 +193,19 @@ struct PromptExecutorTests {
     @Test("detectPattern YAML array deserializes to array")
     func detectPatternYAMLArray() throws {
         let yaml = """
-            schemaVersion: 1
-            identifier: test
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            prompts:
-              - key: project
-                type: fileDetect
-                label: "Project"
-                detectPattern:
-                  - "*.xcworkspace"
-                  - "*.xcodeproj"
-            """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        prompts:
+          - key: project
+            type: fileDetect
+            label: "Project"
+            detectPattern:
+              - "*.xcworkspace"
+              - "*.xcodeproj"
+        """
 
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }

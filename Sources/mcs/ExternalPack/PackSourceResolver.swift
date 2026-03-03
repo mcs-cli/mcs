@@ -14,9 +14,9 @@ enum PackSourceError: Error, Equatable, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidInput(let reason): return "Invalid input: \(reason)"
-        case .notADirectory(let path): return "Path is not a directory: \(path)"
-        case .pathNotFound(let path): return "Path does not exist: \(path)"
+        case let .invalidInput(reason): "Invalid input: \(reason)"
+        case let .notADirectory(path): "Path is not a directory: \(path)"
+        case let .pathNotFound(path): "Path does not exist: \(path)"
         }
     }
 }
@@ -49,15 +49,14 @@ struct PackSourceResolver {
         // 2. Filesystem path — check if input resolves to an existing directory.
         //    file:// is parsed via Foundation URL for correct RFC 8089 handling
         //    (e.g. file://localhost/path), with fallback to simple prefix stripping.
-        let pathString: String
-        if input.hasPrefix("file://") {
+        let pathString: String = if input.hasPrefix("file://") {
             if let fileURL = URL(string: input), fileURL.isFileURL, !fileURL.path.isEmpty {
-                pathString = fileURL.path
+                fileURL.path
             } else {
-                pathString = String(input.dropFirst("file://".count))
+                String(input.dropFirst("file://".count))
             }
         } else {
-            pathString = input
+            input
         }
 
         // expandingTildeInPath handles ~/... and is a no-op for other paths.

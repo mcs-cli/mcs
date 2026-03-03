@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("TemplateEngine")
 struct TemplateEngineTests {
@@ -34,12 +33,12 @@ struct TemplateEngineTests {
     @Test("Strip <!-- EDIT: ... --> comment lines")
     func stripEditComments() {
         let template = """
-            # Title
-            <!-- EDIT: Change the title above -->
-            Some content
-            <!-- EDIT: Update content -->
-            Footer
-            """
+        # Title
+        <!-- EDIT: Change the title above -->
+        Some content
+        <!-- EDIT: Update content -->
+        Footer
+        """
         let result = TemplateEngine.substitute(template: template, values: [:])
         #expect(!result.contains("<!-- EDIT:"))
         #expect(result.contains("# Title"))

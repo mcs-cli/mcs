@@ -30,7 +30,7 @@ func ensureClaudeCLI(
 
     output.dimmed("Installing Claude Code...")
     let result = brew.install("claude-code")
-    if result.succeeded && shell.commandExists(Constants.CLI.claudeCommand) {
+    if result.succeeded, shell.commandExists(Constants.CLI.claudeCommand) {
         output.success("Claude Code installed")
         return true
     }

@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("TechPackRegistry")
 struct TechPackRegistryTests {
@@ -113,7 +112,6 @@ struct TechPackRegistryTests {
         #expect(!checks.isEmpty)
         #expect(checks.first?.name == "test-check")
     }
-
 }
 
 // MARK: - Test Helper
@@ -138,5 +136,5 @@ private struct FakeTechPack: TechPack {
         self.supplementaryDoctorChecks = supplementaryDoctorChecks
     }
 
-    func configureProject(at path: URL, context: ProjectConfigContext) throws {}
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 }

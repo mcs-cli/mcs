@@ -13,10 +13,10 @@ struct PromptExecutor: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .noFilesDetected(let pattern):
-                return "No files matching '\(pattern)' were found"
-            case .scriptFailed(let key, let stderr):
-                return "Script for prompt '\(key)' failed: \(stderr)"
+            case let .noFilesDetected(pattern):
+                "No files matching '\(pattern)' were found"
+            case let .scriptFailed(key, stderr):
+                "Script for prompt '\(key)' failed: \(stderr)"
             }
         }
     }
@@ -35,13 +35,13 @@ struct PromptExecutor: Sendable {
     ) throws -> String {
         switch prompt.type {
         case .fileDetect:
-            return try executeFileDetect(prompt: prompt, projectPath: projectPath)
+            try executeFileDetect(prompt: prompt, projectPath: projectPath)
         case .input:
-            return executeInput(prompt: prompt)
+            executeInput(prompt: prompt)
         case .select:
-            return executeSelect(prompt: prompt)
+            executeSelect(prompt: prompt)
         case .script:
-            return try executeScript(prompt: prompt, packPath: packPath, projectPath: projectPath)
+            try executeScript(prompt: prompt, packPath: packPath, projectPath: projectPath)
         }
     }
 
@@ -112,10 +112,9 @@ struct PromptExecutor: Sendable {
         var seen = Set<String>()
         var result: [String] = []
         for pattern in patterns {
-            for file in detectFiles(matching: pattern, in: directory) {
-                if seen.insert(file).inserted {
-                    result.append(file)
-                }
+            for file in detectFiles(matching: pattern, in: directory)
+                where seen.insert(file).inserted {
+                result.append(file)
             }
         }
         return result
@@ -193,8 +192,8 @@ struct PromptExecutor: Sendable {
     /// Run a script that outputs the resolved value to stdout.
     private func executeScript(
         prompt: ExternalPromptDefinition,
-        packPath: URL,
-        projectPath: URL
+        packPath _: URL,
+        projectPath _: URL
     ) throws -> String {
         if let scriptCommand = prompt.scriptCommand {
             // Run as a shell command

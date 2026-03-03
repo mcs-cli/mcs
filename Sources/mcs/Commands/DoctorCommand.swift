@@ -19,7 +19,9 @@ struct DoctorCommand: LockedCommand {
     @Flag(name: .long, help: "Check globally-configured packs only")
     var global = false
 
-    var skipLock: Bool { !fix }
+    var skipLock: Bool {
+        !fix
+    }
 
     func perform() throws {
         let env = Environment()

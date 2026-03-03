@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - Check implementations
+
 //
 // ## fix() Responsibility Boundaries
 //
@@ -68,14 +69,12 @@ struct MCPServerCheck: DoctorCheck, Sendable {
            let projects = json[Constants.JSONKeys.projects] as? [String: Any],
            let projectEntry = projects[root.path] as? [String: Any],
            let projectMCP = projectEntry[Constants.JSONKeys.mcpServers] as? [String: Any],
-           projectMCP[serverName] != nil
-        {
+           projectMCP[serverName] != nil {
             return .pass("registered")
         }
         // Fall back to global/user-scoped servers
         if let mcpServers = json[Constants.JSONKeys.mcpServers] as? [String: Any],
-           mcpServers[serverName] != nil
-        {
+           mcpServers[serverName] != nil {
             return .pass("registered")
         }
         return .fail("not registered")
@@ -88,8 +87,13 @@ struct MCPServerCheck: DoctorCheck, Sendable {
 
 struct PluginCheck: DoctorCheck, Sendable {
     let pluginRef: PluginRef
-    var name: String { pluginRef.bareName }
-    var section: String { "Plugins" }
+    var name: String {
+        pluginRef.bareName
+    }
+
+    var section: String {
+        "Plugins"
+    }
 
     func check() -> CheckResult {
         let settingsURL = Environment().claudeSettings
@@ -145,8 +149,13 @@ struct HookCheck: DoctorCheck, Sendable {
     let hookName: String
     var isOptional: Bool = false
 
-    var name: String { hookName }
-    var section: String { "Hooks" }
+    var name: String {
+        hookName
+    }
+
+    var section: String {
+        "Hooks"
+    }
 
     func check() -> CheckResult {
         let hookPath = Environment().hooksDirectory.appendingPathComponent(hookName)
@@ -184,8 +193,13 @@ struct HookCheck: DoctorCheck, Sendable {
 }
 
 struct GitignoreCheck: DoctorCheck, Sendable {
-    var name: String { "Global gitignore" }
-    var section: String { "Gitignore" }
+    var name: String {
+        "Global gitignore"
+    }
+
+    var section: String {
+        "Gitignore"
+    }
 
     func check() -> CheckResult {
         let shell = ShellRunner(environment: Environment())
@@ -198,10 +212,8 @@ struct GitignoreCheck: DoctorCheck, Sendable {
         }
         let allEntries = GitignoreManager.coreEntries
         var missing: [String] = []
-        for entry in allEntries {
-            if !content.contains(entry) {
-                missing.append(entry)
-            }
+        for entry in allEntries where !content.contains(entry) {
+            missing.append(entry)
         }
         if missing.isEmpty {
             return .pass("all entries present")
@@ -222,8 +234,13 @@ struct GitignoreCheck: DoctorCheck, Sendable {
 }
 
 struct ProjectIndexCheck: DoctorCheck, Sendable {
-    var name: String { "Project index" }
-    var section: String { "Project" }
+    var name: String {
+        "Project index"
+    }
+
+    var section: String {
+        "Project"
+    }
 
     func check() -> CheckResult {
         let env = Environment()
@@ -305,4 +322,3 @@ struct CommandFileCheck: DoctorCheck, Sendable {
         .notFixable("Run 'mcs sync' to install and fill placeholders")
     }
 }
-

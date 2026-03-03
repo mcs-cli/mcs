@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("ExternalPackLoader")
 struct ExternalPackLoaderTests {
@@ -19,11 +18,11 @@ struct ExternalPackLoaderTests {
         minMCSVersion: String? = nil
     ) -> String {
         var yaml = """
-            schemaVersion: 1
-            identifier: \(identifier)
-            displayName: Test Pack
-            description: A test pack
-            """
+        schemaVersion: 1
+        identifier: \(identifier)
+        displayName: Test Pack
+        description: A test pack
+        """
         if let minVer = minMCSVersion {
             yaml += "\nminMCSVersion: \"\(minVer)\""
         }
@@ -140,12 +139,12 @@ struct ExternalPackLoaderTests {
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
         let yaml = """
-            schemaVersion: 99
-            identifier: test-pack
-            displayName: Test
-            description: Test
-            version: "1.0.0"
-            """
+        schemaVersion: 99
+        identifier: test-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        """
         let manifestURL = packDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: manifestURL, atomically: true, encoding: .utf8)
 
@@ -364,12 +363,12 @@ struct ExternalPackLoaderTests {
         let invalidDir = env.packsDirectory.appendingPathComponent("invalid-pack")
         try FileManager.default.createDirectory(at: invalidDir, withIntermediateDirectories: true)
         let badYAML = """
-            schemaVersion: 99
-            identifier: invalid-pack
-            displayName: Invalid
-            description: Bad
-            version: "1.0.0"
-            """
+        schemaVersion: 99
+        identifier: invalid-pack
+        displayName: Invalid
+        description: Bad
+        version: "1.0.0"
+        """
         try badYAML.write(
             to: invalidDir.appendingPathComponent("techpack.yaml"),
             atomically: true,

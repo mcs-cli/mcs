@@ -55,7 +55,7 @@ struct GitignoreManager: Sendable {
 
         if !lines.contains(entry) {
             var updated = content
-            if !updated.isEmpty && !updated.hasSuffix("\n") {
+            if !updated.isEmpty, !updated.hasSuffix("\n") {
                 updated += "\n"
             }
             updated += entry + "\n"

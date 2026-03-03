@@ -26,10 +26,6 @@ struct ProjectIndex: Sendable {
         var projects: [ProjectEntry] = []
     }
 
-    init(path: URL) {
-        self.path = path
-    }
-
     // MARK: - Load / Save
 
     /// Load from disk. Returns empty index if the file doesn't exist.

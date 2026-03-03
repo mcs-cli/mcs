@@ -39,10 +39,9 @@ struct Backup {
         }
 
         var backups: [URL] = []
-        for case let url as URL in enumerator {
-            if url.lastPathComponent.contains(".backup.") {
-                backups.append(url)
-            }
+        for case let url as URL in enumerator
+            where url.lastPathComponent.contains(".backup.") {
+            backups.append(url)
         }
         return backups
     }

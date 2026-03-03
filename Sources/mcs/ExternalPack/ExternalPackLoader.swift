@@ -18,16 +18,16 @@ struct ExternalPackLoader: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .manifestNotFound(let path):
-                return "techpack.yaml not found at '\(path)'"
-            case .invalidManifest(let id, let reason):
-                return "Invalid manifest for pack '\(id)': \(reason)"
-            case .incompatibleVersion(let pack, let required, let current):
-                return "Pack '\(pack)' requires mcs >= \(required), current is \(current)"
-            case .localCheckoutMissing(let id, let path):
-                return "Pack '\(id)' checkout missing at '\(path)'"
-            case .referencedFilesMissing(let id, let files):
-                return "Pack '\(id)' references missing files: \(files.joined(separator: ", "))"
+            case let .manifestNotFound(path):
+                "techpack.yaml not found at '\(path)'"
+            case let .invalidManifest(id, reason):
+                "Invalid manifest for pack '\(id)': \(reason)"
+            case let .incompatibleVersion(pack, required, current):
+                "Pack '\(pack)' requires mcs >= \(required), current is \(current)"
+            case let .localCheckoutMissing(id, path):
+                "Pack '\(id)' checkout missing at '\(path)'"
+            case let .referencedFilesMissing(id, files):
+                "Pack '\(id)' references missing files: \(files.joined(separator: ", "))"
             }
         }
     }
@@ -42,7 +42,9 @@ struct ExternalPackLoader: Sendable {
         do {
             registryData = try registry.load()
         } catch {
-            output.error("Could not read pack registry at '\(registry.path.path)': \(error.localizedDescription)\n  Fix: rm '\(registry.path.path)' and re-add packs")
+            let registryPath = registry.path.path
+            let message = "Could not read pack registry at '\(registryPath)': \(error.localizedDescription)"
+            output.error("\(message)\n  Fix: rm '\(registryPath)' and re-add packs")
             return []
         }
 
@@ -65,7 +67,7 @@ struct ExternalPackLoader: Sendable {
     }
 
     /// Load a single pack by identifier.
-    func load(identifier: String, output: CLIOutput) throws -> ExternalPackAdapter {
+    func load(identifier: String, output _: CLIOutput) throws -> ExternalPackAdapter {
         let registryData = try registry.load()
 
         guard let entry = registry.pack(identifier: identifier, in: registryData) else {
@@ -143,7 +145,7 @@ struct ExternalPackLoader: Sendable {
 
     /// Check if a load error is a trust verification failure.
     private func isTrustFailure(_ error: LoadError) -> Bool {
-        if case .invalidManifest(_, let reason) = error {
+        if case let .invalidManifest(_, reason) = error {
             return reason.contains("Trusted scripts modified")
         }
         return false
@@ -180,7 +182,8 @@ struct ExternalPackLoader: Sendable {
             if !modified.isEmpty {
                 throw LoadError.invalidManifest(
                     identifier: entry.identifier,
-                    reason: "Trusted scripts modified: \(modified.joined(separator: ", ")). Run 'mcs pack update \(entry.identifier)' to re-trust."
+                    reason:
+                    "Trusted scripts modified: \(modified.joined(separator: ", ")). Run 'mcs pack update \(entry.identifier)' to re-trust."
                 )
             }
         }
@@ -226,7 +229,7 @@ struct ExternalPackLoader: Sendable {
         // Copy pack file sources
         if let components = manifest.components {
             for component in components {
-                if case .copyPackFile(let config) = component.installAction {
+                if case let .copyPackFile(config) = component.installAction {
                     let file = packPath.appendingPathComponent(config.source)
                     if !fm.fileExists(atPath: file.path) {
                         missing.append(config.source)
@@ -248,8 +251,9 @@ enum VersionCompare {
     /// Both must be in `major.minor.patch` format.
     static func isCompatible(current: String, required: String) -> Bool {
         guard let currentParts = parse(current),
-              let requiredParts = parse(required) else {
-            return false  // Unparseable versions are incompatible
+              let requiredParts = parse(required)
+        else {
+            return false // Unparseable versions are incompatible
         }
 
         if currentParts.major != requiredParts.major {

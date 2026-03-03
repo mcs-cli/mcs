@@ -100,12 +100,12 @@ enum ExportError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .outputDirectoryExists(let path):
-            return "Output directory already exists: \(path). Remove it first or choose a different path."
+        case let .outputDirectoryExists(path):
+            "Output directory already exists: \(path). Remove it first or choose a different path."
         case .noConfigurationFound:
-            return "No Claude Code configuration found to export."
+            "No Claude Code configuration found to export."
         case .noProjectFound:
-            return "No project root found. Run from a project directory or use --global."
+            "No project root found. Run from a project directory or use --global."
         }
     }
 }

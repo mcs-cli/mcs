@@ -1,11 +1,9 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("DerivedDoctorChecks")
 struct DerivedDoctorCheckTests {
-
     /// Builds a ComponentDefinition with sensible defaults for testing.
     private func makeComponent(
         id: String = "test",
@@ -111,7 +109,7 @@ struct DerivedDoctorCheckTests {
     // MARK: - copyPackFile derivation
 
     @Test("copyPackFile without projectRoot derives FileExistsCheck with global path and no fallback")
-    func copyPackFileGlobalPath() {
+    func copyPackFileGlobalPath() throws {
         let component = makeComponent(
             displayName: "MySkill",
             installAction: .copyPackFile(
@@ -122,12 +120,12 @@ struct DerivedDoctorCheckTests {
         )
         let fileCheck = component.deriveDoctorCheck() as? FileExistsCheck
         #expect(fileCheck != nil)
-        #expect(fileCheck!.path.path.hasSuffix("/.claude/skills/my-skill.md"))
-        #expect(fileCheck!.fallbackPath == nil)
+        #expect(try #require(fileCheck?.path.path.hasSuffix("/.claude/skills/my-skill.md")))
+        #expect(fileCheck?.fallbackPath == nil)
     }
 
     @Test("copyPackFile with projectRoot derives FileExistsCheck with project path and global fallback")
-    func copyPackFileProjectPath() {
+    func copyPackFileProjectPath() throws {
         let projectRoot = URL(fileURLWithPath: "/tmp/my-project")
         let component = makeComponent(
             displayName: "MySkill",
@@ -139,10 +137,10 @@ struct DerivedDoctorCheckTests {
         )
         let fileCheck = component.deriveDoctorCheck(projectRoot: projectRoot) as? FileExistsCheck
         #expect(fileCheck != nil)
-        #expect(fileCheck!.path.path == "/tmp/my-project/.claude/skills/my-skill.md")
-        #expect(fileCheck!.fallbackPath != nil)
-        #expect(fileCheck!.fallbackPath!.path.hasSuffix("/.claude/skills/my-skill.md"))
-        #expect(!fileCheck!.fallbackPath!.path.contains("/my-project/"))
+        #expect(fileCheck?.path.path == "/tmp/my-project/.claude/skills/my-skill.md")
+        #expect(try #require(fileCheck?.fallbackPath) != nil)
+        #expect(try #require(fileCheck?.fallbackPath?.path.hasSuffix("/.claude/skills/my-skill.md")))
+        #expect(try !#require(fileCheck?.fallbackPath?.path.contains("/my-project/")))
     }
 
     @Test("copyPackFile projectRoot resolves correctly for all CopyFileType variants")
@@ -183,7 +181,7 @@ struct DerivedDoctorCheckTests {
             name: "test", section: "Skills", path: file,
             fallbackPath: URL(fileURLWithPath: "/nonexistent/fallback.md")
         )
-        if case .pass(let msg) = check.check() {
+        if case let .pass(msg) = check.check() {
             #expect(msg == "present")
         } else {
             Issue.record("Expected pass")
@@ -203,7 +201,7 @@ struct DerivedDoctorCheckTests {
             path: URL(fileURLWithPath: "/nonexistent/project.md"),
             fallbackPath: globalFile
         )
-        if case .pass(let msg) = check.check() {
+        if case let .pass(msg) = check.check() {
             #expect(msg == "present (global)")
         } else {
             Issue.record("Expected pass with global fallback")
@@ -237,7 +235,7 @@ struct DerivedDoctorCheckTests {
         )
         let mcpCheck = component.deriveDoctorCheck(projectRoot: projectRoot) as? MCPServerCheck
         #expect(mcpCheck != nil)
-        #expect(mcpCheck!.projectRoot?.path == "/tmp/my-project")
+        #expect(mcpCheck?.projectRoot?.path == "/tmp/my-project")
     }
 
     @Test("mcpServer action without projectRoot has nil projectRoot")
@@ -280,7 +278,6 @@ struct DerivedDoctorCheckTests {
         #expect(checks.count == 1)
         #expect(checks.first?.name == "brew")
     }
-
 }
 
 // MARK: - FileHasher directory hashing

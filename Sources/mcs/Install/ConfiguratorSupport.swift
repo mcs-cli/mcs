@@ -44,7 +44,7 @@ enum ConfiguratorSupport {
 
         output.header(header)
 
-        if removals.isEmpty && additions.isEmpty && updates.isEmpty && packs.isEmpty {
+        if removals.isEmpty, additions.isEmpty, updates.isEmpty, packs.isEmpty {
             output.plain("")
             output.info("No packs selected. Nothing would change.")
             output.plain("")
@@ -136,7 +136,7 @@ enum ConfiguratorSupport {
 
             var excluded = Set<String>()
             for (index, component) in components.enumerated() {
-                if !selectedNumbers.contains(index + 1) && !component.isRequired {
+                if !selectedNumbers.contains(index + 1), !component.isRequired {
                     excluded.insert(component.id)
                 }
             }
@@ -195,14 +195,14 @@ enum ConfiguratorSupport {
 
                 if component.type == .hookFile,
                    let hookEvent = component.hookEvent,
-                   case .copyPackFile(_, let destination, .hook) = component.installAction {
+                   case let .copyPackFile(_, destination, .hook) = component.installAction {
                     let command = "\(hookCommandPrefix)\(destination)"
                     if settings.addHookEntry(event: hookEvent, command: command) {
                         hasContent = true
                     }
                 }
 
-                if case .plugin(let name) = component.installAction {
+                if case let .plugin(name) = component.installAction {
                     let ref = PluginRef(name)
                     var plugins = settings.enabledPlugins ?? [:]
                     if plugins[ref.bareName] == nil {
@@ -213,7 +213,7 @@ enum ConfiguratorSupport {
                     contributedKeys[pack.identifier, default: []].append("enabledPlugins.\(ref.bareName)")
                 }
 
-                if case .settingsMerge(let source) = component.installAction, let source {
+                if case let .settingsMerge(source) = component.installAction, let source {
                     do {
                         let packSettings = try Settings.load(from: source, substituting: resolvedValues)
                         if !packSettings.extraJSON.isEmpty {
@@ -222,7 +222,9 @@ enum ConfiguratorSupport {
                         settings.merge(with: packSettings)
                         hasContent = true
                     } catch {
-                        output.warn("Could not load settings from \(pack.displayName)/\(source.lastPathComponent): \(error.localizedDescription)")
+                        output.warn(
+                            "Could not load settings from \(pack.displayName)/\(source.lastPathComponent): \(error.localizedDescription)"
+                        )
                     }
                 }
             }
@@ -327,15 +329,15 @@ enum ConfiguratorSupport {
         for pack in packs {
             for component in pack.components {
                 switch component.installAction {
-                case .copyPackFile(let source, _, _):
+                case let .copyPackFile(source, _, _):
                     findPlaceholdersInSource(source).forEach(collectUndeclared)
 
-                case .settingsMerge(let source):
+                case let .settingsMerge(source):
                     if let source {
                         findPlaceholdersInSource(source).forEach(collectUndeclared)
                     }
 
-                case .mcpServer(let config):
+                case let .mcpServer(config):
                     for text in config.env.values {
                         TemplateEngine.findUnreplacedPlaceholders(in: text).forEach(collectUndeclared)
                     }

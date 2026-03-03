@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("TemplateComposer")
 struct TemplateComposerTests {
@@ -69,14 +68,14 @@ struct TemplateComposerTests {
     @Test("Parse sections from composed file")
     func parseSections() {
         let content = """
-            <!-- mcs:begin ios -->
-            iOS stuff
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios -->
+        iOS stuff
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web -->
-            Web stuff
-            <!-- mcs:end web -->
-            """
+        <!-- mcs:begin web -->
+        Web stuff
+        <!-- mcs:end web -->
+        """
 
         let sections = TemplateComposer.parseSections(from: content)
 
@@ -90,10 +89,10 @@ struct TemplateComposerTests {
     @Test("Parse sections handles legacy markers with version token")
     func parseSectionsLegacyFormat() {
         let content = """
-            <!-- mcs:begin ios v3.2.1 -->
-            Content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v3.2.1 -->
+        Content
+        <!-- mcs:end ios -->
+        """
         let sections = TemplateComposer.parseSections(from: content)
         #expect(sections.count == 1)
         #expect(sections[0].identifier == "ios")
@@ -105,12 +104,12 @@ struct TemplateComposerTests {
     @Test("Extract user content outside markers")
     func extractUserContent() {
         let content = """
-            User notes at top
-            <!-- mcs:begin ios v1.0.0 -->
-            Managed content
-            <!-- mcs:end ios -->
-            User notes at bottom
-            """
+        User notes at top
+        <!-- mcs:begin ios v1.0.0 -->
+        Managed content
+        <!-- mcs:end ios -->
+        User notes at bottom
+        """
 
         let userContent = TemplateComposer.extractUserContent(from: content)
 
@@ -138,14 +137,14 @@ struct TemplateComposerTests {
     @Test("Replace specific section preserving others")
     func replaceSection() {
         let original = """
-            <!-- mcs:begin ios v1.0.0 -->
-            Old iOS
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios v1.0.0 -->
+        Old iOS
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web v1.0.0 -->
-            Old Web
-            <!-- mcs:end web -->
-            """
+        <!-- mcs:begin web v1.0.0 -->
+        Old Web
+        <!-- mcs:end web -->
+        """
 
         let result = TemplateComposer.replaceSection(
             in: original,
@@ -166,10 +165,10 @@ struct TemplateComposerTests {
     @Test("Replace appends section if not found")
     func replaceSectionAppends() {
         let original = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
+        """
 
         let result = TemplateComposer.replaceSection(
             in: original,
@@ -189,9 +188,9 @@ struct TemplateComposerTests {
     @Test("Detect unpaired begin marker with missing end marker")
     func unpairedBeginMarker() {
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS stuff
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS stuff
+        """
         let unpaired = TemplateComposer.unpairedSections(in: content)
         #expect(unpaired == ["ios"])
     }
@@ -199,10 +198,10 @@ struct TemplateComposerTests {
     @Test("No unpaired markers in well-formed content")
     func noPairedMarkers() {
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS stuff
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS stuff
+        <!-- mcs:end ios -->
+        """
         let unpaired = TemplateComposer.unpairedSections(in: content)
         #expect(unpaired.isEmpty)
     }
@@ -210,10 +209,10 @@ struct TemplateComposerTests {
     @Test("replaceSection preserves content when target section has unpaired marker")
     func replaceSectionUnpairedSafety() {
         let original = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS stuff
-            User content below
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS stuff
+        User content below
+        """
         let result = TemplateComposer.replaceSection(
             in: original,
             sectionIdentifier: "ios",
@@ -226,12 +225,12 @@ struct TemplateComposerTests {
     @Test("replaceSection works normally when a different section is unpaired")
     func replaceSectionOtherUnpaired() {
         let original = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS stuff
-            <!-- mcs:end ios -->
-            <!-- mcs:begin web v1.0.0 -->
-            Web stuff without end marker
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS stuff
+        <!-- mcs:end ios -->
+        <!-- mcs:begin web v1.0.0 -->
+        Web stuff without end marker
+        """
         let result = TemplateComposer.replaceSection(
             in: original,
             sectionIdentifier: "ios",
@@ -249,18 +248,18 @@ struct TemplateComposerTests {
     @Test("Remove a section from composed content")
     func removeSection() {
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web v1.0.0 -->
-            Web content
-            <!-- mcs:end web -->
+        <!-- mcs:begin web v1.0.0 -->
+        Web content
+        <!-- mcs:end web -->
 
-            <!-- mcs:begin android v1.0.0 -->
-            Android content
-            <!-- mcs:end android -->
-            """
+        <!-- mcs:begin android v1.0.0 -->
+        Android content
+        <!-- mcs:end android -->
+        """
 
         let result = TemplateComposer.removeSection(
             in: content,
@@ -278,10 +277,10 @@ struct TemplateComposerTests {
     @Test("Remove nonexistent section returns original")
     func removeSectionNotFound() {
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
+        """
 
         let result = TemplateComposer.removeSection(
             in: content,
@@ -294,10 +293,10 @@ struct TemplateComposerTests {
     @Test("Remove last section returns clean content")
     func removeLastSection() {
         let content = """
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
-            """
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
+        """
 
         let result = TemplateComposer.removeSection(
             in: content,
@@ -310,16 +309,16 @@ struct TemplateComposerTests {
     @Test("Remove section preserves user content outside markers")
     func removeSectionPreservesUserContent() {
         let content = """
-            User notes at top
-            <!-- mcs:begin ios v1.0.0 -->
-            iOS content
-            <!-- mcs:end ios -->
+        User notes at top
+        <!-- mcs:begin ios v1.0.0 -->
+        iOS content
+        <!-- mcs:end ios -->
 
-            <!-- mcs:begin web v1.0.0 -->
-            Web content
-            <!-- mcs:end web -->
-            User notes at bottom
-            """
+        <!-- mcs:begin web v1.0.0 -->
+        Web content
+        <!-- mcs:end web -->
+        User notes at bottom
+        """
 
         let result = TemplateComposer.removeSection(
             in: content,

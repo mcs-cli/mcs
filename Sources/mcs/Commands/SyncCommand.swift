@@ -31,7 +31,9 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .long, help: "Install to global scope (MCP servers with user scope, files to ~/.claude/)")
     var global = false
 
-    var skipLock: Bool { dryRun }
+    var skipLock: Bool {
+        dryRun
+    }
 
     func perform() throws {
         let env = Environment()
@@ -109,11 +111,10 @@ struct SyncCommand: LockedCommand {
         shell: ShellRunner,
         registry: TechPackRegistry
     ) throws {
-        let projectPath: URL
-        if let p = path {
-            projectPath = URL(fileURLWithPath: p)
+        let projectPath = if let p = path {
+            URL(fileURLWithPath: p)
         } else {
-            projectPath = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         }
 
         guard FileManager.default.fileExists(atPath: projectPath.path) else {

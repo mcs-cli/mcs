@@ -59,14 +59,20 @@ protocol TechPack: Sendable {
 }
 
 extension TechPack {
-    // NOTE: This default calls `try? templates` which performs disk I/O and silently
-    // drops errors. Concrete conformers with throwing `templates` should override this
-    // with a lightweight implementation (e.g., ExternalPackAdapter reads from manifest).
+    /// NOTE: This default calls `try? templates` which performs disk I/O and silently
+    /// drops errors. Concrete conformers with throwing `templates` should override this
+    /// with a lightweight implementation (e.g., ExternalPackAdapter reads from manifest).
     var templateSectionIdentifiers: [String] {
         (try? templates)?.map(\.sectionIdentifier) ?? []
     }
-    func templateValues(context: ProjectConfigContext) -> [String: String] { [:] }
-    func declaredPrompts(context: ProjectConfigContext) -> [ExternalPromptDefinition] { [] }
+
+    func templateValues(context _: ProjectConfigContext) -> [String: String] {
+        [:]
+    }
+
+    func declaredPrompts(context _: ProjectConfigContext) -> [ExternalPromptDefinition] {
+        []
+    }
 }
 
 /// Protocol for doctor checks (used by both core and packs)
@@ -82,7 +88,9 @@ protocol DoctorCheck: Sendable {
 }
 
 extension DoctorCheck {
-    var fixCommandPreview: String? { nil }
+    var fixCommandPreview: String? {
+        nil
+    }
 }
 
 enum CheckResult: Sendable {
@@ -93,8 +101,8 @@ enum CheckResult: Sendable {
 
     var isFailOrWarn: Bool {
         switch self {
-        case .fail, .warn: return true
-        case .pass, .skip: return false
+        case .fail, .warn: true
+        case .pass, .skip: false
         }
     }
 }
@@ -104,4 +112,3 @@ enum FixResult: Sendable {
     case failed(String)
     case notFixable(String)
 }
-

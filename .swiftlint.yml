@@ -1,0 +1,27 @@
+excluded:
+  - .build
+  - .swiftpm
+  - Tests
+
+disabled_rules:
+  - trailing_comma # SwiftFormat owns this rule (trailingCommas: always)
+  - identifier_name
+  - cyclomatic_complexity # TODO: Re-enable after refactoring (see GitHub issue)
+  - type_body_length # TODO: Re-enable after refactoring (see GitHub issue)
+  - file_length # TODO: Re-enable after refactoring (see GitHub issue)
+
+line_length:
+  warning: 140
+  error: 200
+
+function_body_length:
+  warning: 150
+  error: 200
+
+function_parameter_count:
+  warning: 8
+  error: 10
+
+large_tuple:
+  warning: 4
+  error: 6

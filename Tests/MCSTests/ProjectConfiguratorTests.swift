@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 // MARK: - Dry Run Tests
 
@@ -190,9 +189,9 @@ struct PackSettingsMergeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         // Create a pack settings file
-        let packSettings = Settings(extraJSON: [
-            "env": try JSONSerialization.data(withJSONObject: ["MY_KEY": "my_value"]),
-            "alwaysThinkingEnabled": try JSONSerialization.data(
+        let packSettings = try Settings(extraJSON: [
+            "env": JSONSerialization.data(withJSONObject: ["MY_KEY": "my_value"]),
+            "alwaysThinkingEnabled": JSONSerialization.data(
                 withJSONObject: true, options: .fragmentsAllowed
             ),
         ])
@@ -230,7 +229,8 @@ struct PackSettingsMergeTests {
 
         // Check settings.local.json was created with merged settings
         let result = try Settings.load(from: settingsPath)
-        let env = try JSONSerialization.jsonObject(with: result.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(result.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["MY_KEY"] == "my_value")
         #expect(result.extraJSON["alwaysThinkingEnabled"] != nil)
     }
@@ -241,18 +241,18 @@ struct PackSettingsMergeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         // Pack A settings
-        let settingsA = Settings(extraJSON: [
-            "env": try JSONSerialization.data(withJSONObject: ["KEY_A": "value_a"]),
+        let settingsA = try Settings(extraJSON: [
+            "env": JSONSerialization.data(withJSONObject: ["KEY_A": "value_a"]),
         ])
         let urlA = try writeSettingsFile(
             in: tmpDir, name: "settings-a.json", settings: settingsA
         )
 
         // Pack B settings
-        let settingsB = Settings(
+        let settingsB = try Settings(
             enabledPlugins: ["my-plugin": true],
             extraJSON: [
-                "env": try JSONSerialization.data(withJSONObject: ["KEY_B": "value_b"]),
+                "env": JSONSerialization.data(withJSONObject: ["KEY_B": "value_b"]),
             ]
         )
         let urlB = try writeSettingsFile(
@@ -296,7 +296,8 @@ struct PackSettingsMergeTests {
 
         let settingsPath = claudeDir.appendingPathComponent("settings.local.json")
         let result = try Settings.load(from: settingsPath)
-        let env = try JSONSerialization.jsonObject(with: result.extraJSON["env"]!) as! [String: String]
+        let envData = try #require(result.extraJSON["env"])
+        let env = try #require(JSONSerialization.jsonObject(with: envData) as? [String: String])
         #expect(env["KEY_A"] == "value_a")
         #expect(env["KEY_B"] == "value_b")
         #expect(result.enabledPlugins?["my-plugin"] == true)
@@ -308,8 +309,8 @@ struct PackSettingsMergeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         // Pack settings
-        let packSettings = Settings(extraJSON: [
-            "env": try JSONSerialization.data(withJSONObject: ["PACK_KEY": "pack_value"]),
+        let packSettings = try Settings(extraJSON: [
+            "env": JSONSerialization.data(withJSONObject: ["PACK_KEY": "pack_value"]),
         ])
         let settingsURL = try writeSettingsFile(
             in: tmpDir, name: "pack-settings.json", settings: packSettings
@@ -723,8 +724,8 @@ struct AutoDerivedSettingsTests {
                         type: "command",
                         command: "bash ~/.claude/hooks/session_start.sh"
                     )]
-                )
-            ]
+                ),
+            ],
         ]
         let settingsURL = tmpDir.appendingPathComponent("pack-settings.json")
         try packSettings.save(to: settingsURL)
@@ -803,7 +804,6 @@ struct AutoDerivedSettingsTests {
 
 @Suite("Configurator — excludedComponents (project scope)")
 struct ConfiguratorExcludedComponentsTests {
-
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mcs-exclude-test-\(UUID().uuidString)")
@@ -984,7 +984,7 @@ private struct MockTechPack: TechPack {
         self.supplementaryDoctorChecks = supplementaryDoctorChecks
     }
 
-    func configureProject(at path: URL, context: ProjectConfigContext) throws {}
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 }
 
 // MARK: - parseRepoName Tests

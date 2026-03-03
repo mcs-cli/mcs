@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("FileLock")
 struct FileLockTests {
@@ -34,7 +33,7 @@ struct FileLockTests {
         let lockFile = tmpDir.appendingPathComponent("lock")
         #expect(!FileManager.default.fileExists(atPath: lockFile.path))
 
-        try withFileLock(at: lockFile) { }
+        try withFileLock(at: lockFile) {}
 
         #expect(FileManager.default.fileExists(atPath: lockFile.path))
     }
@@ -49,7 +48,7 @@ struct FileLockTests {
             .appendingPathComponent("dir")
             .appendingPathComponent("lock")
 
-        try withFileLock(at: lockFile) { }
+        try withFileLock(at: lockFile) {}
 
         #expect(FileManager.default.fileExists(atPath: lockFile.path))
     }
@@ -75,10 +74,10 @@ struct FileLockTests {
 
         let lockFile = tmpDir.appendingPathComponent("lock")
 
-        try withFileLock(at: lockFile) { }
+        try withFileLock(at: lockFile) {}
 
         // Second acquisition should succeed (lock was released)
-        try withFileLock(at: lockFile) { }
+        try withFileLock(at: lockFile) {}
     }
 
     @Test("withFileLock releases lock after body throws")
@@ -97,7 +96,7 @@ struct FileLockTests {
         }
 
         // Second acquisition should succeed (lock was released despite error)
-        try withFileLock(at: lockFile) { }
+        try withFileLock(at: lockFile) {}
     }
 
     // MARK: - Contention
@@ -118,7 +117,7 @@ struct FileLockTests {
 
         // withFileLock should fail immediately
         #expect(throws: FileLockError.self) {
-            try withFileLock(at: lockFile) { }
+            try withFileLock(at: lockFile) {}
         }
     }
 

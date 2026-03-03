@@ -14,7 +14,9 @@ enum ComponentType: String, Sendable, CaseIterable {
 
 extension ComponentType {
     /// Maps component types to doctor check section headers.
-    var doctorSection: String { rawValue }
+    var doctorSection: String {
+        rawValue
+    }
 }
 
 /// Definition of an installable component
@@ -85,21 +87,21 @@ extension CopyFileType {
     /// Returns `""` for `.generic`.
     var subdirectory: String {
         switch self {
-        case .skill: return "skills/"
-        case .hook: return "hooks/"
-        case .command: return "commands/"
-        case .agent: return "agents/"
-        case .generic: return ""
+        case .skill: "skills/"
+        case .hook: "hooks/"
+        case .command: "commands/"
+        case .agent: "agents/"
+        case .generic: ""
         }
     }
 
     func baseDirectory(in environment: Environment) -> URL {
         switch self {
-        case .skill: return environment.skillsDirectory
-        case .hook: return environment.hooksDirectory
-        case .command: return environment.commandsDirectory
-        case .agent: return environment.agentsDirectory
-        case .generic: return environment.claudeDirectory
+        case .skill: environment.skillsDirectory
+        case .hook: environment.hooksDirectory
+        case .command: environment.commandsDirectory
+        case .agent: environment.agentsDirectory
+        case .generic: environment.claudeDirectory
         }
     }
 

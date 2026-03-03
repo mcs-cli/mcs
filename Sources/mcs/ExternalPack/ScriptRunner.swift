@@ -14,7 +14,9 @@ struct ScriptRunner: Sendable {
         let stdout: String
         let stderr: String
 
-        var succeeded: Bool { exitCode == 0 }
+        var succeeded: Bool {
+            exitCode == 0
+        }
     }
 
     /// Errors specific to script execution.
@@ -25,12 +27,12 @@ struct ScriptRunner: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .pathTraversal(let script, let packPath):
-                return "Script '\(script)' escapes pack directory '\(packPath)'"
-            case .scriptNotFound(let path):
-                return "Script not found: '\(path)'"
-            case .timeout(let seconds):
-                return "Script timed out after \(Int(seconds)) seconds"
+            case let .pathTraversal(script, packPath):
+                "Script '\(script)' escapes pack directory '\(packPath)'"
+            case let .scriptNotFound(path):
+                "Script not found: '\(path)'"
+            case let .timeout(seconds):
+                "Script timed out after \(Int(seconds)) seconds"
             }
         }
     }

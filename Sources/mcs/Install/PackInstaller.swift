@@ -86,26 +86,26 @@ struct PackInstaller {
         let exec = executor
 
         switch component.installAction {
-        case .brewInstall(let package):
+        case let .brewInstall(package):
             return exec.installBrewPackage(package)
 
-        case .shellCommand(let command):
+        case let .shellCommand(command):
             let result = shell.shell(command)
             if !result.succeeded {
                 output.warn(String(result.stderr.prefix(200)))
             }
             return result.succeeded
 
-        case .mcpServer(let config):
+        case let .mcpServer(config):
             return exec.installMCPServer(config)
 
-        case .plugin(let name):
+        case let .plugin(name):
             return exec.installPlugin(name)
 
-        case .gitignoreEntries(let entries):
+        case let .gitignoreEntries(entries):
             return exec.addGitignoreEntries(entries)
 
-        case .copyPackFile(let source, let destination, let fileType):
+        case let .copyPackFile(source, destination, fileType):
             return exec.installCopyPackFile(
                 source: source,
                 destination: destination,

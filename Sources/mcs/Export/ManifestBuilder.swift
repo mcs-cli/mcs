@@ -7,7 +7,6 @@ import Foundation
 /// 1. `buildManifest()` — constructs a typed `ExternalPackManifest` (compile-time coupling to schema)
 /// 2. `renderYAML()` — serializes the typed model to shorthand YAML with presentational formatting
 struct ManifestBuilder {
-
     struct Metadata {
         let identifier: String
         let displayName: String
@@ -36,6 +35,15 @@ struct ManifestBuilder {
         let sectionIdentifier: String
         let filename: String
         let content: String
+    }
+
+    private struct CopyFileSpec {
+        let files: [ConfigurationDiscovery.DiscoveredFile]
+        let selected: Set<String>
+        let idPrefix: String
+        let componentType: ExternalComponentType
+        let fileType: ExternalCopyFileType
+        let descriptionFor: (ConfigurationDiscovery.DiscoveredFile) -> String
     }
 
     typealias Config = ConfigurationDiscovery.DiscoveredConfiguration
@@ -87,6 +95,7 @@ struct ManifestBuilder {
 
     // MARK: - Phase 1: Build Typed Manifest
 
+    // swiftlint:disable:next function_body_length
     private func buildManifest(
         from config: Config,
         metadata: Metadata,
@@ -136,9 +145,8 @@ struct ManifestBuilder {
             let scope: ExternalScope? = server.scope != "local"
                 ? ExternalScope(rawValue: server.scope) : nil
 
-            let mcpConfig: ExternalMCPServerConfig
-            if server.isHTTP {
-                mcpConfig = ExternalMCPServerConfig(
+            let mcpConfig = if server.isHTTP {
+                ExternalMCPServerConfig(
                     name: server.name,
                     command: nil,
                     args: nil,
@@ -148,7 +156,7 @@ struct ManifestBuilder {
                     scope: scope
                 )
             } else {
-                mcpConfig = ExternalMCPServerConfig(
+                ExternalMCPServerConfig(
                     name: server.name,
                     command: server.command,
                     args: server.args.isEmpty ? nil : server.args,
@@ -169,22 +177,29 @@ struct ManifestBuilder {
         }
 
         // ── Hooks / Skills / Commands ────────────────────────────────────────
-        let copyFileSpecs: [(
-            files: [ConfigurationDiscovery.DiscoveredFile],
-            selected: Set<String>,
-            idPrefix: String,
-            componentType: ExternalComponentType,
-            fileType: ExternalCopyFileType,
-            descriptionFor: (ConfigurationDiscovery.DiscoveredFile) -> String
-        )] = [
-            (config.hookFiles, options.selectedHookFiles, "hook", .hookFile, .hook,
-             { "Hook script for \($0.hookEvent ?? "unknown event")" }),
-            (config.skillFiles, options.selectedSkillFiles, "skill", .skill, .skill,
-             { "\($0.filename) skill" }),
-            (config.commandFiles, options.selectedCommandFiles, "cmd", .command, .command,
-             { "/\($0.filename.hasSuffix(".md") ? String($0.filename.dropLast(3)) : $0.filename) command" }),
-            (config.agentFiles, options.selectedAgentFiles, "agent", .agent, .agent,
-             { "\($0.filename) subagent" }),
+        let copyFileSpecs: [CopyFileSpec] = [
+            CopyFileSpec(
+                files: config.hookFiles, selected: options.selectedHookFiles,
+                idPrefix: "hook", componentType: .hookFile, fileType: .hook,
+                descriptionFor: { "Hook script for \($0.hookEvent ?? "unknown event")" }
+            ),
+            CopyFileSpec(
+                files: config.skillFiles, selected: options.selectedSkillFiles,
+                idPrefix: "skill", componentType: .skill, fileType: .skill,
+                descriptionFor: { "\($0.filename) skill" }
+            ),
+            CopyFileSpec(
+                files: config.commandFiles, selected: options.selectedCommandFiles,
+                idPrefix: "cmd", componentType: .command, fileType: .command,
+                descriptionFor: {
+                    "/\($0.filename.hasSuffix(".md") ? String($0.filename.dropLast(3)) : $0.filename) command"
+                }
+            ),
+            CopyFileSpec(
+                files: config.agentFiles, selected: options.selectedAgentFiles,
+                idPrefix: "agent", componentType: .agent, fileType: .agent,
+                descriptionFor: { "\($0.filename) subagent" }
+            ),
         ]
 
         for spec in copyFileSpecs {
@@ -424,7 +439,7 @@ struct ManifestBuilder {
         to yaml: inout YAMLRenderer
     ) {
         // Skip .generic file components — no YAML shorthand key exists for this type
-        if case .copyPackFile(let config) = comp.installAction,
+        if case let .copyPackFile(config) = comp.installAction,
            config.fileType == .generic || config.fileType == nil {
             return
         }
@@ -451,7 +466,7 @@ struct ManifestBuilder {
 
         // Install action → shorthand key (exhaustive switch = compile-time safety)
         switch comp.installAction {
-        case .mcpServer(let config):
+        case let .mcpServer(config):
             yaml.line("    mcp:")
             if config.transport == .http, let url = config.url {
                 yaml.line("      url: \(yamlQuote(url))")
@@ -476,13 +491,13 @@ struct ManifestBuilder {
                 yaml.line("      scope: \(scope.rawValue)")
             }
 
-        case .brewInstall(let package):
+        case let .brewInstall(package):
             yaml.line("    brew: \(package)")
 
-        case .plugin(let name):
+        case let .plugin(name):
             yaml.line("    plugin: \(yamlQuote(name))")
 
-        case .copyPackFile(let config):
+        case let .copyPackFile(config):
             let key: String
             switch config.fileType {
             case .hook: key = "hook"
@@ -496,16 +511,16 @@ struct ManifestBuilder {
             yaml.line("      source: \(yamlQuote(config.source))")
             yaml.line("      destination: \(yamlQuote(config.destination))")
 
-        case .settingsFile(let source):
+        case let .settingsFile(source):
             yaml.line("    settingsFile: \(yamlQuote(source))")
 
-        case .gitignoreEntries(let entries):
+        case let .gitignoreEntries(entries):
             yaml.line("    gitignore:")
             for entry in entries {
                 yaml.line("      - \(yamlQuote(entry))")
             }
 
-        case .shellCommand(let command):
+        case let .shellCommand(command):
             yaml.line("    type: \(comp.type.rawValue)")
             yaml.line("    shell: \(yamlQuote(command))")
 

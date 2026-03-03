@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 private func makeFetcher() -> PackFetcher {
     let tmpDir = FileManager.default.temporaryDirectory
@@ -15,7 +14,6 @@ private func makeFetcher() -> PackFetcher {
 
 @Suite("PackFetcher ref validation")
 struct PackFetcherRefValidationTests {
-
     // MARK: - Valid refs
 
     @Test("Accepts valid semver tag")
@@ -102,7 +100,6 @@ struct PackFetcherRefValidationTests {
 
 @Suite("PackFetcher identifier validation")
 struct PackFetcherIdentifierValidationTests {
-
     // MARK: - Valid identifiers
 
     @Test("Accepts simple hyphenated name")
@@ -155,7 +152,6 @@ struct PackFetcherIdentifierValidationTests {
 
 @Suite("PackFetcher operations")
 struct PackFetcherOperationTests {
-
     private struct TestSetupError: Error {
         let message: String
     }

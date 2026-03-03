@@ -3,8 +3,8 @@ import Foundation
 enum TemplateComposer {
     /// A parsed section from a composed file.
     struct Section {
-        let identifier: String  // e.g., "ios", "swift"
-        let content: String     // Content between markers
+        let identifier: String // e.g., "ios", "swift"
+        let content: String // Content between markers
     }
 
     // MARK: - Marker generation

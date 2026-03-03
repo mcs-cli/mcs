@@ -83,7 +83,6 @@ protocol SyncStrategy {
 // MARK: - Default Implementations
 
 extension SyncStrategy {
-
     /// Default removal summary — prints all non-empty artifact fields.
     ///
     /// Uses `scope.claudeFilePath.lastPathComponent` for template section labels.
@@ -116,7 +115,7 @@ extension SyncStrategy {
     /// `scope.claudeFilePath.lastPathComponent` to parameterize display.
     func printArtifactSummary(_ pack: any TechPack, output: CLIOutput) {
         let mcpServers = pack.components.compactMap { component -> String? in
-            if case .mcpServer(let config) = component.installAction {
+            if case let .mcpServer(config) = component.installAction {
                 let displayScope = scope.mcpScopeOverride ?? config.resolvedScope
                 return "+\(config.name) (\(displayScope))"
             }
@@ -127,7 +126,7 @@ extension SyncStrategy {
         }
 
         let files = pack.components.compactMap { component -> String? in
-            if case .copyPackFile(_, let destination, let fileType) = component.installAction {
+            if case let .copyPackFile(_, destination, fileType) = component.installAction {
                 return "+\(scope.fileDisplayPrefix)\(fileType.subdirectory)\(destination)"
             }
             return nil
@@ -137,7 +136,7 @@ extension SyncStrategy {
         }
 
         let brewPackages = pack.components.compactMap { component -> String? in
-            if case .brewInstall(let package) = component.installAction {
+            if case let .brewInstall(package) = component.installAction {
                 return package
             }
             return nil
@@ -148,7 +147,7 @@ extension SyncStrategy {
         }
 
         let plugins = pack.components.compactMap { component -> String? in
-            if case .plugin(let name) = component.installAction {
+            if case let .plugin(name) = component.installAction {
                 return PluginRef(name).bareName
             }
             return nil
@@ -165,7 +164,7 @@ extension SyncStrategy {
         }
 
         let settingsFiles = pack.components.compactMap { component -> String? in
-            if case .settingsMerge(let source) = component.installAction, source != nil {
+            if case let .settingsMerge(source) = component.installAction, source != nil {
                 return "+settings merge from \(component.displayName)"
             }
             return nil

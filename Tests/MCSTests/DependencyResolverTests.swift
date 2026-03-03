@@ -1,7 +1,6 @@
 import Foundation
-import Testing
-
 @testable import mcs
+import Testing
 
 @Suite("DependencyResolver")
 struct DependencyResolverTests {
@@ -74,7 +73,7 @@ struct DependencyResolverTests {
 
         let ids = plan.orderedComponents.map(\.id)
         // C should appear exactly once
-        #expect(ids.filter { $0 == "C" }.count == 1)
+        #expect(ids.count(where: { $0 == "C" }) == 1)
         // All three should be present
         #expect(Set(ids) == Set(["A", "B", "C"]))
     }
@@ -95,9 +94,9 @@ struct DependencyResolverTests {
         )
 
         let ids = plan.orderedComponents.map(\.id)
-        let indexOfA = ids.firstIndex(of: "A")!
-        let indexOfB = ids.firstIndex(of: "B")!
-        let indexOfC = ids.firstIndex(of: "C")!
+        let indexOfA = try #require(ids.firstIndex(of: "A"))
+        let indexOfB = try #require(ids.firstIndex(of: "B"))
+        let indexOfC = try #require(ids.firstIndex(of: "C"))
 
         #expect(indexOfC < indexOfB)
         #expect(indexOfB < indexOfA)

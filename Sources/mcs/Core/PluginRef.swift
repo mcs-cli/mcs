@@ -25,18 +25,18 @@ struct PluginRef: Sendable, Equatable {
         self.fullName = fullName
         let parts = fullName.split(separator: "@", maxSplits: 1)
         if parts.count == 2 {
-            self.bareName = String(parts[0])
+            bareName = String(parts[0])
             let repoToken = String(parts[1])
             if repoToken.contains("/") {
-                self.marketplaceRepo = repoToken
+                marketplaceRepo = repoToken
             } else if repoToken == Constants.Plugins.officialMarketplace {
-                self.marketplaceRepo = Constants.Plugins.officialMarketplaceRepo
+                marketplaceRepo = Constants.Plugins.officialMarketplaceRepo
             } else {
-                self.marketplaceRepo = repoToken
+                marketplaceRepo = repoToken
             }
         } else {
-            self.bareName = fullName
-            self.marketplaceRepo = Constants.Plugins.officialMarketplaceRepo
+            bareName = fullName
+            marketplaceRepo = Constants.Plugins.officialMarketplaceRepo
         }
     }
 }

@@ -14,14 +14,37 @@ struct CLIOutput: Sendable {
 
     // MARK: - ANSI Codes
 
-    private var red: String { colorsEnabled ? "\u{1B}[0;31m" : "" }
-    private var green: String { colorsEnabled ? "\u{1B}[0;32m" : "" }
-    private var yellow: String { colorsEnabled ? "\u{1B}[1;33m" : "" }
-    private var blue: String { colorsEnabled ? "\u{1B}[0;34m" : "" }
-    private var cyan: String { colorsEnabled ? "\u{1B}[0;36m" : "" }
-    private var bold: String { colorsEnabled ? "\u{1B}[1m" : "" }
-    private var dim: String { colorsEnabled ? "\u{1B}[2m" : "" }
-    private var reset: String { colorsEnabled ? "\u{1B}[0m" : "" }
+    private var red: String {
+        colorsEnabled ? "\u{1B}[0;31m" : ""
+    }
+
+    private var green: String {
+        colorsEnabled ? "\u{1B}[0;32m" : ""
+    }
+
+    private var yellow: String {
+        colorsEnabled ? "\u{1B}[1;33m" : ""
+    }
+
+    private var blue: String {
+        colorsEnabled ? "\u{1B}[0;34m" : ""
+    }
+
+    private var cyan: String {
+        colorsEnabled ? "\u{1B}[0;36m" : ""
+    }
+
+    private var bold: String {
+        colorsEnabled ? "\u{1B}[1m" : ""
+    }
+
+    private var dim: String {
+        colorsEnabled ? "\u{1B}[2m" : ""
+    }
+
+    private var reset: String {
+        colorsEnabled ? "\u{1B}[0m" : ""
+    }
 
     // MARK: - Logging
 
@@ -117,7 +140,7 @@ struct CLIOutput: Sendable {
     /// Use arrow keys to move, space to toggle, Enter to confirm.
     /// Falls back to number-based input when not a TTY.
     func multiSelect(groups: inout [SelectableGroup]) -> Set<Int> {
-        if colorsEnabled && isatty(STDIN_FILENO) != 0 {
+        if colorsEnabled, isatty(STDIN_FILENO) != 0 {
             return interactiveMultiSelect(groups: &groups)
         }
         return fallbackMultiSelect(groups: &groups)
@@ -131,7 +154,7 @@ struct CLIOutput: Sendable {
     func singleSelect(title: String, items: [(name: String, description: String)]) -> Int {
         guard !items.isEmpty else { return 0 }
 
-        if colorsEnabled && isatty(STDIN_FILENO) != 0 {
+        if colorsEnabled, isatty(STDIN_FILENO) != 0 {
             return interactiveSingleSelect(title: title, items: items)
         }
         return fallbackSingleSelect(title: title, items: items)
@@ -148,8 +171,8 @@ struct CLIOutput: Sendable {
         tcgetattr(STDIN_FILENO, &originalTermios)
         var raw = originalTermios
         raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1  // VMIN = 1
-        raw.c_cc.17 = 0  // VTIME = 0
+        raw.c_cc.16 = 1 // VMIN = 1
+        raw.c_cc.17 = 0 // VTIME = 0
         tcsetattr(STDIN_FILENO, TCSANOW, &raw)
 
         // Hide cursor
@@ -285,8 +308,8 @@ struct CLIOutput: Sendable {
         tcgetattr(STDIN_FILENO, &originalTermios)
         var raw = originalTermios
         raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1  // VMIN = 1
-        raw.c_cc.17 = 0  // VTIME = 0
+        raw.c_cc.16 = 1 // VMIN = 1
+        raw.c_cc.17 = 0 // VTIME = 0
         tcsetattr(STDIN_FILENO, TCSANOW, &raw)
 
         // Hide cursor
@@ -357,7 +380,7 @@ struct CLIOutput: Sendable {
 
     private func renderInteractiveList(
         groups: [SelectableGroup],
-        flatItems: [(groupIndex: Int, itemIndex: Int)],
+        flatItems _: [(groupIndex: Int, itemIndex: Int)],
         cursor: Int
     ) {
         write("\n")
@@ -383,7 +406,7 @@ struct CLIOutput: Sendable {
         }
 
         // Always-included section
-        let allRequired = groups.flatMap { $0.requiredItems }
+        let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
             write("\n")
             sectionHeader("Always included")
@@ -411,7 +434,7 @@ struct CLIOutput: Sendable {
             lineCount += group.items.count * 2 // name + description per item
         }
 
-        let allRequired = groups.flatMap { $0.requiredItems }
+        let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
             lineCount += 1 // blank line
             lineCount += 2 // section header
@@ -429,7 +452,7 @@ struct CLIOutput: Sendable {
 
     private func readByte() -> UInt8 {
         var byte: UInt8 = 0
-        let _ = Darwin.read(STDIN_FILENO, &byte, 1)
+        _ = Darwin.read(STDIN_FILENO, &byte, 1)
         return byte
     }
 
@@ -468,13 +491,12 @@ struct CLIOutput: Sendable {
                         groups[gi].items[ii].isSelected = false
                     }
                 }
-            case .toggle(let numbers):
+            case let .toggle(numbers):
                 for num in numbers {
                     for gi in groups.indices {
-                        for ii in groups[gi].items.indices {
-                            if groups[gi].items[ii].number == num {
-                                groups[gi].items[ii].isSelected.toggle()
-                            }
+                        for ii in groups[gi].items.indices
+                            where groups[gi].items[ii].number == num {
+                            groups[gi].items[ii].isSelected.toggle()
                         }
                     }
                 }
@@ -503,7 +525,7 @@ struct CLIOutput: Sendable {
             }
         }
 
-        let allRequired = groups.flatMap { $0.requiredItems }
+        let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
             write("\n")
             sectionHeader("Always included")

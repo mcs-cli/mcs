@@ -28,8 +28,8 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
             && gitignoreEntries.isEmpty
     }
 
-    // Custom decoder for backward compatibility — existing JSON files may lack
-    // newer keys (brewPackages, plugins, gitignoreEntries).
+    /// Custom decoder for backward compatibility — existing JSON files may lack
+    /// newer keys (brewPackages, plugins, gitignoreEntries).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mcpServers = try container.decodeIfPresent([MCPServerRef].self, forKey: .mcpServers) ?? []
@@ -105,17 +105,17 @@ struct ProjectState {
     }
 
     init(projectRoot: URL) throws {
-        self.path = projectRoot
+        path = projectRoot
             .appendingPathComponent(Constants.FileNames.claudeDirectory)
             .appendingPathComponent(Constants.FileNames.mcsProject)
-        self.storage = StateStorage()
+        storage = StateStorage()
         try load()
     }
 
     /// Initialize with a specific state file path (used for global state at `~/.mcs/global-state.json`).
     init(stateFile: URL) throws {
-        self.path = stateFile
-        self.storage = StateStorage()
+        path = stateFile
+        storage = StateStorage()
         try load()
     }
 

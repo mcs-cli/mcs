@@ -124,6 +124,27 @@ mcs export <dir> --dry-run       # Preview what would be exported
 - `TemplateEngine.swift` — `__PLACEHOLDER__` substitution
 - `TemplateComposer.swift` — section markers for composed files (`<!-- mcs:begin/end -->`), section parsing, user content preservation
 
+## Code Style
+
+SwiftFormat and SwiftLint enforce consistent code style. Both are installed via Homebrew.
+
+```bash
+# Format modified files (run before committing)
+swiftformat <file-or-directory>
+
+# Lint — check without modifying (CI runs these with --strict)
+swiftformat --lint .
+swiftlint
+
+# Auto-fix lint issues
+swiftlint --fix
+```
+
+- **SwiftFormat runs first**, then SwiftLint — SwiftFormat owns formatting rules, SwiftLint owns semantic rules
+- Config files: `.swiftformat` and `.swiftlint.yml` at project root
+- CI runs both in strict mode (warnings become errors) with GitHub Actions inline annotations
+- SwiftLint excludes `Tests/` — only Sources and Package.swift are linted
+
 ## Testing
 
 - Test files mirror source: `FooTests.swift` tests `Foo.swift`
