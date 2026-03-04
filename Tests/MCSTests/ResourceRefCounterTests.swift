@@ -18,7 +18,7 @@ private struct StubTechPack: TechPack {
         []
     }
 
-    var supplementaryDoctorChecks: [any DoctorCheck] {
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
         []
     }
 
@@ -53,7 +53,6 @@ private func pluginComponent(id: String, pack: String, pluginName: String) -> Co
     )
 }
 
-@Suite("ResourceRefCounter")
 struct ResourceRefCounterTests {
     private func makeTmpHome() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

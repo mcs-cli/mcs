@@ -46,7 +46,7 @@ protocol TechPack: Sendable {
     var templateSectionIdentifiers: [String] { get }
     /// Doctor checks that cannot be auto-derived from components.
     /// For pack-level or project-level concerns (e.g. Xcode CLT, config files).
-    var supplementaryDoctorChecks: [any DoctorCheck] { get }
+    func supplementaryDoctorChecks(projectRoot: URL?) -> [any DoctorCheck]
     func configureProject(at path: URL, context: ProjectConfigContext) throws
 
     /// Resolve pack-specific placeholder values for CLAUDE.local.md templates.

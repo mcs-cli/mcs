@@ -4,7 +4,6 @@ import Testing
 
 // MARK: - Dry Run Tests
 
-@Suite("Configurator — dryRun (project scope)")
 struct DryRunTests {
     private let output = CLIOutput(colorsEnabled: false)
 
@@ -155,7 +154,6 @@ struct DryRunTests {
 
 // MARK: - Settings Merge Tests
 
-@Suite("Configurator — packSettingsMerge (project scope)")
 struct PackSettingsMergeTests {
     private let output = CLIOutput(colorsEnabled: false)
 
@@ -395,7 +393,6 @@ struct PackSettingsMergeTests {
 
 // MARK: - installProjectFile Substitution Tests
 
-@Suite("ComponentExecutor — installProjectFile substitution")
 struct InstallProjectFileSubstitutionTests {
     private let output = CLIOutput(colorsEnabled: false)
 
@@ -547,7 +544,6 @@ struct InstallProjectFileSubstitutionTests {
 
 // MARK: - Auto-Derived Hook & Plugin Tests
 
-@Suite("Configurator — auto-derived hooks and plugins (project scope)")
 struct AutoDerivedSettingsTests {
     private let output = CLIOutput(colorsEnabled: false)
 
@@ -802,7 +798,6 @@ struct AutoDerivedSettingsTests {
 
 // MARK: - Excluded Components
 
-@Suite("Configurator — excludedComponents (project scope)")
 struct ConfiguratorExcludedComponentsTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -908,7 +903,6 @@ struct ConfiguratorExcludedComponentsTests {
 
 // MARK: - Corrupt State Abort Tests
 
-@Suite("Configurator — corrupt state abort (project scope)")
 struct CorruptStateAbortTests {
     private let output = CLIOutput(colorsEnabled: false)
 
@@ -968,7 +962,7 @@ private struct MockTechPack: TechPack {
     let description: String = "Mock pack for testing"
     let components: [ComponentDefinition]
     let templates: [TemplateContribution]
-    let supplementaryDoctorChecks: [any DoctorCheck]
+    private let storedChecks: [any DoctorCheck]
 
     init(
         identifier: String,
@@ -981,7 +975,11 @@ private struct MockTechPack: TechPack {
         self.displayName = displayName
         self.components = components
         self.templates = templates
-        self.supplementaryDoctorChecks = supplementaryDoctorChecks
+        storedChecks = supplementaryDoctorChecks
+    }
+
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        storedChecks
     }
 
     func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
@@ -989,7 +987,6 @@ private struct MockTechPack: TechPack {
 
 // MARK: - parseRepoName Tests
 
-@Suite("ConfiguratorSupport — parseRepoName")
 struct ParseRepoNameTests {
     @Test("HTTPS URL with .git suffix")
     func httpsWithGit() {

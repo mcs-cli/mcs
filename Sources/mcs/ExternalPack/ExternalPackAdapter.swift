@@ -69,9 +69,8 @@ struct ExternalPackAdapter: TechPack {
 
     // MARK: - Doctor Checks
 
-    var supplementaryDoctorChecks: [any DoctorCheck] {
+    func supplementaryDoctorChecks(projectRoot: URL?) -> [any DoctorCheck] {
         guard let externalChecks = manifest.supplementaryDoctorChecks else { return [] }
-        let projectRoot = ProjectDetector.findProjectRoot()
 
         return externalChecks.compactMap { ext in
             convertDoctorCheck(ext, scriptRunner: scriptRunner, projectRoot: projectRoot)

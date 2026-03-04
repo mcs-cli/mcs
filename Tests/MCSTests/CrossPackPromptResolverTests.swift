@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("CrossPackPromptResolver")
 struct CrossPackPromptResolverTests {
     // MARK: - Helpers
 
@@ -280,7 +279,6 @@ struct CrossPackPromptResolverTests {
 
 // MARK: - MCPServerConfig substitution
 
-@Suite("MCPServerConfig — substituting")
 struct MCPServerConfigSubstitutionTests {
     @Test("Substitutes env values")
     func substitutesEnv() {
@@ -355,7 +353,6 @@ struct MCPServerConfigSubstitutionTests {
 
 // MARK: - Settings load with substitution
 
-@Suite("Settings — load with substitution")
 struct SettingsLoadSubstitutionTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -451,7 +448,6 @@ struct SettingsLoadSubstitutionTests {
 
 // MARK: - Undeclared placeholder scanner extension
 
-@Suite("ConfiguratorSupport — scanForUndeclaredPlaceholders")
 struct ScannerExtensionTests {
     @Test("Finds placeholders in settings file sources")
     func findsSettingsPlaceholders() throws {
@@ -618,7 +614,10 @@ private struct PromptMockPack: TechPack {
     let description: String = "Mock pack for prompt tests"
     let components: [ComponentDefinition]
     let templates: [TemplateContribution] = []
-    let supplementaryDoctorChecks: [any DoctorCheck] = []
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        []
+    }
+
     private let prompts: [PromptDefinition]
 
     init(

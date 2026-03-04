@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("TechPackRegistry")
 struct TechPackRegistryTests {
     // MARK: - Basic registry
 
@@ -22,13 +21,13 @@ struct TechPackRegistryTests {
 
     @Test("supplementaryDoctorChecks returns empty when no packs installed")
     func supplementaryDoctorChecksEmpty() {
-        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: [])
+        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: [], projectRoot: nil)
         #expect(checks.isEmpty)
     }
 
     @Test("supplementaryDoctorChecks ignores unrecognized pack identifiers")
     func supplementaryDoctorChecksUnknownPack() {
-        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: ["nonexistent"])
+        let checks = TechPackRegistry.shared.supplementaryDoctorChecks(installedPacks: ["nonexistent"], projectRoot: nil)
         #expect(checks.isEmpty)
     }
 
@@ -108,7 +107,7 @@ struct TechPackRegistryTests {
             supplementaryDoctorChecks: [check]
         )
         let registry = TechPackRegistry(packs: [fakePack])
-        let checks = registry.supplementaryDoctorChecks(installedPacks: ["test-pack"])
+        let checks = registry.supplementaryDoctorChecks(installedPacks: ["test-pack"], projectRoot: nil)
         #expect(!checks.isEmpty)
         #expect(checks.first?.name == "test-check")
     }
@@ -122,7 +121,7 @@ private struct FakeTechPack: TechPack {
     let description: String = "A fake pack for testing"
     let components: [ComponentDefinition]
     let templates: [TemplateContribution]
-    let supplementaryDoctorChecks: [any DoctorCheck]
+    private let storedChecks: [any DoctorCheck]
 
     init(
         identifier: String,
@@ -133,7 +132,11 @@ private struct FakeTechPack: TechPack {
         self.identifier = identifier
         self.components = components
         self.templates = templates
-        self.supplementaryDoctorChecks = supplementaryDoctorChecks
+        storedChecks = supplementaryDoctorChecks
+    }
+
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        storedChecks
     }
 
     func configureProject(at _: URL, context _: ProjectConfigContext) throws {}

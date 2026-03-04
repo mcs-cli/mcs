@@ -1,7 +1,7 @@
 import Foundation
 
 /// Registry of all available tech packs loaded from external pack sources.
-struct TechPackRegistry: Sendable {
+struct TechPackRegistry {
     static let shared = TechPackRegistry()
 
     private let packs: [any TechPack]
@@ -27,9 +27,9 @@ struct TechPackRegistry: Sendable {
 
     /// Get supplementary doctor checks only for installed packs.
     /// These are pack-level checks that cannot be auto-derived from components.
-    func supplementaryDoctorChecks(installedPacks ids: Set<String>) -> [any DoctorCheck] {
+    func supplementaryDoctorChecks(installedPacks ids: Set<String>, projectRoot: URL?) -> [any DoctorCheck] {
         availablePacks.filter { ids.contains($0.identifier) }
-            .flatMap(\.supplementaryDoctorChecks)
+            .flatMap { $0.supplementaryDoctorChecks(projectRoot: projectRoot) }
     }
 
     /// Get template contributions for a specific pack.

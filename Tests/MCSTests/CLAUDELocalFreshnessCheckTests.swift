@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("CLAUDEMDFreshnessCheck")
 struct CLAUDEMDFreshnessCheckTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -625,7 +624,10 @@ private struct StubTechPack: TechPack {
     let description: String = "A stub pack for testing"
     let components: [ComponentDefinition] = []
     let templates: [TemplateContribution]
-    let supplementaryDoctorChecks: [any DoctorCheck] = []
+
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        []
+    }
 
     func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 }
@@ -639,7 +641,9 @@ private struct ThrowingTechPack: TechPack {
         get throws { throw TestError.templateLoadFailed }
     }
 
-    let supplementaryDoctorChecks: [any DoctorCheck] = []
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        []
+    }
 
     func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
 

@@ -122,7 +122,8 @@ struct DoctorRunner {
                     allChecks += checks.map { (check: $0, isExcluded: excluded) }
                 }
                 // Pack-level supplementary checks (cannot be derived from components)
-                allChecks += pack.supplementaryDoctorChecks.map { (check: $0, isExcluded: false) }
+                allChecks += pack.supplementaryDoctorChecks(projectRoot: scope.effectiveProjectRoot)
+                    .map { (check: $0, isExcluded: false) }
             }
         }
 
