@@ -2,7 +2,7 @@ import Foundation
 
 /// Tracks per-pack artifacts installed into a project, enabling clean removal
 /// when a pack is deselected during `mcs sync`.
-struct PackArtifactRecord: Codable, Equatable, Sendable {
+struct PackArtifactRecord: Codable, Equatable {
     /// MCP servers registered for this pack (name + scope for `claude mcp remove`).
     var mcpServers: [MCPServerRef] = []
     /// Project-relative paths of files installed by this pack.
@@ -19,17 +19,19 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
     var plugins: [String] = []
     /// Global gitignore entries added by this pack.
     var gitignoreEntries: [String] = []
+    /// SHA-256 hashes of installed files (project-relative path → hash) for content drift detection.
+    var fileHashes: [String: String] = [:]
 
     /// Whether all artifact lists are empty (cleanup is complete).
     var isEmpty: Bool {
         mcpServers.isEmpty && files.isEmpty && templateSections.isEmpty
             && hookCommands.isEmpty && settingsKeys.isEmpty
             && brewPackages.isEmpty && plugins.isEmpty
-            && gitignoreEntries.isEmpty
+            && gitignoreEntries.isEmpty && fileHashes.isEmpty
     }
 
     /// Custom decoder for backward compatibility — existing JSON files may lack
-    /// newer keys (brewPackages, plugins, gitignoreEntries).
+    /// newer keys (brewPackages, plugins, gitignoreEntries, fileHashes).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         mcpServers = try container.decodeIfPresent([MCPServerRef].self, forKey: .mcpServers) ?? []
@@ -40,6 +42,7 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
         brewPackages = try container.decodeIfPresent([String].self, forKey: .brewPackages) ?? []
         plugins = try container.decodeIfPresent([String].self, forKey: .plugins) ?? []
         gitignoreEntries = try container.decodeIfPresent([String].self, forKey: .gitignoreEntries) ?? []
+        fileHashes = try container.decodeIfPresent([String: String].self, forKey: .fileHashes) ?? [:]
     }
 
     init(
@@ -50,7 +53,8 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
         settingsKeys: [String] = [],
         brewPackages: [String] = [],
         plugins: [String] = [],
-        gitignoreEntries: [String] = []
+        gitignoreEntries: [String] = [],
+        fileHashes: [String: String] = [:]
     ) {
         self.mcpServers = mcpServers
         self.files = files
@@ -60,6 +64,7 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
         self.brewPackages = brewPackages
         self.plugins = plugins
         self.gitignoreEntries = gitignoreEntries
+        self.fileHashes = fileHashes
     }
 
     /// Record a brew package as MCS-owned, deduplicating automatically.
@@ -78,7 +83,7 @@ struct PackArtifactRecord: Codable, Equatable, Sendable {
 }
 
 /// Reference to a registered MCP server for later removal.
-struct MCPServerRef: Codable, Hashable, Sendable {
+struct MCPServerRef: Codable, Hashable {
     var name: String
     var scope: String
 }

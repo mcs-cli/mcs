@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("PackArtifactRecord")
 struct PackArtifactRecordTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -35,6 +34,7 @@ struct PackArtifactRecordTests {
         // New fields default to empty
         #expect(record.brewPackages.isEmpty)
         #expect(record.plugins.isEmpty)
+        #expect(record.fileHashes.isEmpty)
     }
 
     @Test("Encodes and decodes new fields correctly")
@@ -42,12 +42,14 @@ struct PackArtifactRecordTests {
         var record = PackArtifactRecord()
         record.brewPackages = ["swiftlint", "jq"]
         record.plugins = ["anthropics/claude-plugins-official/pr-review-toolkit"]
+        record.fileHashes = [".claude/hooks/test.sh": "abc123"]
 
         let data = try JSONEncoder().encode(record)
         let decoded = try JSONDecoder().decode(PackArtifactRecord.self, from: data)
 
         #expect(decoded.brewPackages == ["swiftlint", "jq"])
         #expect(decoded.plugins == ["anthropics/claude-plugins-official/pr-review-toolkit"])
+        #expect(decoded.fileHashes == [".claude/hooks/test.sh": "abc123"])
     }
 
     @Test("isEmpty includes new fields")

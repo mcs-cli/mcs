@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ComponentExecutor")
 struct ComponentExecutorTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -97,7 +96,7 @@ struct ComponentExecutorTests {
         )
 
         var exec = makeExecutor()
-        let paths = exec.installProjectFile(
+        let result = exec.installProjectFile(
             source: packDir,
             destination: "my-skill",
             fileType: .skill,
@@ -105,7 +104,7 @@ struct ComponentExecutorTests {
             resolvedValues: ["PROJECT_DIR_NAME": "my-folder", "REPO_NAME": "my-app"]
         )
 
-        #expect(!paths.isEmpty)
+        #expect(!result.paths.isEmpty)
 
         let installed = projectPath.appendingPathComponent(".claude/skills/my-skill/SKILL.md")
         let content = try String(contentsOf: installed, encoding: .utf8)
@@ -130,7 +129,7 @@ struct ComponentExecutorTests {
         )
 
         var exec = makeExecutor()
-        let paths = exec.installProjectFile(
+        let result = exec.installProjectFile(
             source: agentFile,
             destination: "code-reviewer.md",
             fileType: .agent,
@@ -138,11 +137,40 @@ struct ComponentExecutorTests {
             resolvedValues: [:]
         )
 
-        #expect(!paths.isEmpty)
+        #expect(!result.paths.isEmpty)
 
         let installed = projectPath.appendingPathComponent(".claude/agents/code-reviewer.md")
         #expect(FileManager.default.fileExists(atPath: installed.path))
         let content = try String(contentsOf: installed, encoding: .utf8)
         #expect(content.contains("Code Reviewer"))
+    }
+
+    // MARK: - installProjectFile hash recording
+
+    @Test("installProjectFile returns SHA-256 hashes of installed files")
+    func installProjectFileRecordsHashes() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let projectPath = tmpDir.appendingPathComponent("project")
+        try FileManager.default.createDirectory(at: projectPath, withIntermediateDirectories: true)
+
+        let source = tmpDir.appendingPathComponent("test-hook.sh")
+        try "#!/bin/bash\necho test".write(to: source, atomically: true, encoding: .utf8)
+
+        var exec = makeExecutor()
+        let result = exec.installProjectFile(
+            source: source,
+            destination: "test-hook.sh",
+            fileType: .hook,
+            projectPath: projectPath
+        )
+
+        #expect(result.paths.count == 1)
+        #expect(result.hashes.count == 1)
+
+        let installed = projectPath.appendingPathComponent(".claude/hooks/test-hook.sh")
+        let expectedHash = try FileHasher.sha256(of: installed)
+        #expect(result.hashes.values.first == expectedHash)
     }
 }

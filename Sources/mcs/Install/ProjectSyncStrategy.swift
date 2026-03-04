@@ -73,20 +73,21 @@ struct ProjectSyncStrategy: SyncStrategy {
                 }
 
             case let .copyPackFile(source, destination, fileType):
-                let paths = executor.installProjectFile(
+                let result = executor.installProjectFile(
                     source: source,
                     destination: destination,
                     fileType: fileType,
                     projectPath: projectPath,
                     resolvedValues: resolvedValues
                 )
-                artifacts.files.append(contentsOf: paths)
+                artifacts.files.append(contentsOf: result.paths)
+                artifacts.fileHashes.merge(result.hashes) { _, new in new }
                 if component.type == .hookFile,
                    component.hookEvent != nil,
                    fileType == .hook {
                     artifacts.hookCommands.append("\(scope.hookCommandPrefix)\(destination)")
                 }
-                if !paths.isEmpty {
+                if !result.paths.isEmpty {
                     output.success("  \(component.displayName) installed")
                 }
 

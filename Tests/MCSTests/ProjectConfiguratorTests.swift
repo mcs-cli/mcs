@@ -429,7 +429,7 @@ struct InstallProjectFileSubstitutionTests {
         )
 
         var exec = makeExecutor()
-        let paths = exec.installProjectFile(
+        let result = exec.installProjectFile(
             source: source,
             destination: "pr.md",
             fileType: .command,
@@ -437,7 +437,7 @@ struct InstallProjectFileSubstitutionTests {
             resolvedValues: ["BRANCH_PREFIX": "feature"]
         )
 
-        #expect(!paths.isEmpty)
+        #expect(!result.paths.isEmpty)
 
         // Read the installed file
         let installed = projectPath
@@ -464,7 +464,7 @@ struct InstallProjectFileSubstitutionTests {
         )
 
         var exec = makeExecutor()
-        let paths = exec.installProjectFile(
+        let result = exec.installProjectFile(
             source: packDir,
             destination: "my-skill",
             fileType: .skill,
@@ -472,7 +472,7 @@ struct InstallProjectFileSubstitutionTests {
             resolvedValues: ["REPO_NAME": "my-app"]
         )
 
-        #expect(!paths.isEmpty)
+        #expect(!result.paths.isEmpty)
 
         let installed = projectPath
             .appendingPathComponent(".claude/skills/my-skill/SKILL.md")
@@ -526,7 +526,7 @@ struct InstallProjectFileSubstitutionTests {
         try Data(bytes).write(to: source)
 
         var exec = makeExecutor()
-        let paths = exec.installProjectFile(
+        let installResult = exec.installProjectFile(
             source: source,
             destination: "data.bin",
             fileType: .command,
@@ -534,7 +534,7 @@ struct InstallProjectFileSubstitutionTests {
             resolvedValues: ["FOO": "bar"]
         )
 
-        #expect(!paths.isEmpty)
+        #expect(!installResult.paths.isEmpty)
 
         let installed = projectPath.appendingPathComponent(".claude/commands/data.bin")
         let result = try Data(contentsOf: installed)

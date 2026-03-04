@@ -145,6 +145,7 @@ swiftlint --fix
 - Config files: `.swiftformat` and `.swiftlint.yml` at project root
 - CI runs both in strict mode (warnings become errors) with GitHub Actions inline annotations
 - SwiftLint excludes `Tests/` — only Sources and Package.swift are linted
+- **Never use `try?` to silently discard errors** — use `do/catch` and surface the error (via `output.warn()`, logging, or propagation). `try?` hides root causes and makes debugging impossible. The only acceptable use is when the absence of a result is the *entire* semantic meaning (e.g., `FileManager.fileExists` alternative)
 
 ## Testing
 

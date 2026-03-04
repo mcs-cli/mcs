@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("DerivedDoctorChecks")
 struct DerivedDoctorCheckTests {
     /// Builds a ComponentDefinition with sensible defaults for testing.
     private func makeComponent(
@@ -280,7 +279,6 @@ struct DerivedDoctorCheckTests {
 
 // MARK: - FileHasher directory hashing
 
-@Suite("FileHasherDirectoryHashing")
 struct FileHasherDirectoryHashingTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -334,5 +332,90 @@ struct FileHasherDirectoryHashingTests {
         let hashes = try FileHasher.directoryFileHashes(at: tmpDir)
         #expect(hashes.count == 1)
         #expect(hashes.first?.relativePath == "visible.txt")
+    }
+}
+
+// MARK: - FileContentCheck
+
+struct FileContentCheckTests {
+    private func makeTmpDir() throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    @Test("Passes when file content matches expected hash")
+    func matchingHash() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("hook.sh")
+        try "#!/bin/bash\necho hello".write(to: file, atomically: true, encoding: .utf8)
+        let hash = try FileHasher.sha256(of: file)
+
+        let check = FileContentCheck(
+            name: "hook.sh",
+            section: "Installed Files",
+            path: file,
+            expectedHash: hash
+        )
+        if case .pass = check.check() {} else {
+            Issue.record("Expected .pass but got \(check.check())")
+        }
+    }
+
+    @Test("Warns when file content differs from expected hash")
+    func driftedContent() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("hook.sh")
+        try "#!/bin/bash\necho hello".write(to: file, atomically: true, encoding: .utf8)
+        let originalHash = try FileHasher.sha256(of: file)
+
+        // Modify the file
+        try "#!/bin/bash\necho modified".write(to: file, atomically: true, encoding: .utf8)
+
+        let check = FileContentCheck(
+            name: "hook.sh",
+            section: "Installed Files",
+            path: file,
+            expectedHash: originalHash
+        )
+        if case .warn = check.check() {} else {
+            Issue.record("Expected .warn but got \(check.check())")
+        }
+    }
+
+    @Test("Skips when file is missing (existence checked separately)")
+    func missingFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("nonexistent.sh")
+
+        let check = FileContentCheck(
+            name: "nonexistent.sh",
+            section: "Installed Files",
+            path: file,
+            expectedHash: "abc123"
+        )
+        if case .skip = check.check() {} else {
+            Issue.record("Expected .skip but got \(check.check())")
+        }
+    }
+
+    @Test("Fix returns notFixable")
+    func fixNotFixable() {
+        let check = FileContentCheck(
+            name: "test",
+            section: "Installed Files",
+            path: URL(fileURLWithPath: "/tmp/test"),
+            expectedHash: "abc"
+        )
+        if case .notFixable = check.fix() {} else {
+            Issue.record("Expected .notFixable")
+        }
     }
 }

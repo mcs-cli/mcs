@@ -95,12 +95,13 @@ struct GlobalSyncStrategy: SyncStrategy {
                 }
 
             case let .copyPackFile(source, destination, fileType):
-                if executor.installCopyPackFile(
+                let result = executor.installCopyPackFile(
                     source: source,
                     destination: destination,
                     fileType: fileType,
                     resolvedValues: resolvedValues
-                ) {
+                )
+                if result.success {
                     let baseDir = fileType.baseDirectory(in: environment)
                     let destURL = baseDir.appendingPathComponent(destination)
                     let relativePath = PathContainment.relativePath(
@@ -108,6 +109,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                         within: environment.claudeDirectory.path
                     )
                     artifacts.files.append(relativePath)
+                    artifacts.fileHashes.merge(result.hashes) { _, new in new }
                     if component.type == .hookFile,
                        component.hookEvent != nil,
                        fileType == .hook {

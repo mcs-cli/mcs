@@ -16,7 +16,7 @@ import Foundation
 //
 // This separation keeps `doctor --fix` predictable and non-destructive.
 
-struct CommandCheck: DoctorCheck, Sendable {
+struct CommandCheck: DoctorCheck {
     let name: String
     let section: String
     let command: String
@@ -38,7 +38,7 @@ struct CommandCheck: DoctorCheck, Sendable {
     }
 }
 
-struct MCPServerCheck: DoctorCheck, Sendable {
+struct MCPServerCheck: DoctorCheck {
     let name: String
     let section = "MCP Servers"
     let serverName: String
@@ -85,7 +85,7 @@ struct MCPServerCheck: DoctorCheck, Sendable {
     }
 }
 
-struct PluginCheck: DoctorCheck, Sendable {
+struct PluginCheck: DoctorCheck {
     let pluginRef: PluginRef
     var name: String {
         pluginRef.bareName
@@ -117,7 +117,7 @@ struct PluginCheck: DoctorCheck, Sendable {
     }
 }
 
-struct FileExistsCheck: DoctorCheck, Sendable {
+struct FileExistsCheck: DoctorCheck {
     let name: String
     let section: String
     let path: URL
@@ -145,7 +145,36 @@ struct FileExistsCheck: DoctorCheck, Sendable {
     }
 }
 
-struct HookCheck: DoctorCheck, Sendable {
+/// Checks that an installed file's content matches its expected SHA-256 hash.
+/// Skips if the file is absent (existence is already covered by `FileExistsCheck`).
+/// Reports `.warn` on content drift (file modified since last sync).
+struct FileContentCheck: DoctorCheck {
+    let name: String
+    let section: String
+    let path: URL
+    let expectedHash: String
+
+    func check() -> CheckResult {
+        guard FileManager.default.fileExists(atPath: path.path) else {
+            return .skip("missing (checked separately)")
+        }
+        do {
+            let currentHash = try FileHasher.sha256(of: path)
+            if currentHash == expectedHash {
+                return .pass("content matches")
+            }
+            return .warn("modified since last sync")
+        } catch {
+            return .fail("could not read file: \(error.localizedDescription)")
+        }
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs sync' to restore original content")
+    }
+}
+
+struct HookCheck: DoctorCheck {
     let hookName: String
     var isOptional: Bool = false
 
@@ -192,7 +221,7 @@ struct HookCheck: DoctorCheck, Sendable {
     }
 }
 
-struct GitignoreCheck: DoctorCheck, Sendable {
+struct GitignoreCheck: DoctorCheck {
     var name: String {
         "Global gitignore"
     }
@@ -233,7 +262,7 @@ struct GitignoreCheck: DoctorCheck, Sendable {
     }
 }
 
-struct ProjectIndexCheck: DoctorCheck, Sendable {
+struct ProjectIndexCheck: DoctorCheck {
     var name: String {
         "Project index"
     }
@@ -293,7 +322,7 @@ struct ProjectIndexCheck: DoctorCheck, Sendable {
     }
 }
 
-struct CommandFileCheck: DoctorCheck, Sendable {
+struct CommandFileCheck: DoctorCheck {
     let name: String
     let section = "Commands"
     let path: URL

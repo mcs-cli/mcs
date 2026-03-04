@@ -122,18 +122,18 @@ struct ComponentExecutor {
         destination: String,
         fileType: CopyFileType,
         resolvedValues: [String: String] = [:]
-    ) -> Bool {
+    ) -> (success: Bool, hashes: [String: String]) {
         let fm = FileManager.default
         let expectedParent = fileType.baseDirectory(in: environment)
 
         guard let destURL = PathContainment.safePath(relativePath: destination, within: expectedParent) else {
             output.warn("Destination '\(destination)' escapes expected directory")
-            return false
+            return (false, [:])
         }
 
         guard fm.fileExists(atPath: source.path) else {
             output.warn("Pack source not found: \(source.path)")
-            return false
+            return (false, [:])
         }
 
         do {
@@ -144,6 +144,7 @@ struct ComponentExecutor {
 
             var isDir: ObjCBool = false
             fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            var installedHashes: [String: String] = [:]
 
             if isDir.boolValue {
                 // Source is a directory — copy all files recursively
@@ -158,6 +159,11 @@ struct ComponentExecutor {
                     if fileType == .hook {
                         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destFile.path)
                     }
+                    let relPath = PathContainment.relativePath(
+                        of: destFile.path,
+                        within: environment.claudeDirectory.path
+                    )
+                    recordHash(of: destFile, relativePath: relPath, into: &installedHashes)
                 }
             } else {
                 // Source is a single file
@@ -170,11 +176,16 @@ struct ComponentExecutor {
                 if fileType == .hook {
                     try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destURL.path)
                 }
+                let relPath = PathContainment.relativePath(
+                    of: destURL.path,
+                    within: environment.claudeDirectory.path
+                )
+                recordHash(of: destURL, relativePath: relPath, into: &installedHashes)
             }
-            return true
+            return (true, installedHashes)
         } catch {
             output.warn(error.localizedDescription)
-            return false
+            return (false, [:])
         }
     }
 
@@ -190,18 +201,18 @@ struct ComponentExecutor {
         fileType: CopyFileType,
         projectPath: URL,
         resolvedValues: [String: String] = [:]
-    ) -> [String] {
+    ) -> (paths: [String], hashes: [String: String]) {
         let fm = FileManager.default
         let baseDir = fileType.projectBaseDirectory(projectPath: projectPath)
 
         guard let destURL = PathContainment.safePath(relativePath: destination, within: baseDir) else {
             output.warn("Destination '\(destination)' escapes project directory")
-            return []
+            return ([], [:])
         }
 
         guard fm.fileExists(atPath: source.path) else {
             output.warn("Pack source not found: \(source.path)")
-            return []
+            return ([], [:])
         }
 
         do {
@@ -213,6 +224,7 @@ struct ComponentExecutor {
             var isDir: ObjCBool = false
             fm.fileExists(atPath: source.path, isDirectory: &isDir)
             var installedPaths: [String] = []
+            var installedHashes: [String: String] = [:]
 
             if isDir.boolValue {
                 try fm.createDirectory(at: destURL, withIntermediateDirectories: true)
@@ -223,7 +235,9 @@ struct ComponentExecutor {
                         try fm.removeItem(at: destFile)
                     }
                     try Self.copyWithSubstitution(from: file, to: destFile, values: resolvedValues)
-                    installedPaths.append(projectRelativePath(destFile, projectPath: projectPath))
+                    let relPath = projectRelativePath(destFile, projectPath: projectPath)
+                    installedPaths.append(relPath)
+                    recordHash(of: destFile, relativePath: relPath, into: &installedHashes)
                 }
             } else {
                 if fm.fileExists(atPath: destURL.path) {
@@ -233,12 +247,14 @@ struct ComponentExecutor {
                 if fileType == .hook {
                     try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destURL.path)
                 }
-                installedPaths.append(projectRelativePath(destURL, projectPath: projectPath))
+                let relPath = projectRelativePath(destURL, projectPath: projectPath)
+                installedPaths.append(relPath)
+                recordHash(of: destURL, relativePath: relPath, into: &installedHashes)
             }
-            return installedPaths
+            return (installedPaths, installedHashes)
         } catch {
             output.warn(error.localizedDescription)
-            return []
+            return ([], [:])
         }
     }
 
@@ -309,6 +325,20 @@ struct ComponentExecutor {
             output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
         }
         return result.succeeded
+    }
+
+    /// Compute and record a SHA-256 hash for a just-installed file.
+    /// Warns (without aborting the install) if hashing fails.
+    private func recordHash(
+        of file: URL,
+        relativePath: String,
+        into hashes: inout [String: String]
+    ) {
+        do {
+            hashes[relativePath] = try FileHasher.sha256(of: file)
+        } catch {
+            output.warn("Could not compute hash for \(relativePath): \(error.localizedDescription)")
+        }
     }
 
     private func projectRelativePath(_ url: URL, projectPath: URL) -> String {
