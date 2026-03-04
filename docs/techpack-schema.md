@@ -520,3 +520,11 @@ templates:
     placeholders: [__FRAMEWORK__]
     contentFile: templates/instructions.md
 ```
+
+---
+
+**Next**: See [Architecture](architecture.md) for how the engine processes your manifest.
+
+---
+
+[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md)

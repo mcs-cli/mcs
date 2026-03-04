@@ -152,7 +152,7 @@ templates:
     contentFile: templates/claude-local.md
 ```
 
-Verbose form is also supported — see [Tech Pack Schema](../docs/techpack-schema.md).
+Verbose form is also supported — see [Tech Pack Schema](techpack-schema.md).
 
 ## Sync Flow
 
@@ -330,6 +330,29 @@ Key operations:
 
 The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (no lock needed). It supports `--global` for global scope, `--dry-run` for preview, and `--non-interactive` for CI use.
 
+## Safety & Trust
+
+`mcs` is designed to be safe to run repeatedly, non-destructive by default, and transparent about what it changes.
+
+| Guarantee | How it works |
+|-----------|-------------|
+| **Backups** | Timestamped backup before modifying files with user content (e.g., `CLAUDE.local.md`). Tool-managed files are not backed up since they can be regenerated. Clean up with `mcs cleanup`. |
+| **Dry Run** | `mcs sync --dry-run` previews all changes without writing any files, so you can inspect exactly what will happen before committing. |
+| **Selective Install** | `mcs sync --customize` lets you deselect individual components. `--all` applies everything without prompts. Both are safe — the engine tracks what was selected. |
+| **Idempotent** | Every `mcs sync` run converges to the same desired state. Safe to run any number of times — re-copies files, re-composes settings, re-registers MCP servers. |
+| **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
+| **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
+| **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. If a hash doesn't match, the pack is rejected. Local packs skip verification since scripts change during development. |
+| **Lockfile** | `mcs.lock.yaml` pins pack commits for reproducible environments. Use `--lock` to check out pinned versions or `--update` to fetch latest and refresh the lockfile. |
+
 ## Concurrency Model
 
 The codebase uses Swift 6's strict concurrency. All core types conform to `Sendable`. `TechPack` is a `Sendable` protocol. No mutable global state exists outside the installer's in-progress mutation context.
+
+---
+
+**Next**: Having issues? See [Troubleshooting](troubleshooting.md).
+
+---
+
+[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md)

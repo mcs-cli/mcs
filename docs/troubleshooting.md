@@ -260,3 +260,11 @@ If `mcs doctor` doesn't identify the problem:
 3. Verify `~/.claude/settings.json` is valid JSON: `python3 -m json.tool ~/.claude/settings.json`
 4. Check `.claude/.mcs-project` in your project for state corruption
 5. Open an issue at the project repository with the output of `mcs doctor`
+
+---
+
+**Back to**: [Documentation Home](README.md)
+
+---
+
+[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md)

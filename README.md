@@ -38,9 +38,7 @@ You've spent hours getting Claude Code just right — MCP servers, plugins, hook
 
 ## The Solution
 
-`mcs` is a **configuration engine for Claude Code**. It lets you package everything — MCP servers, plugins, hooks, skills, commands, agents, settings, and templates — into shareable **tech packs** (Git repos with a `techpack.yaml` manifest). Then sync them across any project, any machine, in seconds.
-
-> Think of it as **Ansible for your Claude Code environment**: declare what you want in a pack, point `mcs` at it, and the engine converges your setup to the desired state — idempotent, composable, and safe to re-run.
+`mcs` is a **configuration engine for Claude Code** — like Ansible for your AI development environment. Package everything into shareable **tech packs** (Git repos with a `techpack.yaml` manifest), then sync them across any project, any machine, in seconds.
 
 | Without `mcs` | With `mcs` |
 |---|---|
@@ -50,21 +48,6 @@ You've spent hours getting Claude Code just right — MCP servers, plugins, hook
 | Configuration drifts silently | `mcs doctor --fix` detects and repairs |
 | Rebuild from memory on new machines | Fully reproducible in minutes |
 | No way to share your setup | Push a pack, anyone can `mcs pack add` it |
-
----
-
-## ✨ Key Features
-
-| | Feature | Description |
-|---|---------|-------------|
-| 📦 | **Tech Packs** | Package your entire Claude setup as a Git repo anyone can install |
-| 🔄 | **Convergent Sync** | Re-run safely — adds what's missing, removes what's deselected, updates what changed |
-| 🩺 | **Self-Healing** | `mcs doctor --fix` detects configuration drift and repairs it automatically |
-| 🎯 | **Per-Project** | Each project gets its own hooks, skills, commands, and settings |
-| 🌍 | **Portable** | Recreate your entire environment on a new machine in minutes |
-| 🔒 | **Safe** | Backups, dry-run previews, section markers, trust verification, lockfiles |
-| 🧩 | **Composable** | Mix and match multiple packs — `mcs` merges them cleanly |
-| 🚀 | **Zero Bundled Content** | Pure engine — all features come from the packs you choose |
 
 ---
 
@@ -113,34 +96,6 @@ That's it. Your MCP servers, plugins, hooks, skills, commands, agents, settings,
 
 ---
 
-## 🎯 Use Cases
-
-### 🧑‍💻 Solo Developer — Portable Setup
-
-Got a new Mac? One `mcs pack add` + `mcs sync` and your entire Claude Code environment is back — every MCP server, every hook, every setting. No wiki, no notes, no memory required.
-
-### 👥 Teams — Consistent Environments
-
-Create a team pack with your org's MCP servers, approved plugins, commit hooks, and coding standards. Every developer gets the same setup:
-
-```bash
-# New team member onboarding
-brew install bguidolim/tap/managed-claude-stack
-mcs pack add your-org/team-claude-pack
-mcs sync --all
-# Done. Everything configured.
-```
-
-### 🌐 Open Source — Instant Contributor Setup
-
-Ship a tech pack with your repo. Contributors run `mcs sync` and get the right MCP servers, project-specific skills, and coding conventions automatically. No setup documentation to maintain.
-
-### 🧪 Experimentation — Try, Swap, Roll Back
-
-Want to try a different set of MCP servers? Add a new pack, sync. Don't like it? Remove and re-sync. `mcs` converges cleanly — deselected packs are fully removed, no leftovers.
-
----
-
 ## 🔍 Real-World Examples
 
 Packs are modular — mix and match what you need instead of one monolith:
@@ -168,135 +123,37 @@ Packs are modular — mix and match what you need instead of one monolith:
               artifacts    artifacts
 ```
 
-When you run `mcs sync` in a project directory:
-
 1. **Select** which packs to apply (interactive multi-select or `--all`)
 2. **Resolve** prompts (auto-detect project files, ask for config values)
-3. **Install** artifacts to the right locations:
+3. **Install** artifacts to the right locations (skills, hooks, commands, agents, settings, MCP servers)
+4. **Track** everything for convergence — re-running `mcs sync` adds what's missing, removes what's deselected, and updates what changed
 
-| Artifact | Location | Scope |
-|----------|----------|-------|
-| MCP servers | `~/.claude.json` | Per-project (keyed by path) |
-| Skills | `<project>/.claude/skills/` | Per-project |
-| Hooks | `<project>/.claude/hooks/` | Per-project |
-| Commands | `<project>/.claude/commands/` | Per-project |
-| Agents | `<project>/.claude/agents/` | Per-project |
-| Settings | `<project>/.claude/settings.local.json` | Per-project |
-| Templates | `<project>/CLAUDE.local.md` | Per-project |
-
-4. **Track** everything in `<project>/.claude/.mcs-project` for convergence
-
-Re-running `mcs sync` converges to the desired state — new packs added, deselected packs fully cleaned up, unchanged packs updated idempotently. It's safe to run as many times as you want.
-
-Use `mcs sync --global` for global-scope components (Homebrew packages, plugins, global MCP servers).
+Use `mcs sync --global` for global-scope components (Homebrew packages, plugins, global MCP servers). See [Architecture](docs/architecture.md) for artifact locations and the full sync flow.
 
 ---
 
 ## 📦 What's in a Tech Pack?
 
-A tech pack is a Git repository with a `techpack.yaml` manifest. It can include any combination of:
-
-| Type | Description | Example |
-|------|-------------|---------|
-| 🍺 `brew` | CLI dependencies | `brew: node` |
-| 🔌 `mcp` | MCP servers (stdio or HTTP) | `mcp: { command: npx, args: [...] }` |
-| 🧩 `plugin` | Claude Code plugins | `plugin: "my-plugin@publisher"` |
-| ⚡ `hook` | Session lifecycle scripts | `hook: { source: hooks/start.sh }` |
-| 🎓 `skill` | Domain knowledge & workflows | `skill: { source: skills/my-skill }` |
-| 💬 `command` | Custom `/slash` commands | `command: { source: commands/deploy.md }` |
-| 🤖 `agent` | Custom subagents | `agent: { source: agents/code-reviewer.md }` |
-| ⚙️ `settingsFile` | Settings for `settings.local.json` | `settingsFile: config/settings.json` |
-| 📝 `templates` | CLAUDE.local.md instructions | Placeholder substitution with `__VAR__` |
-| 🔍 `doctorChecks` | Health verification & auto-repair | Command existence, settings validation |
-
-### Creating Your Own Pack
-
-```bash
-mkdir my-pack && cd my-pack && git init
-
-# Create your techpack.yaml (see docs for full schema)
-cat > techpack.yaml << 'EOF'
-schemaVersion: 1
-identifier: my-pack
-displayName: My Pack
-author: "Your Name"
-
-components:
-  - id: my-server
-    description: My MCP server
-    mcp:
-      command: npx
-      args: ["-y", "my-server@latest"]
-EOF
-
-git add -A && git commit -m "Initial pack"
-# Push to GitHub, then:
-# mcs pack add https://github.com/you/my-pack
-```
+A tech pack is a Git repo with a `techpack.yaml` manifest. It can bundle MCP servers, plugins, hooks, skills, commands, agents, settings, templates, and doctor checks — anything `mcs` can install, verify, and uninstall.
 
 📖 **Full guide:** [Creating Tech Packs](docs/creating-tech-packs.md) · **Schema reference:** [techpack-schema.md](docs/techpack-schema.md)
 
 ---
 
-## 🛡️ Safety & Trust
+## 🎯 Use Cases
 
-| Guarantee | What it means |
-|-----------|---------------|
-| 💾 **Backups** | Timestamped backup before modifying files with user content |
-| 👀 **Dry Run** | `mcs sync --dry-run` previews all changes without applying |
-| 🎛️ **Selective Install** | Choose components with `--customize` or apply all with `--all` |
-| 🔁 **Idempotent** | Safe to re-run any number of times |
-| 📌 **Non-Destructive** | Your content in `CLAUDE.local.md` is preserved via section markers |
-| 🔄 **Convergent** | Deselected packs are fully cleaned up — no orphaned artifacts |
-| 🔐 **Trust Verification** | Pack scripts SHA-256 hashed at add-time, verified at load-time |
-| 📎 **Lockfile** | `mcs.lock.yaml` pins pack commits for reproducible environments |
+- **🧑‍💻 Solo Developer** — New Mac? One `mcs pack add` + `mcs sync` and your entire Claude Code environment is back. No wiki, no notes, no memory required.
+- **👥 Teams** — Create a team pack with your org's MCP servers, approved plugins, and coding standards. Every developer gets the same setup with `mcs sync --all`.
+- **🌐 Open Source** — Ship a tech pack with your repo. Contributors run `mcs sync` and get the right MCP servers, skills, and conventions automatically.
+- **🧪 Experimentation** — Try a different set of MCP servers, swap packs, roll back. `mcs` converges cleanly — deselected packs are fully removed, no leftovers.
 
 ---
 
-## 📖 Commands Reference
+## 🛡️ Safety & Trust
 
-### Sync (primary command)
+`mcs` is designed to be non-destructive and transparent. Timestamped backups before modifying user content, `--dry-run` to preview changes, section markers to preserve your edits in `CLAUDE.local.md`, and SHA-256 trust verification for pack scripts. Lockfiles (`mcs.lock.yaml`) pin pack versions for reproducible environments.
 
-```bash
-mcs sync [path]                  # Interactive project sync (default command)
-mcs sync --pack <name>           # Non-interactive: apply specific pack(s) (repeatable)
-mcs sync --all                   # Apply all registered packs without prompts
-mcs sync --dry-run               # Preview what would change
-mcs sync --customize             # Per-pack component selection
-mcs sync --global                # Install to global scope (~/.claude/)
-mcs sync --lock                  # Checkout locked versions from mcs.lock.yaml
-mcs sync --update                # Fetch latest and update mcs.lock.yaml
-```
-
-### Pack Management
-
-```bash
-mcs pack add <source>            # Add a tech pack (git URL, GitHub shorthand, or local path)
-mcs pack add user/repo           # GitHub shorthand → https://github.com/user/repo.git
-mcs pack add /path/to/pack       # Add a local pack (read in-place, no clone)
-mcs pack add <url> --ref <tag>   # Pin to a specific tag, branch, or commit (git only)
-mcs pack add <url> --preview     # Preview pack contents without installing
-mcs pack remove <name>           # Remove a registered pack
-mcs pack remove <name> --force   # Remove without confirmation
-mcs pack list                    # List registered packs
-mcs pack update [name]           # Update pack(s) to latest version (skips local packs)
-```
-
-### Health Checks
-
-```bash
-mcs doctor                       # Diagnose installation health
-mcs doctor --fix                 # Diagnose and auto-fix issues
-mcs doctor --pack <name>         # Check a specific pack only
-mcs doctor --global              # Check globally-configured packs only
-```
-
-### Maintenance
-
-```bash
-mcs cleanup                      # Find and delete backup files
-mcs cleanup --force              # Delete backups without confirmation
-```
+📖 **Full details:** [Architecture > Safety & Trust](docs/architecture.md#safety--trust)
 
 ---
 
@@ -312,9 +169,10 @@ The perfect complement to `mcs`: configure your environment with `mcs`, then use
 
 | Document | Description |
 |----------|-------------|
+| 📖 [CLI Reference](docs/cli.md) | Complete command reference (`sync`, `pack`, `doctor`, `export`, `cleanup`) |
 | 📖 [Creating Tech Packs](docs/creating-tech-packs.md) | Step-by-step guide to building your first pack |
 | 📋 [Tech Pack Schema](docs/techpack-schema.md) | Complete `techpack.yaml` field reference |
-| 🏗️ [Architecture](docs/architecture.md) | Internal design, sync flow, and extension points |
+| 🏗️ [Architecture](docs/architecture.md) | Internal design, sync flow, safety guarantees, and extension points |
 | 🔧 [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
 
 ---

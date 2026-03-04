@@ -604,3 +604,11 @@ mcs sync                  # Local packs pick up changes automatically
 
 - [Schema Reference](techpack-schema.md) — complete field-by-field reference for `techpack.yaml`
 - [Troubleshooting](troubleshooting.md) — common issues and solutions
+
+---
+
+**Next**: See the [Schema Reference](techpack-schema.md) for complete field documentation.
+
+---
+
+[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md)
