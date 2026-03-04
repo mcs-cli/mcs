@@ -6,7 +6,7 @@ import Foundation
 /// structured access by configurators and doctor checks). All other top-level
 /// keys flow through `extraJSON` — a `[String: Data]` bag of serialized JSON
 /// fragments — so any key works without code changes.
-struct Settings: Codable, Sendable {
+struct Settings: Codable {
     var hooks: [String: [HookGroup]]?
     var enabledPlugins: [String: Bool]?
 
@@ -17,12 +17,12 @@ struct Settings: Codable, Sendable {
 
     // MARK: - Nested Types
 
-    struct HookGroup: Codable, Sendable {
+    struct HookGroup: Codable {
         var matcher: String?
         var hooks: [HookEntry]?
     }
 
-    struct HookEntry: Codable, Sendable {
+    struct HookEntry: Codable {
         var type: String?
         var command: String?
     }
@@ -181,11 +181,12 @@ struct Settings: Codable, Sendable {
     /// Load settings from a JSON file. Returns empty settings if file doesn't exist.
     /// Unknown top-level keys are captured into `extraJSON` as serialized Data fragments.
     static func load(from url: URL) throws -> Settings {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return Settings()
         }
-        let data = try Data(contentsOf: url)
         return try decode(from: data)
     }
 
@@ -194,14 +195,15 @@ struct Settings: Codable, Sendable {
     /// then parses the substituted text as JSON.
     static func load(from url: URL, substituting values: [String: String]) throws -> Settings {
         guard !values.isEmpty else { return try load(from: url) }
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: url.path) else {
+        let rawText: String
+        do {
+            rawText = try String(contentsOf: url, encoding: .utf8)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             return Settings()
         }
         // JSON-escape substitution values so embedded quotes, backslashes, or newlines
         // don't produce invalid JSON when placed inside string literals.
         let escaped = try jsonEscapeValues(values)
-        let rawText = try String(contentsOf: url, encoding: .utf8)
         let substituted = TemplateEngine.substitute(template: rawText, values: escaped, emitWarnings: false)
         return try decode(from: Data(substituted.utf8))
     }
