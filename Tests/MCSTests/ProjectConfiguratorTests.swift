@@ -1675,6 +1675,10 @@ private final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
         let name: String
     }
 
+    var isAvailable: Bool {
+        true
+    }
+
     var mcpAddCalls: [MCPAddCall] = []
     var mcpRemoveCalls: [MCPRemoveCall] = []
     var pluginMarketplaceAddCalls: [String] = []

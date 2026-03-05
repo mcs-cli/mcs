@@ -2,6 +2,8 @@ import Foundation
 
 /// Protocol for Claude CLI operations, enabling test mocks to avoid real shell calls.
 protocol ClaudeCLI: Sendable {
+    /// Whether the Claude CLI is available on the system.
+    var isAvailable: Bool { get }
     @discardableResult
     func mcpAdd(name: String, scope: String, arguments: [String]) -> ShellResult
     @discardableResult
@@ -17,6 +19,10 @@ protocol ClaudeCLI: Sendable {
 /// Wrapper for the `claude` CLI to manage MCP servers and plugins.
 struct ClaudeIntegration: ClaudeCLI {
     let shell: ShellRunner
+
+    var isAvailable: Bool {
+        shell.commandExists(Constants.CLI.claudeCommand)
+    }
 
     /// The claude CLI command, with CLAUDECODE unset to avoid nesting checks.
     private var claudeEnv: [String: String] {

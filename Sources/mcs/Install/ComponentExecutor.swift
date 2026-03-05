@@ -30,7 +30,7 @@ struct ComponentExecutor {
 
     /// Register an MCP server via the Claude CLI.
     func installMCPServer(_ config: MCPServerConfig) -> Bool {
-        guard shell.commandExists(Constants.CLI.claudeCommand) else {
+        guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, skipping MCP server")
             return false
         }
@@ -55,7 +55,7 @@ struct ComponentExecutor {
 
     /// Install a plugin via the Claude CLI.
     func installPlugin(_ fullName: String) -> Bool {
-        guard shell.commandExists(Constants.CLI.claudeCommand) else {
+        guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, skipping plugin")
             return false
         }
@@ -81,7 +81,7 @@ struct ComponentExecutor {
 
     /// Remove a plugin via the Claude CLI. Returns `true` if removal succeeded.
     func removePlugin(_ fullName: String) -> Bool {
-        guard shell.commandExists(Constants.CLI.claudeCommand) else {
+        guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, cannot remove plugin")
             return false
         }
