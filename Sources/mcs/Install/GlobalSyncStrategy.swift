@@ -75,12 +75,12 @@ struct GlobalSyncStrategy: SyncStrategy {
                     command: resolved.command,
                     args: resolved.args,
                     env: resolved.env,
-                    scope: "user"
+                    scope: Constants.MCPScope.user
                 )
                 if executor.installMCPServer(globalConfig) {
                     artifacts.mcpServers.append(MCPServerRef(
                         name: resolved.name,
-                        scope: "user"
+                        scope: Constants.MCPScope.user
                     ))
                     output.success("  \(component.displayName) registered (scope: user)")
                 }

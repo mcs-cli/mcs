@@ -429,6 +429,9 @@ struct Configurator {
             guard !excludedDefs.isEmpty else { continue }
 
             let exec = makeExecutor()
+            let refCounter = ResourceRefCounter(
+                environment: environment, output: output, registry: registry
+            )
             let suffix = scope.labelSuffix
             output.info("Removing excluded components from \(pack.displayName)\(suffix)...")
 
@@ -457,9 +460,6 @@ struct Configurator {
                     }
 
                 case let .brewInstall(package):
-                    let refCounter = ResourceRefCounter(
-                        environment: environment, output: output, registry: registry
-                    )
                     if refCounter.isStillNeeded(
                         .brewPackage(package),
                         excludingScope: scope.scopeIdentifier,
@@ -472,9 +472,6 @@ struct Configurator {
                     }
 
                 case let .plugin(name):
-                    let refCounter = ResourceRefCounter(
-                        environment: environment, output: output, registry: registry
-                    )
                     if refCounter.isStillNeeded(
                         .plugin(name),
                         excludingScope: scope.scopeIdentifier,
@@ -527,14 +524,6 @@ struct Configurator {
         }
     }
 
-    /// Remove artifacts that were tracked in the previous sync but are absent from the current one.
-    ///
-    /// After `installArtifacts()` produces a fresh `PackArtifactRecord`, this method diffs it
-    /// against the previous record to find stale artifacts (from removed/renamed components or
-    /// scope changes) and cleans them up. This closes convergence gaps where `installArtifacts`
-    /// rebuilds from scratch without consulting the previous record.
-    ///
-    /// Template sections are handled separately in step 7b.
     /// Resolve all template/placeholder values upfront (single pass).
     ///
     /// Resolves built-in values (e.g. REPO_NAME), shared cross-pack prompts,
@@ -703,6 +692,11 @@ struct Configurator {
         }
     }
 
+    /// Remove artifacts that were tracked in the previous sync but are absent from the current one.
+    ///
+    /// After `installArtifacts()` produces a fresh `PackArtifactRecord`, this method diffs it
+    /// against the previous record to find stale artifacts (from removed/renamed components or
+    /// scope changes) and cleans them up. Template sections are handled separately in step 7b.
     private func reconcileStaleArtifacts(
         previousArtifacts: PackArtifactRecord?,
         currentArtifacts: PackArtifactRecord,
@@ -740,9 +734,10 @@ struct Configurator {
             }
         }
 
-        // Brew packages (ref-counted)
+        // Brew packages and plugins (ref-counted)
         let staleBrew = Set(previous.brewPackages).subtracting(currentArtifacts.brewPackages)
-        if !staleBrew.isEmpty {
+        let stalePlugins = Set(previous.plugins).subtracting(currentArtifacts.plugins)
+        if !staleBrew.isEmpty || !stalePlugins.isEmpty {
             let refCounter = ResourceRefCounter(
                 environment: environment, output: output, registry: registry
             )
@@ -757,14 +752,6 @@ struct Configurator {
                     output.dimmed("  Removed stale brew package: \(package)")
                 }
             }
-        }
-
-        // Plugins (ref-counted)
-        let stalePlugins = Set(previous.plugins).subtracting(currentArtifacts.plugins)
-        if !stalePlugins.isEmpty {
-            let refCounter = ResourceRefCounter(
-                environment: environment, output: output, registry: registry
-            )
             for name in stalePlugins {
                 if refCounter.isStillNeeded(
                     .plugin(name),

@@ -91,6 +91,16 @@ enum Constants {
         ]
     }
 
+    // MARK: - MCP Scopes
+
+    enum MCPScope {
+        /// Per-user, per-project isolation (default for project scope).
+        static let local = "local"
+
+        /// Cross-project scope (used for global scope).
+        static let user = "user"
+    }
+
     // MARK: - Plugins
 
     enum Plugins {

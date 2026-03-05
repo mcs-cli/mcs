@@ -5,7 +5,7 @@ import Foundation
 /// Captures all path-level and flag-level differences between project-scoped
 /// and global-scoped sync, so the unified `Configurator` never needs to branch
 /// on scope identity for trivially parameterizable values.
-struct SyncScope: Sendable {
+struct SyncScope {
     /// Display label for output messages ("Project" or "Global").
     let label: String
 
@@ -89,7 +89,7 @@ extension SyncScope {
             settingsPath: environment.claudeSettings,
             claudeFilePath: environment.globalClaudeMD,
             scopeIdentifier: ProjectIndex.globalSentinel,
-            mcpScopeOverride: "user",
+            mcpScopeOverride: Constants.MCPScope.user,
             includeTemplatesInScan: false,
             runConfigureProjectHooks: false,
             isGlobalScope: true,

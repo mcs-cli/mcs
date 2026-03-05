@@ -288,15 +288,12 @@ struct DoctorRunner {
             )]
         }
 
-        let globalExcluded = globalExcludedComponentIDs
-        let globalArtifacts = globalArtifactsByPack
-
         // --global flag: single global scope
         if globalOnly {
             return [globalScope(
                 globallyConfiguredPackIDs,
-                artifactsByPack: globalArtifacts,
-                excludedComponentIDs: globalExcluded
+                artifactsByPack: globalArtifactsByPack,
+                excludedComponentIDs: globalExcludedComponentIDs
             )]
         }
 
@@ -316,8 +313,8 @@ struct DoctorRunner {
             if !globalOnlyIDs.isEmpty {
                 scopes.append(globalScope(
                     globalOnlyIDs,
-                    artifactsByPack: globalArtifacts,
-                    excludedComponentIDs: globalExcluded
+                    artifactsByPack: globalArtifactsByPack,
+                    excludedComponentIDs: globalExcludedComponentIDs
                 ))
             }
 
@@ -325,8 +322,8 @@ struct DoctorRunner {
             if scopes.isEmpty {
                 scopes.append(globalScope(
                     globallyConfiguredPackIDs,
-                    artifactsByPack: globalArtifacts,
-                    excludedComponentIDs: globalExcluded
+                    artifactsByPack: globalArtifactsByPack,
+                    excludedComponentIDs: globalExcludedComponentIDs
                 ))
             }
 
@@ -336,8 +333,8 @@ struct DoctorRunner {
         // Not in a project — global packs only
         return [globalScope(
             globallyConfiguredPackIDs,
-            artifactsByPack: globalArtifacts,
-            excludedComponentIDs: globalExcluded
+            artifactsByPack: globalArtifactsByPack,
+            excludedComponentIDs: globalExcludedComponentIDs
         )]
     }
 
