@@ -34,8 +34,6 @@ struct ComponentExecutor {
             output.warn("Claude Code CLI not found, skipping MCP server")
             return false
         }
-        let claude = claudeCLI
-
         var args: [String] = []
         for (key, value) in config.env.sorted(by: { $0.key < $1.key }) {
             args.append(contentsOf: ["-e", "\(key)=\(value)"])
@@ -49,7 +47,7 @@ struct ComponentExecutor {
             args.append(contentsOf: config.args)
         }
 
-        let result = claude.mcpAdd(name: config.name, scope: config.resolvedScope, arguments: args)
+        let result = claudeCLI.mcpAdd(name: config.name, scope: config.resolvedScope, arguments: args)
         return result.succeeded
     }
 
@@ -61,9 +59,8 @@ struct ComponentExecutor {
             output.warn("Claude Code CLI not found, skipping plugin")
             return false
         }
-        let claude = claudeCLI
         let ref = PluginRef(fullName)
-        let result = claude.pluginInstall(ref: ref)
+        let result = claudeCLI.pluginInstall(ref: ref)
         return result.succeeded
     }
 
@@ -88,9 +85,8 @@ struct ComponentExecutor {
             output.warn("Claude Code CLI not found, cannot remove plugin")
             return false
         }
-        let claude = claudeCLI
         let ref = PluginRef(fullName)
-        let result = claude.pluginRemove(ref: ref)
+        let result = claudeCLI.pluginRemove(ref: ref)
         if !result.succeeded {
             output.warn("Could not remove plugin '\(ref.bareName)': \(result.stderr)")
         }
@@ -337,8 +333,7 @@ struct ComponentExecutor {
     /// Returns `true` if removal succeeded.
     @discardableResult
     func removeMCPServer(name: String, scope: String) -> Bool {
-        let claude = claudeCLI
-        let result = claude.mcpRemove(name: name, scope: scope)
+        let result = claudeCLI.mcpRemove(name: name, scope: scope)
         if !result.succeeded {
             output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
         }

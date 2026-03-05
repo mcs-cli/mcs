@@ -16,14 +16,13 @@ struct DryRunTests {
 
     private func makeConfigurator(projectPath: URL, home: URL? = nil) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: output,
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: MockClaudeCLI()
         )
-        configurator.claudeCLI = MockClaudeCLI()
-        return configurator
     }
 
     @Test("Dry run does not create any files")
@@ -168,14 +167,13 @@ struct PackSettingsMergeTests {
 
     private func makeConfigurator(projectPath: URL, home: URL? = nil) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: output,
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: MockClaudeCLI()
         )
-        configurator.claudeCLI = MockClaudeCLI()
-        return configurator
     }
 
     /// Write a JSON settings file and return its URL.
@@ -562,14 +560,13 @@ struct AutoDerivedSettingsTests {
 
     private func makeConfigurator(projectPath: URL, home: URL? = nil) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: output,
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: MockClaudeCLI()
         )
-        configurator.claudeCLI = MockClaudeCLI()
-        return configurator
     }
 
     /// Create a pack with a hookFile component that has hookEvent set.
@@ -820,14 +817,13 @@ struct ConfiguratorExcludedComponentsTests {
         mockCLI: MockClaudeCLI = MockClaudeCLI()
     ) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: CLIOutput(),
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: mockCLI
         )
-        configurator.claudeCLI = mockCLI
-        return configurator
     }
 
     @Test("Excluded component is not installed")
@@ -1308,14 +1304,13 @@ struct StaleArtifactReconciliationTests {
         mockCLI: MockClaudeCLI = MockClaudeCLI()
     ) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: mockCLI
         )
-        configurator.claudeCLI = mockCLI
-        return configurator
     }
 
     @Test("Stale file is removed when component is dropped from pack")
@@ -1622,14 +1617,13 @@ struct CorruptStateAbortTests {
 
     private func makeConfigurator(projectPath: URL, home: URL? = nil) -> Configurator {
         let env = Environment(home: home)
-        var configurator = Configurator(
+        return Configurator(
             environment: env,
             output: output,
             shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
+            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
+            claudeCLI: MockClaudeCLI()
         )
-        configurator.claudeCLI = MockClaudeCLI()
-        return configurator
     }
 
     @Test("configure throws when .mcs-project is corrupt")

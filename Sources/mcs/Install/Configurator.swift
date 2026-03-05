@@ -9,9 +9,25 @@ struct Configurator {
     let environment: Environment
     let output: CLIOutput
     let shell: ShellRunner
-    var registry: TechPackRegistry = .shared
+    var registry: TechPackRegistry
     let strategy: any SyncStrategy
-    var claudeCLI: (any ClaudeCLI)?
+    let claudeCLI: any ClaudeCLI
+
+    init(
+        environment: Environment,
+        output: CLIOutput,
+        shell: ShellRunner,
+        registry: TechPackRegistry = .shared,
+        strategy: any SyncStrategy,
+        claudeCLI: (any ClaudeCLI)? = nil
+    ) {
+        self.environment = environment
+        self.output = output
+        self.shell = shell
+        self.registry = registry
+        self.strategy = strategy
+        self.claudeCLI = claudeCLI ?? ClaudeIntegration(shell: shell)
+    }
 
     private var scope: SyncScope {
         strategy.scope
@@ -865,7 +881,7 @@ struct Configurator {
     // MARK: - Helpers
 
     private func makeExecutor() -> ComponentExecutor {
-        ConfiguratorSupport.makeExecutor(
+        ComponentExecutor(
             environment: environment, output: output, shell: shell, claudeCLI: claudeCLI
         )
     }
