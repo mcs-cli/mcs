@@ -257,13 +257,18 @@ struct DoctorRunner {
             var artifacts: [String: PackArtifactRecord] = [:]
             var excludedIDs: Set<String> = []
             if let root = effectiveRoot {
-                if let state = try? ProjectState(projectRoot: root), state.exists {
-                    excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
-                    for id in packIDs {
-                        if let record = state.artifacts(for: id) {
-                            artifacts[id] = record
+                do {
+                    let state = try ProjectState(projectRoot: root)
+                    if state.exists {
+                        excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
+                        for id in packIDs {
+                            if let record = state.artifacts(for: id) {
+                                artifacts[id] = record
+                            }
                         }
                     }
+                } catch {
+                    output.warn("Could not read project state: \(error.localizedDescription)")
                 }
             } else {
                 // Global scope — use pre-loaded artifacts and exclusions
