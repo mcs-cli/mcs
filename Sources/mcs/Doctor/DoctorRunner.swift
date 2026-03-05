@@ -60,11 +60,13 @@ struct DoctorRunner {
         // trigger doctor checks.
         let globallyConfiguredPackIDs: Set<String>
         let globalArtifactsByPack: [String: PackArtifactRecord]
+        let globalExcludedComponentIDs: Set<String>
         do {
             let globalState = try ProjectState(stateFile: env.globalStateFile)
             if globalState.exists {
                 // Global state file exists — use its configured packs (may be empty)
                 globallyConfiguredPackIDs = globalState.configuredPacks
+                globalExcludedComponentIDs = Set(globalState.allExcludedComponents.values.flatMap(\.self))
                 var artifacts: [String: PackArtifactRecord] = [:]
                 for packID in globalState.configuredPacks {
                     if let record = globalState.artifacts(for: packID) {
@@ -75,6 +77,7 @@ struct DoctorRunner {
             } else {
                 // No global state file yet — fall back to registry for backward compat
                 globalArtifactsByPack = [:]
+                globalExcludedComponentIDs = []
                 let packRegistry = PackRegistryFile(path: env.packsRegistry)
                 do {
                     globallyConfiguredPackIDs = try Set((packRegistry.load()).packs.map(\.identifier))
@@ -86,6 +89,7 @@ struct DoctorRunner {
         } catch {
             // Corrupt state file — fall back to registry
             globalArtifactsByPack = [:]
+            globalExcludedComponentIDs = []
             output.warn("Could not read global state: \(error.localizedDescription) — falling back to pack registry")
             let packRegistry = PackRegistryFile(path: env.packsRegistry)
             do {
@@ -103,7 +107,8 @@ struct DoctorRunner {
         let scopes = resolveCheckScopes(
             projectRoot: projectRoot,
             globallyConfiguredPackIDs: globallyConfiguredPackIDs,
-            globalArtifactsByPack: globalArtifactsByPack
+            globalArtifactsByPack: globalArtifactsByPack,
+            globalExcludedComponentIDs: globalExcludedComponentIDs
         )
 
         // Display resolved packs per scope
@@ -241,16 +246,19 @@ struct DoctorRunner {
     private func resolveCheckScopes(
         projectRoot: URL?,
         globallyConfiguredPackIDs: Set<String>,
-        globalArtifactsByPack: [String: PackArtifactRecord]
+        globalArtifactsByPack: [String: PackArtifactRecord],
+        globalExcludedComponentIDs: Set<String>
     ) -> [CheckScope] {
         // --pack flag: single scope, use globalOnly to determine effective root
         if let filter = packFilter {
             let packIDs = Set(filter.components(separatedBy: ","))
             let effectiveRoot = globalOnly ? nil : projectRoot
-            // Load artifacts from the appropriate state so content drift checks work
+            // Load artifacts and excluded components from the appropriate state
             var artifacts: [String: PackArtifactRecord] = [:]
+            var excludedIDs: Set<String> = []
             if let root = effectiveRoot {
                 if let state = try? ProjectState(projectRoot: root), state.exists {
+                    excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                     for id in packIDs {
                         if let record = state.artifacts(for: id) {
                             artifacts[id] = record
@@ -258,7 +266,8 @@ struct DoctorRunner {
                     }
                 }
             } else {
-                // Global scope — use pre-loaded artifacts
+                // Global scope — use pre-loaded artifacts and exclusions
+                excludedIDs = globalExcludedComponentIDs
                 for id in packIDs {
                     if let record = globalArtifactsByPack[id] {
                         artifacts[id] = record
@@ -268,15 +277,22 @@ struct DoctorRunner {
             return [CheckScope(
                 packIDs: packIDs,
                 effectiveProjectRoot: effectiveRoot,
-                excludedComponentIDs: [],
+                excludedComponentIDs: excludedIDs,
                 label: "--pack flag",
                 artifactsByPack: artifacts
             )]
         }
 
+        let globalExcluded = globalExcludedComponentIDs
+        let globalArtifacts = globalArtifactsByPack
+
         // --global flag: single global scope
         if globalOnly {
-            return [globalScope(globallyConfiguredPackIDs, artifactsByPack: globalArtifactsByPack)]
+            return [globalScope(
+                globallyConfiguredPackIDs,
+                artifactsByPack: globalArtifacts,
+                excludedComponentIDs: globalExcluded
+            )]
         }
 
         // In a project: resolve project packs, then append global-only packs
@@ -293,19 +309,31 @@ struct DoctorRunner {
             // Append packs that are globally configured but not in the project scope
             let globalOnlyIDs = globallyConfiguredPackIDs.subtracting(projectPackIDs)
             if !globalOnlyIDs.isEmpty {
-                scopes.append(globalScope(globalOnlyIDs, artifactsByPack: globalArtifactsByPack))
+                scopes.append(globalScope(
+                    globalOnlyIDs,
+                    artifactsByPack: globalArtifacts,
+                    excludedComponentIDs: globalExcluded
+                ))
             }
 
             // If nothing was found at all, fall back to the full global set
             if scopes.isEmpty {
-                scopes.append(globalScope(globallyConfiguredPackIDs, artifactsByPack: globalArtifactsByPack))
+                scopes.append(globalScope(
+                    globallyConfiguredPackIDs,
+                    artifactsByPack: globalArtifacts,
+                    excludedComponentIDs: globalExcluded
+                ))
             }
 
             return scopes
         }
 
         // Not in a project — global packs only
-        return [globalScope(globallyConfiguredPackIDs, artifactsByPack: globalArtifactsByPack)]
+        return [globalScope(
+            globallyConfiguredPackIDs,
+            artifactsByPack: globalArtifacts,
+            excludedComponentIDs: globalExcluded
+        )]
     }
 
     /// Resolves the project-scoped `CheckScope` for the given project root.
@@ -361,12 +389,13 @@ struct DoctorRunner {
     /// Creates a global-scope `CheckScope` with the given pack IDs.
     private func globalScope(
         _ packIDs: Set<String>,
-        artifactsByPack: [String: PackArtifactRecord]
+        artifactsByPack: [String: PackArtifactRecord],
+        excludedComponentIDs: Set<String> = []
     ) -> CheckScope {
         CheckScope(
             packIDs: packIDs,
             effectiveProjectRoot: nil,
-            excludedComponentIDs: [],
+            excludedComponentIDs: excludedComponentIDs,
             label: "global",
             artifactsByPack: artifactsByPack
         )
