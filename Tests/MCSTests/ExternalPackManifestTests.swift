@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ExternalPackManifest")
 struct ExternalPackManifestTests {
     /// Create a unique temp directory for each test.
     private func makeTmpDir() throws -> URL {
@@ -1632,6 +1631,118 @@ struct ExternalPackManifestTests {
 
         // Should not throw — normalized section IDs now have the correct prefix
         try normalized.validate()
+    }
+
+    // MARK: - Template dependency normalization and validation
+
+    @Test("normalized() auto-prefixes template dependencies")
+    func normalizeTemplateDependencies() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: serena
+            displayName: Serena
+            description: LSP
+            type: mcpServer
+            installAction:
+              type: mcpServer
+              name: serena
+              command: uvx
+              args: [serena]
+        templates:
+          - sectionIdentifier: serena
+            contentFile: templates/serena.md
+            dependencies:
+              - serena
+        """
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let raw = try ExternalPackManifest.load(from: file)
+        let normalized = try raw.normalized()
+
+        #expect(normalized.templates?[0].dependencies == ["my-pack.serena"])
+    }
+
+    @Test("validate() rejects template dependency referencing nonexistent component")
+    func rejectTemplateDependencyMismatch() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: my-pack.serena
+            contentFile: templates/serena.md
+            dependencies:
+              - my-pack.nonexistent
+        """
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        #expect(throws: ManifestError.templateDependencyMismatch(
+            sectionIdentifier: "my-pack.serena",
+            componentID: "my-pack.nonexistent"
+        )) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("normalized() rejects template dependency containing dots")
+    func normalizeRejectsDottedTemplateDep() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: serena
+            contentFile: templates/serena.md
+            dependencies:
+              - my-pack.serena
+        """
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let raw = try ExternalPackManifest.load(from: file)
+        #expect(throws: ManifestError.dotInRawID("my-pack.serena")) {
+            try raw.normalized()
+        }
+    }
+
+    @Test("validate() accepts template with no dependencies")
+    func acceptTemplateWithoutDependencies() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        templates:
+          - sectionIdentifier: my-pack.main
+            contentFile: templates/main.md
+        """
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        try manifest.validate()
+        #expect(manifest.templates?[0].dependencies == nil)
     }
 
     // MARK: - Dependency resolution validation

@@ -92,12 +92,21 @@ extension ExternalPackManifest {
 
         // Template section identifiers must be prefixed with pack identifier
         if let templates {
+            let componentIDs = Set(components?.map(\.id) ?? [])
             for template in templates {
                 guard template.sectionIdentifier.hasPrefix("\(identifier).") else {
                     throw ManifestError.templateSectionMismatch(
                         sectionIdentifier: template.sectionIdentifier,
                         packIdentifier: identifier
                     )
+                }
+                for dep in template.dependencies ?? [] {
+                    guard componentIDs.contains(dep) else {
+                        throw ManifestError.templateDependencyMismatch(
+                            sectionIdentifier: template.sectionIdentifier,
+                            componentID: dep
+                        )
+                    }
                 }
             }
         }
@@ -194,6 +203,12 @@ extension ExternalPackManifest {
                 throw ManifestError.dotInRawID(t.sectionIdentifier)
             }
             t.sectionIdentifier = prefix + t.sectionIdentifier
+            t.dependencies = try t.dependencies?.map { dep in
+                guard !dep.contains(".") else {
+                    throw ManifestError.dotInRawID(dep)
+                }
+                return prefix + dep
+            }
             return t
         }
         return ExternalPackManifest(
@@ -225,6 +240,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case duplicatePromptKey(String)
     case invalidDoctorCheck(name: String, reason: String)
     case dotInRawID(String)
+    case templateDependencyMismatch(sectionIdentifier: String, componentID: String)
     case unresolvedDependency(componentID: String, dependency: String)
     case invalidHookEvent(componentID: String, hookEvent: String)
 
@@ -242,6 +258,8 @@ enum ManifestError: Error, Equatable, LocalizedError {
             "Duplicate component ID: '\(id)'"
         case let .templateSectionMismatch(section, pack):
             "Template section '\(section)' must be prefixed with '\(pack).' (e.g. '\(pack).main')"
+        case let .templateDependencyMismatch(section, component):
+            "Template '\(section)' depends on component '\(component)' which does not exist in the pack"
         case let .duplicatePromptKey(key):
             "Duplicate prompt key: '\(key)'"
         case let .invalidDoctorCheck(name, reason):
@@ -665,6 +683,7 @@ struct ExternalTemplateDefinition: Codable {
     var sectionIdentifier: String
     let placeholders: [String]?
     let contentFile: String
+    var dependencies: [String]?
 }
 
 // MARK: - Configure Project

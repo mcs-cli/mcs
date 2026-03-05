@@ -193,11 +193,16 @@ struct Configurator {
         // 4b. Persist resolved values for doctor freshness checks
         state.setResolvedValues(allValues)
 
-        // 4c. Pre-load templates (single disk read per pack)
+        // 4c. Pre-load templates (single disk read per pack), filtering excluded dependencies
         var preloadedTemplates: [String: [TemplateContribution]] = [:]
         for pack in packs {
             do {
-                preloadedTemplates[pack.identifier] = try pack.templates
+                let excluded = excludedComponents[pack.identifier] ?? []
+                let allTemplates = try pack.templates
+                preloadedTemplates[pack.identifier] = allTemplates.filter { template in
+                    template.dependencies.isEmpty
+                        || !template.dependencies.contains(where: excluded.contains)
+                }
             } catch {
                 output.warn("Could not load templates for \(pack.displayName): \(error.localizedDescription)")
             }

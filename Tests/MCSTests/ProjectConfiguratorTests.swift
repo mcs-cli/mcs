@@ -899,6 +899,67 @@ struct ConfiguratorExcludedComponentsTests {
         #expect(reloaded.excludedComponents(for: "my-pack").isEmpty)
         #expect(!reloaded.configuredPacks.contains("my-pack"))
     }
+
+    @Test("Excluded component filters its dependent template from CLAUDE.local.md")
+    func excludedComponentFiltersTemplate() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        let pack = MockTechPack(
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            components: [
+                ComponentDefinition(
+                    id: "test-pack.serena",
+                    displayName: "Serena",
+                    description: "LSP navigation",
+                    type: .mcpServer,
+                    packIdentifier: "test-pack",
+                    dependencies: [],
+                    isRequired: false,
+                    installAction: .mcpServer(MCPServerConfig(
+                        name: "serena", command: "uvx", args: ["serena"], env: [:]
+                    ))
+                ),
+            ],
+            templates: [
+                TemplateContribution(
+                    sectionIdentifier: "test-pack.serena",
+                    templateContent: "## Serena instructions",
+                    placeholders: [],
+                    dependencies: ["test-pack.serena"]
+                ),
+                TemplateContribution(
+                    sectionIdentifier: "test-pack.git",
+                    templateContent: "## Git instructions",
+                    placeholders: []
+                ),
+            ]
+        )
+
+        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
+
+        // Exclude serena component
+        try configurator.configure(
+            packs: [pack],
+            confirmRemovals: false,
+            excludedComponents: ["test-pack": ["test-pack.serena"]]
+        )
+
+        // CLAUDE.local.md should have git template but NOT serena template
+        let claudeLocalPath = tmpDir.appendingPathComponent("CLAUDE.local.md")
+        let content = try String(contentsOf: claudeLocalPath, encoding: .utf8)
+        #expect(content.contains("Git instructions"))
+        #expect(!content.contains("Serena instructions"))
+
+        // Artifact record should only track the git template section
+        let state = try ProjectState(projectRoot: tmpDir)
+        let artifacts = state.artifacts(for: "test-pack")
+        #expect(artifacts?.templateSections == ["test-pack.git"])
+    }
 }
 
 // MARK: - Corrupt State Abort Tests

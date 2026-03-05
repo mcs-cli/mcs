@@ -57,7 +57,8 @@ struct ExternalPackAdapter: TechPack {
                 return TemplateContribution(
                     sectionIdentifier: ext.sectionIdentifier,
                     templateContent: content,
-                    placeholders: ext.placeholders ?? []
+                    placeholders: ext.placeholders ?? [],
+                    dependencies: ext.dependencies ?? []
                 )
             }
         }

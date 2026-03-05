@@ -30,6 +30,19 @@ struct TemplateContribution {
     let sectionIdentifier: String // e.g., "ios"
     let templateContent: String // The template content with placeholders
     let placeholders: [String] // Required placeholder names (e.g., ["__PROJECT__"])
+    let dependencies: [String]
+
+    init(
+        sectionIdentifier: String,
+        templateContent: String,
+        placeholders: [String],
+        dependencies: [String] = []
+    ) {
+        self.sectionIdentifier = sectionIdentifier
+        self.templateContent = templateContent
+        self.placeholders = placeholders
+        self.dependencies = dependencies
+    }
 }
 
 /// Protocol that all tech packs must conform to.
