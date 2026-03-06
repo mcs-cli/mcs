@@ -235,19 +235,17 @@ struct GitignoreCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let shell = ShellRunner(environment: Environment())
-        let gitignoreManager = GitignoreManager(shell: shell)
-        let gitignorePath = gitignoreManager.resolveGlobalGitignorePath()
-        guard FileManager.default.fileExists(atPath: gitignorePath.path),
-              let content = try? String(contentsOf: gitignorePath, encoding: .utf8)
-        else {
-            return .fail("global gitignore not found")
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
+        let lines: Set<String>
+        do {
+            guard let result = try gitignoreManager.readLines() else {
+                return .fail("global gitignore not found")
+            }
+            lines = result
+        } catch {
+            return .fail("global gitignore unreadable: \(error.localizedDescription)")
         }
-        let allEntries = GitignoreManager.coreEntries
-        var missing: [String] = []
-        for entry in allEntries where !content.contains(entry) {
-            missing.append(entry)
-        }
+        let missing = GitignoreManager.coreEntries.filter { !lines.contains($0) }
         if missing.isEmpty {
             return .pass("all entries present")
         }
@@ -255,8 +253,7 @@ struct GitignoreCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        let shell = ShellRunner(environment: Environment())
-        let gitignoreManager = GitignoreManager(shell: shell)
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
         do {
             try gitignoreManager.addCoreEntries()
             return .fixed("added missing entries")
@@ -323,6 +320,141 @@ struct ProjectIndexCheck: DoctorCheck {
         } catch {
             return .failed(error.localizedDescription)
         }
+    }
+}
+
+/// Verifies that pack-contributed hook commands are still present in the settings file.
+struct HookSettingsCheck: DoctorCheck {
+    let commands: [String]
+    let settingsPath: URL
+    let packName: String
+
+    var name: String {
+        "Hook entries (\(packName))"
+    }
+
+    var section: String {
+        "Hooks"
+    }
+
+    func check() -> CheckResult {
+        guard FileManager.default.fileExists(atPath: settingsPath.path) else {
+            return .fail("settings file not found")
+        }
+        let settings: Settings
+        do {
+            settings = try Settings.load(from: settingsPath)
+        } catch {
+            return .fail("cannot read settings: \(error.localizedDescription)")
+        }
+        let allCommands = (settings.hooks ?? [:]).values
+            .flatMap(\.self)
+            .compactMap(\.hooks)
+            .flatMap(\.self)
+            .compactMap(\.command)
+        let commandSet = Set(allCommands)
+        let missing = commands.filter { !commandSet.contains($0) }
+        if missing.isEmpty {
+            return .pass("all hook commands present")
+        }
+        return .fail("missing hook commands: \(missing.joined(separator: ", "))")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs sync' to restore hook entries")
+    }
+}
+
+/// Verifies that pack-contributed settings keys are still present in the settings file.
+struct SettingsKeysCheck: DoctorCheck {
+    let keys: [String]
+    let settingsPath: URL
+    let packName: String
+
+    var name: String {
+        "Settings keys (\(packName))"
+    }
+
+    var section: String {
+        "Settings"
+    }
+
+    func check() -> CheckResult {
+        let data: Data
+        do {
+            data = try Data(contentsOf: settingsPath)
+        } catch {
+            return .fail("settings file not found or unreadable")
+        }
+        let json: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .fail("settings file is not a JSON object")
+            }
+            json = parsed
+        } catch {
+            return .fail("settings file contains invalid JSON: \(error.localizedDescription)")
+        }
+        var missing: [String] = []
+        for keyPath in keys where !keyExists(keyPath, in: json) {
+            missing.append(keyPath)
+        }
+        if missing.isEmpty {
+            return .pass("all settings keys present")
+        }
+        return .fail("missing settings keys: \(missing.joined(separator: ", "))")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs sync' to restore settings keys")
+    }
+
+    /// Check if a dot-notation key path exists in a JSON dictionary.
+    private func keyExists(_ keyPath: String, in json: [String: Any]) -> Bool {
+        let parts = keyPath.split(separator: ".", maxSplits: 1)
+        let topLevel = String(parts[0])
+        if parts.count == 2 {
+            let subKey = String(parts[1])
+            guard let nested = json[topLevel] as? [String: Any] else { return false }
+            return nested[subKey] != nil
+        }
+        return json[topLevel] != nil
+    }
+}
+
+/// Verifies that pack-contributed gitignore entries are still present in the global gitignore.
+struct PackGitignoreCheck: DoctorCheck {
+    let entries: [String]
+    let packName: String
+
+    var name: String {
+        "Gitignore entries (\(packName))"
+    }
+
+    var section: String {
+        "Gitignore"
+    }
+
+    func check() -> CheckResult {
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
+        let lines: Set<String>
+        do {
+            guard let result = try gitignoreManager.readLines() else {
+                return .fail("global gitignore not found")
+            }
+            lines = result
+        } catch {
+            return .fail("global gitignore unreadable: \(error.localizedDescription)")
+        }
+        let missing = entries.filter { !lines.contains($0) }
+        if missing.isEmpty {
+            return .pass("all entries present")
+        }
+        return .fail("missing entries: \(missing.joined(separator: ", "))")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Run 'mcs sync' to restore gitignore entries")
     }
 }
 

@@ -152,21 +152,14 @@ struct DoctorRunner {
                 allChecks += pack.supplementaryDoctorChecks(projectRoot: scope.effectiveProjectRoot)
                     .map { (check: $0, isExcluded: false) }
 
-                // File content drift checks from stored hashes
+                // Artifact-record-driven checks from stored state
                 if let artifacts = scope.artifactsByPack[pack.identifier] {
-                    let baseURL = scope.effectiveProjectRoot ?? env.claudeDirectory
-                    for (relativePath, expectedHash) in artifacts.fileHashes {
-                        let fileURL = baseURL.appendingPathComponent(relativePath)
-                        allChecks.append((
-                            check: FileContentCheck(
-                                name: "File content: \(relativePath)",
-                                section: "Installed Files",
-                                path: fileURL,
-                                expectedHash: expectedHash
-                            ),
-                            isExcluded: false
-                        ))
-                    }
+                    allChecks += artifactChecks(
+                        for: artifacts,
+                        pack: pack,
+                        scope: scope,
+                        env: env
+                    )
                 }
             }
         }
@@ -401,6 +394,74 @@ struct DoctorRunner {
             label: "global",
             artifactsByPack: artifactsByPack
         )
+    }
+
+    // MARK: - Artifact-record checks
+
+    /// Builds doctor checks derived from a pack's stored artifact record.
+    /// Covers file content hashes, hook commands, settings keys, and gitignore entries.
+    private func artifactChecks(
+        for artifacts: PackArtifactRecord,
+        pack: any TechPack,
+        scope: CheckScope,
+        env: Environment
+    ) -> [(check: any DoctorCheck, isExcluded: Bool)] {
+        var checks: [(check: any DoctorCheck, isExcluded: Bool)] = []
+
+        let baseURL = scope.effectiveProjectRoot ?? env.claudeDirectory
+        for (relativePath, expectedHash) in artifacts.fileHashes {
+            let fileURL = baseURL.appendingPathComponent(relativePath)
+            checks.append((
+                check: FileContentCheck(
+                    name: "File content: \(relativePath)",
+                    section: "Installed Files",
+                    path: fileURL,
+                    expectedHash: expectedHash
+                ),
+                isExcluded: false
+            ))
+        }
+
+        if !artifacts.hookCommands.isEmpty || !artifacts.settingsKeys.isEmpty {
+            let settingsPath: URL = if let root = scope.effectiveProjectRoot {
+                root.appendingPathComponent(Constants.FileNames.claudeDirectory)
+                    .appendingPathComponent("settings.local.json")
+            } else {
+                env.claudeSettings
+            }
+            if !artifacts.hookCommands.isEmpty {
+                checks.append((
+                    check: HookSettingsCheck(
+                        commands: artifacts.hookCommands,
+                        settingsPath: settingsPath,
+                        packName: pack.displayName
+                    ),
+                    isExcluded: false
+                ))
+            }
+            if !artifacts.settingsKeys.isEmpty {
+                checks.append((
+                    check: SettingsKeysCheck(
+                        keys: artifacts.settingsKeys,
+                        settingsPath: settingsPath,
+                        packName: pack.displayName
+                    ),
+                    isExcluded: false
+                ))
+            }
+        }
+
+        if !artifacts.gitignoreEntries.isEmpty {
+            checks.append((
+                check: PackGitignoreCheck(
+                    entries: artifacts.gitignoreEntries,
+                    packName: pack.displayName
+                ),
+                isExcluded: false
+            ))
+        }
+
+        return checks
     }
 
     // MARK: - Standalone checks (not tied to any component)
