@@ -29,7 +29,6 @@ brew install bguidolim/tap/managed-claude-stack
 
 ```bash
 mcs pack add bguidolim/mcs-continuous-learning
-mcs pack add you/your-pack
 ```
 
 ### 3. Sync a project
