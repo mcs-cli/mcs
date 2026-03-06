@@ -82,14 +82,13 @@ struct GitignoreManager {
     }
 
     /// Read the global gitignore and return its lines as a set.
-    /// Returns `nil` if the file doesn't exist or can't be read.
-    func readLines() -> Set<String>? {
+    /// Returns `nil` if the file doesn't exist. Throws if the file exists but can't be read.
+    func readLines() throws -> Set<String>? {
         let path = resolveGlobalGitignorePath()
-        guard FileManager.default.fileExists(atPath: path.path),
-              let content = try? String(contentsOf: path, encoding: .utf8)
-        else {
+        guard FileManager.default.fileExists(atPath: path.path) else {
             return nil
         }
+        let content = try String(contentsOf: path, encoding: .utf8)
         return Set(content.components(separatedBy: .newlines))
     }
 

@@ -197,6 +197,24 @@ struct SettingsKeysCheckTests {
             Issue.record("Expected .fail, got \(result)")
         }
     }
+
+    @Test("fail when settings file contains invalid JSON")
+    func failWhenInvalidJSON() throws {
+        let url = try makeTempSettings(content: "not valid json {{{")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = SettingsKeysCheck(
+            keys: ["someKey"],
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case let .fail(msg) = result {
+            #expect(msg.contains("invalid JSON"))
+        } else {
+            Issue.record("Expected .fail, got \(result)")
+        }
+    }
 }
 
 // MARK: - PackGitignoreCheck

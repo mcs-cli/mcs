@@ -236,8 +236,14 @@ struct GitignoreCheck: DoctorCheck {
 
     func check() -> CheckResult {
         let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
-        guard let lines = gitignoreManager.readLines() else {
-            return .fail("global gitignore not found")
+        let lines: Set<String>
+        do {
+            guard let result = try gitignoreManager.readLines() else {
+                return .fail("global gitignore not found")
+            }
+            lines = result
+        } catch {
+            return .fail("global gitignore unreadable: \(error.localizedDescription)")
         }
         let missing = GitignoreManager.coreEntries.filter { !lines.contains($0) }
         if missing.isEmpty {
@@ -247,8 +253,7 @@ struct GitignoreCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        let shell = ShellRunner(environment: Environment())
-        let gitignoreManager = GitignoreManager(shell: shell)
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
         do {
             try gitignoreManager.addCoreEntries()
             return .fixed("added missing entries")
@@ -333,6 +338,9 @@ struct HookSettingsCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
+        guard FileManager.default.fileExists(atPath: settingsPath.path) else {
+            return .fail("settings file not found")
+        }
         let settings: Settings
         do {
             settings = try Settings.load(from: settingsPath)
@@ -378,8 +386,14 @@ struct SettingsKeysCheck: DoctorCheck {
         } catch {
             return .fail("settings file not found or unreadable")
         }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return .fail("settings file contains invalid JSON")
+        let json: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .fail("settings file is not a JSON object")
+            }
+            json = parsed
+        } catch {
+            return .fail("settings file contains invalid JSON: \(error.localizedDescription)")
         }
         var missing: [String] = []
         for keyPath in keys where !keyExists(keyPath, in: json) {
@@ -423,8 +437,14 @@ struct PackGitignoreCheck: DoctorCheck {
 
     func check() -> CheckResult {
         let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
-        guard let lines = gitignoreManager.readLines() else {
-            return .fail("global gitignore not found")
+        let lines: Set<String>
+        do {
+            guard let result = try gitignoreManager.readLines() else {
+                return .fail("global gitignore not found")
+            }
+            lines = result
+        } catch {
+            return .fail("global gitignore unreadable: \(error.localizedDescription)")
         }
         let missing = entries.filter { !lines.contains($0) }
         if missing.isEmpty {
