@@ -158,6 +158,7 @@ swiftlint --fix
 
 - **Never amend commits** — always create new commits so the change history stays trackable
 - **Never force-push** — use regular `git push` only
+- **Always run `swiftformat` and `swiftlint` on changed files before committing** — CI will reject PRs that fail lint. Run `swiftformat <changed-files>` then `swiftlint` to catch issues locally
 
 ## Key Design Decisions
 
