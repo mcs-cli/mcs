@@ -94,21 +94,14 @@ struct CLIOutput: Sendable {
     private func visualRowCount(of output: String, columns: Int) -> Int {
         guard columns > 0 else { return output.filter { $0 == "\n" }.count }
 
-        let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.last?.isEmpty == true { lines.removeLast() }
+
         var rows = 0
-
-        for (index, line) in lines.enumerated() {
-            // The trailing \n produces a final empty element — skip it
-            if index == lines.count - 1, line.isEmpty { break }
-
+        for line in lines {
             let visible = stripANSI(String(line))
-            if visible.isEmpty {
-                rows += 1
-            } else {
-                rows += (visible.count - 1) / columns + 1
-            }
+            rows += visible.isEmpty ? 1 : (visible.count - 1) / columns + 1
         }
-
         return rows
     }
 
@@ -291,9 +284,9 @@ struct CLIOutput: Sendable {
     private func buildSingleSelectListString(
         title: String,
         items: [(name: String, description: String)],
-        cursor: Int
+        cursor: Int,
+        columns: Int
     ) -> String {
-        let columns = terminalColumns
         var output = ""
 
         output += "\n"
@@ -321,7 +314,8 @@ struct CLIOutput: Sendable {
         items: [(name: String, description: String)],
         cursor: Int
     ) {
-        write(buildSingleSelectListString(title: title, items: items, cursor: cursor))
+        let columns = terminalColumns
+        write(buildSingleSelectListString(title: title, items: items, cursor: cursor, columns: columns))
     }
 
     private func rerenderSingleSelectList(
@@ -329,12 +323,9 @@ struct CLIOutput: Sendable {
         items: [(name: String, description: String)],
         cursor: Int
     ) {
-        let output = buildSingleSelectListString(title: title, items: items, cursor: cursor)
-        let rowCount = visualRowCount(of: output, columns: terminalColumns)
-
-        write("\u{1B}[\(rowCount)A")
-        write("\u{1B}[0J")
-        write(output)
+        let columns = terminalColumns
+        let output = buildSingleSelectListString(title: title, items: items, cursor: cursor, columns: columns)
+        rerenderInPlace(output, columns: columns)
     }
 
     private func fallbackSingleSelect(
@@ -401,7 +392,7 @@ struct CLIOutput: Sendable {
             tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
         }
 
-        renderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+        renderInteractiveList(groups: groups, cursor: cursor)
 
         while true {
             let byte = readByte()
@@ -414,7 +405,7 @@ struct CLIOutput: Sendable {
             case 0x20: // Space — toggle current item
                 let (gi, ii) = flatItems[cursor]
                 groups[gi].items[ii].isSelected.toggle()
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x61: // 'a' — select all
                 for gi in groups.indices {
@@ -422,7 +413,7 @@ struct CLIOutput: Sendable {
                         groups[gi].items[ii].isSelected = true
                     }
                 }
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x6E: // 'n' — select none
                 for gi in groups.indices {
@@ -430,7 +421,7 @@ struct CLIOutput: Sendable {
                         groups[gi].items[ii].isSelected = false
                     }
                 }
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x1B: // Escape sequence (arrow keys)
                 let next = readByte()
@@ -439,10 +430,10 @@ struct CLIOutput: Sendable {
                     switch arrow {
                     case 0x41: // Up
                         if cursor > 0 { cursor -= 1 }
-                        rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                        rerenderInteractiveList(groups: groups, cursor: cursor)
                     case 0x42: // Down
                         if cursor < flatItems.count - 1 { cursor += 1 }
-                        rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                        rerenderInteractiveList(groups: groups, cursor: cursor)
                     default:
                         break
                     }
@@ -460,10 +451,9 @@ struct CLIOutput: Sendable {
 
     private func buildInteractiveListString(
         groups: [SelectableGroup],
-        flatItems _: [(groupIndex: Int, itemIndex: Int)],
-        cursor: Int
+        cursor: Int,
+        columns: Int
     ) -> String {
-        let columns = terminalColumns
         var output = ""
 
         output += "\n"
@@ -504,22 +494,25 @@ struct CLIOutput: Sendable {
 
     private func renderInteractiveList(
         groups: [SelectableGroup],
-        flatItems: [(groupIndex: Int, itemIndex: Int)],
         cursor: Int
     ) {
-        write(buildInteractiveListString(groups: groups, flatItems: flatItems, cursor: cursor))
+        let columns = terminalColumns
+        write(buildInteractiveListString(groups: groups, cursor: cursor, columns: columns))
     }
 
     /// Move cursor up to re-render the list in place.
     private func rerenderInteractiveList(
         groups: [SelectableGroup],
-        flatItems: [(groupIndex: Int, itemIndex: Int)],
         cursor: Int
     ) {
-        let output = buildInteractiveListString(groups: groups, flatItems: flatItems, cursor: cursor)
-        // Visual row count accounts for line wrapping past terminal width
-        let rowCount = visualRowCount(of: output, columns: terminalColumns)
+        let columns = terminalColumns
+        let output = buildInteractiveListString(groups: groups, cursor: cursor, columns: columns)
+        rerenderInPlace(output, columns: columns)
+    }
 
+    /// Cursor-up by visual row count, clear, and rewrite.
+    private func rerenderInPlace(_ output: String, columns: Int) {
+        let rowCount = visualRowCount(of: output, columns: columns)
         write("\u{1B}[\(rowCount)A")
         write("\u{1B}[0J")
         write(output)
