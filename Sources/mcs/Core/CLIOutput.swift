@@ -46,6 +46,70 @@ struct CLIOutput: Sendable {
         colorsEnabled ? "\u{1B}[0m" : ""
     }
 
+    // MARK: - Terminal Helpers
+
+    private var terminalColumns: Int {
+        var ws = winsize()
+        if ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0, ws.ws_col > 0 {
+            return Int(ws.ws_col)
+        }
+        return 80
+    }
+
+    private func stripANSI(_ string: String) -> String {
+        string.replacing(/\u{1B}\[[0-9;?]*[A-Za-z]/, with: "")
+    }
+
+    /// Word-wraps text at word boundaries to fit within `columns`,
+    /// using `indent` as the prefix for every line (including the first).
+    private func wordWrap(_ text: String, indent: String, columns: Int) -> String {
+        let maxWidth = columns - indent.count
+        guard maxWidth > 10 else {
+            return "\(indent)\(text)"
+        }
+
+        let words = text.split(separator: " ", omittingEmptySubsequences: true)
+        var lines: [String] = []
+        var currentLine = ""
+
+        for word in words {
+            if currentLine.isEmpty {
+                currentLine = String(word)
+            } else if currentLine.count + 1 + word.count <= maxWidth {
+                currentLine += " \(word)"
+            } else {
+                lines.append("\(indent)\(currentLine)")
+                currentLine = String(word)
+            }
+        }
+        if !currentLine.isEmpty {
+            lines.append("\(indent)\(currentLine)")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    /// Counts visual terminal rows for a rendered output string,
+    /// accounting for lines that wrap past `columns`.
+    private func visualRowCount(of output: String, columns: Int) -> Int {
+        guard columns > 0 else { return output.count(where: { $0 == "\n" }) }
+
+        var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+        if lines.last?.isEmpty == true { lines.removeLast() }
+
+        var rows = 0
+        for line in lines {
+            let visible = stripANSI(String(line))
+            rows += visible.isEmpty ? 1 : (visible.count - 1) / columns + 1
+        }
+        return rows
+    }
+
+    private func sectionHeaderString(_ title: String) -> String {
+        let divider = "──────────────────────────────────────────"
+        return "  \(bold)\(title)\(reset)\n  \(dim)\(divider)\(reset)\n"
+    }
+
     // MARK: - Logging
 
     func info(_ message: String) {
@@ -86,9 +150,7 @@ struct CLIOutput: Sendable {
     }
 
     func sectionHeader(_ title: String) {
-        let divider = "──────────────────────────────────────────"
-        write("  \(bold)\(title)\(reset)\n")
-        write("  \(dim)\(divider)\(reset)\n")
+        write(sectionHeaderString(title))
     }
 
     /// Colored doctor summary line.
@@ -219,28 +281,41 @@ struct CLIOutput: Sendable {
         }
     }
 
-    private func renderSingleSelectList(
+    private func buildSingleSelectListString(
         title: String,
         items: [(name: String, description: String)],
-        cursor: Int
-    ) {
-        write("\n")
-        write("  \(bold)\(title)\(reset)\n")
-        write("\n")
+        cursor: Int,
+        columns: Int
+    ) -> String {
+        var output = ""
+
+        output += "\n"
+        output += "  \(bold)\(title)\(reset)\n"
+        output += "\n"
 
         for (index, item) in items.enumerated() {
-            if index > 0 { write("\n") }
+            if index > 0 { output += "\n" }
             let isCursor = index == cursor
             let pointer = isCursor ? "\(cyan)\u{203A}\(reset)" : " "
             let nameStyle = isCursor
                 ? "\(bold)\(cyan)\(item.name)\(reset)"
                 : "\(bold)\(item.name)\(reset)"
-            write("  \(pointer) \(nameStyle)\n")
-            write("    \(dim)\(item.description)\(reset)\n")
+            output += "  \(pointer) \(nameStyle)\n"
+            output += "\(dim)\(wordWrap(item.description, indent: "    ", columns: columns))\(reset)\n"
         }
 
-        write("\n")
-        write("  \(dim)\u{2191}/\u{2193} Navigate \u{00B7} Space/Enter Select\(reset)\n")
+        output += "\n"
+        output += "  \(dim)\u{2191}/\u{2193} Navigate \u{00B7} Space/Enter Select\(reset)\n"
+        return output
+    }
+
+    private func renderSingleSelectList(
+        title: String,
+        items: [(name: String, description: String)],
+        cursor: Int
+    ) {
+        let columns = terminalColumns
+        write(buildSingleSelectListString(title: title, items: items, cursor: cursor, columns: columns))
     }
 
     private func rerenderSingleSelectList(
@@ -248,13 +323,9 @@ struct CLIOutput: Sendable {
         items: [(name: String, description: String)],
         cursor: Int
     ) {
-        // title line + blank before items + items (2 lines each) + separators between items + blank + hint
-        let lineCount = 1 + 1 + (items.count * 2) + max(items.count - 1, 0) + 1 + 1
-        // +1 for the leading blank line from renderSingleSelectList
-        write("\u{1B}[\(lineCount + 1)A")
-        write("\u{1B}[0J")
-
-        renderSingleSelectList(title: title, items: items, cursor: cursor)
+        let columns = terminalColumns
+        let output = buildSingleSelectListString(title: title, items: items, cursor: cursor, columns: columns)
+        rerenderInPlace(output, columns: columns)
     }
 
     private func fallbackSingleSelect(
@@ -321,7 +392,7 @@ struct CLIOutput: Sendable {
             tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
         }
 
-        renderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+        renderInteractiveList(groups: groups, cursor: cursor)
 
         while true {
             let byte = readByte()
@@ -334,7 +405,7 @@ struct CLIOutput: Sendable {
             case 0x20: // Space — toggle current item
                 let (gi, ii) = flatItems[cursor]
                 groups[gi].items[ii].isSelected.toggle()
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x61: // 'a' — select all
                 for gi in groups.indices {
@@ -342,7 +413,7 @@ struct CLIOutput: Sendable {
                         groups[gi].items[ii].isSelected = true
                     }
                 }
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x6E: // 'n' — select none
                 for gi in groups.indices {
@@ -350,7 +421,7 @@ struct CLIOutput: Sendable {
                         groups[gi].items[ii].isSelected = false
                     }
                 }
-                rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                rerenderInteractiveList(groups: groups, cursor: cursor)
 
             case 0x1B: // Escape sequence (arrow keys)
                 let next = readByte()
@@ -359,10 +430,10 @@ struct CLIOutput: Sendable {
                     switch arrow {
                     case 0x41: // Up
                         if cursor > 0 { cursor -= 1 }
-                        rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                        rerenderInteractiveList(groups: groups, cursor: cursor)
                     case 0x42: // Down
                         if cursor < flatItems.count - 1 { cursor += 1 }
-                        rerenderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+                        rerenderInteractiveList(groups: groups, cursor: cursor)
                     default:
                         break
                     }
@@ -378,20 +449,22 @@ struct CLIOutput: Sendable {
         }
     }
 
-    private func renderInteractiveList(
+    private func buildInteractiveListString(
         groups: [SelectableGroup],
-        flatItems _: [(groupIndex: Int, itemIndex: Int)],
-        cursor: Int
-    ) {
-        write("\n")
-        write("  Use \(bold)\u{2191}\u{2193}\(reset) to move, ")
-        write("\(bold)space\(reset) to toggle, ")
-        write("\(bold)enter\(reset) to confirm\n")
+        cursor: Int,
+        columns: Int
+    ) -> String {
+        var output = ""
+
+        output += "\n"
+        output += "  Use \(bold)\u{2191}\u{2193}\(reset) to move, "
+        output += "\(bold)space\(reset) to toggle, "
+        output += "\(bold)enter\(reset) to confirm\n"
 
         var flatIndex = 0
         for group in groups where !group.items.isEmpty {
-            write("\n")
-            sectionHeader(group.title)
+            output += "\n"
+            output += sectionHeaderString(group.title)
             for item in group.items {
                 let isCursor = flatIndex == cursor
                 let marker = item.isSelected
@@ -399,8 +472,8 @@ struct CLIOutput: Sendable {
                     : "\(dim)\u{25CB}\(reset)"
                 let pointer = isCursor ? "\(cyan)\u{276F}\(reset)" : " "
                 let nameStyle = isCursor ? "\(bold)\(cyan)\(item.name)\(reset)" : "\(bold)\(item.name)\(reset)"
-                write("  \(pointer) \(marker) \(nameStyle)\n")
-                write("      \(dim)\(item.description)\(reset)\n")
+                output += "  \(pointer) \(marker) \(nameStyle)\n"
+                output += "\(dim)\(wordWrap(item.description, indent: "      ", columns: columns))\(reset)\n"
                 flatIndex += 1
             }
         }
@@ -408,46 +481,41 @@ struct CLIOutput: Sendable {
         // Always-included section
         let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
-            write("\n")
-            sectionHeader("Always included")
+            output += "\n"
+            output += sectionHeaderString("Always included")
             for req in allRequired {
-                write("    \(green)\u{2713}\(reset) \(req.name)\n")
+                output += "    \(green)\u{2713}\(reset) \(req.name)\n"
             }
         }
 
-        write("\n")
+        output += "\n"
+        return output
+    }
+
+    private func renderInteractiveList(
+        groups: [SelectableGroup],
+        cursor: Int
+    ) {
+        let columns = terminalColumns
+        write(buildInteractiveListString(groups: groups, cursor: cursor, columns: columns))
     }
 
     /// Move cursor up to re-render the list in place.
     private func rerenderInteractiveList(
         groups: [SelectableGroup],
-        flatItems: [(groupIndex: Int, itemIndex: Int)],
         cursor: Int
     ) {
-        // Calculate total lines to move up:
-        // instruction line + blank line
-        var lineCount = 2
+        let columns = terminalColumns
+        let output = buildInteractiveListString(groups: groups, cursor: cursor, columns: columns)
+        rerenderInPlace(output, columns: columns)
+    }
 
-        for group in groups where !group.items.isEmpty {
-            lineCount += 1 // blank line before group
-            lineCount += 2 // section header (title + divider)
-            lineCount += group.items.count * 2 // name + description per item
-        }
-
-        let allRequired = groups.flatMap(\.requiredItems)
-        if !allRequired.isEmpty {
-            lineCount += 1 // blank line
-            lineCount += 2 // section header
-            lineCount += allRequired.count
-        }
-
-        lineCount += 1 // trailing blank line
-
-        // Move cursor up and clear
-        write("\u{1B}[\(lineCount)A")
+    /// Cursor-up by visual row count, clear, and rewrite.
+    private func rerenderInPlace(_ output: String, columns: Int) {
+        let rowCount = visualRowCount(of: output, columns: columns)
+        write("\u{1B}[\(rowCount)A")
         write("\u{1B}[0J")
-
-        renderInteractiveList(groups: groups, flatItems: flatItems, cursor: cursor)
+        write(output)
     }
 
     private func readByte() -> UInt8 {
