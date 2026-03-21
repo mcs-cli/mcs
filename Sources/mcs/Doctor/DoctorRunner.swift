@@ -173,7 +173,7 @@ struct DoctorRunner {
 
         // Layers 3-5: Standalone and project-scoped checks (scope-independent)
         var nonComponentChecks: [any DoctorCheck] = []
-        nonComponentChecks += standaloneDoctorChecks()
+        nonComponentChecks += standaloneDoctorChecks(environment: env)
         if !globalOnly, let root = projectRoot {
             // Only add project-scoped checks if mcs was used in this project
             let claudeLocalExists = FileManager.default.fileExists(
@@ -486,7 +486,7 @@ struct DoctorRunner {
     // MARK: - Standalone checks (not tied to any component)
 
     /// Checks that cannot be derived from any ComponentDefinition.
-    private func standaloneDoctorChecks() -> [any DoctorCheck] {
+    private func standaloneDoctorChecks(environment: Environment) -> [any DoctorCheck] {
         var checks: [any DoctorCheck] = []
 
         // Gitignore (core entries)
