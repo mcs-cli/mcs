@@ -30,9 +30,33 @@ struct PackUpdater {
         }
 
         guard let result = fetchResult else {
+            // Disk may be ahead of registry if trust was denied on a previous update.
+            let diskSHA: String
+            do {
+                diskSHA = try fetcher.currentCommit(at: packPath)
+            } catch {
+                return .skipped("could not read current commit at \(packPath.path) — \(error.localizedDescription)")
+            }
+            if diskSHA != entry.commitSHA {
+                return validateAndTrust(
+                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA
+                )
+            }
             return .alreadyUpToDate
         }
 
+        return validateAndTrust(
+            entry: entry, packPath: packPath, registry: registry, commitSHA: result.commitSHA
+        )
+    }
+
+    /// Validate the manifest, detect new scripts, prompt for trust, and build an updated entry.
+    private func validateAndTrust(
+        entry: PackRegistryFile.PackEntry,
+        packPath: URL,
+        registry: PackRegistryFile,
+        commitSHA: String
+    ) -> UpdateResult {
         let loader = ExternalPackLoader(environment: environment, registry: registry)
         let manifest: ExternalPackManifest
         do {
@@ -79,7 +103,7 @@ struct PackUpdater {
             author: manifest.author,
             sourceURL: entry.sourceURL,
             ref: entry.ref,
-            commitSHA: result.commitSHA,
+            commitSHA: commitSHA,
             localPath: entry.localPath,
             addedAt: entry.addedAt,
             trustedScriptHashes: scriptHashes,
