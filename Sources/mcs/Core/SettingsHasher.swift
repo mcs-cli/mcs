@@ -13,16 +13,20 @@ enum SettingsHasher {
         var canonical = ""
         for keyPath in keyPaths.sorted() {
             let value = extractValue(keyPath, from: json)
-            let jsonString: String = if let value {
-                if let data = try? JSONSerialization.data(
-                    withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]
-                ), let str = String(data: data, encoding: .utf8) {
-                    str
-                } else {
-                    "\(value)"
+            let jsonString: String
+            if let value {
+                do {
+                    let data = try JSONSerialization.data(
+                        withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]
+                    )
+                    jsonString = String(data: data, encoding: .utf8) ?? "null"
+                } catch {
+                    // Value came from JSONSerialization.jsonObject — round-trip should not fail.
+                    // Use deterministic fallback to avoid phantom drift warnings.
+                    jsonString = "null"
                 }
             } else {
-                "null"
+                jsonString = "null"
             }
             canonical += "\(keyPath)=\(jsonString)\n"
         }

@@ -431,8 +431,14 @@ struct SettingsDriftCheck: DoctorCheck {
         } catch {
             return .skip("settings file not found (checked separately)")
         }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return .skip("settings file invalid (checked separately)")
+        let json: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return .skip("settings file is not a JSON object (checked separately)")
+            }
+            json = parsed
+        } catch {
+            return .skip("settings file invalid: \(error.localizedDescription) (checked separately)")
         }
         guard let currentHash = SettingsHasher.hash(keyPaths: keys, in: json) else {
             return .skip("no settings keys to verify")

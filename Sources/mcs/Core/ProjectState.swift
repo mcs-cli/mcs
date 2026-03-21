@@ -26,6 +26,8 @@ struct PackArtifactRecord: Codable, Equatable {
     var settingsHash: String?
 
     /// Whether all artifact lists are empty (cleanup is complete).
+    /// Note: `settingsHash` is intentionally excluded — it is derived metadata
+    /// tied to `settingsKeys` and has no independent cleanup semantics.
     var isEmpty: Bool {
         mcpServers.isEmpty && files.isEmpty && templateSections.isEmpty
             && hookCommands.isEmpty && settingsKeys.isEmpty

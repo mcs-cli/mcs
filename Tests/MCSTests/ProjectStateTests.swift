@@ -31,10 +31,11 @@ struct PackArtifactRecordTests {
         #expect(record.templateSections == ["core v1.0.0"])
         #expect(record.hookCommands == ["bash .claude/hooks/test.sh"])
         #expect(record.settingsKeys == ["enabledPlugins.test"])
-        // New fields default to empty
+        // New fields default to empty/nil
         #expect(record.brewPackages.isEmpty)
         #expect(record.plugins.isEmpty)
         #expect(record.fileHashes.isEmpty)
+        #expect(record.settingsHash == nil)
     }
 
     @Test("Encodes and decodes new fields correctly")
@@ -43,6 +44,7 @@ struct PackArtifactRecordTests {
         record.brewPackages = ["swiftlint", "jq"]
         record.plugins = ["anthropics/claude-plugins-official/pr-review-toolkit"]
         record.fileHashes = [".claude/hooks/test.sh": "abc123"]
+        record.settingsHash = "def456"
 
         let data = try JSONEncoder().encode(record)
         let decoded = try JSONDecoder().decode(PackArtifactRecord.self, from: data)
@@ -50,6 +52,7 @@ struct PackArtifactRecordTests {
         #expect(decoded.brewPackages == ["swiftlint", "jq"])
         #expect(decoded.plugins == ["anthropics/claude-plugins-official/pr-review-toolkit"])
         #expect(decoded.fileHashes == [".claude/hooks/test.sh": "abc123"])
+        #expect(decoded.settingsHash == "def456")
     }
 
     @Test("isEmpty includes new fields")

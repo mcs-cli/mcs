@@ -71,6 +71,13 @@ struct SettingsHasherTests {
         #expect(hash1 != hash2)
     }
 
+    @Test("extractValue returns nil when parent is not a dict")
+    func extractValueNonDictParent() {
+        let json: [String: Any] = ["env": 42]
+        let result = SettingsHasher.extractValue("env.FOO", from: json)
+        #expect(result == nil)
+    }
+
     @Test("same values always produce same hash")
     func sameValues() {
         let json: [String: Any] = [

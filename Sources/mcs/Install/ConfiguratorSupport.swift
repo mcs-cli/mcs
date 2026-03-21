@@ -253,8 +253,15 @@ enum ConfiguratorSupport {
             output.warn("Could not read settings for drift hash: \(error.localizedDescription)")
             return [:]
         }
-        guard let savedJSON = try? JSONSerialization.jsonObject(with: savedData) as? [String: Any] else {
-            output.warn("Could not parse settings for drift hash")
+        let savedJSON: [String: Any]
+        do {
+            guard let parsed = try JSONSerialization.jsonObject(with: savedData) as? [String: Any] else {
+                output.warn("Settings file is not a JSON object — skipping drift hash")
+                return [:]
+            }
+            savedJSON = parsed
+        } catch {
+            output.warn("Could not parse settings for drift hash: \(error.localizedDescription)")
             return [:]
         }
         var hashes: [String: String] = [:]
