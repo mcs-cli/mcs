@@ -35,7 +35,7 @@ struct PackUpdater {
             do {
                 diskSHA = try fetcher.currentCommit(at: packPath)
             } catch {
-                return .skipped("could not read current commit — \(error.localizedDescription)")
+                return .skipped("could not read current commit at \(packPath.path) — \(error.localizedDescription)")
             }
             if diskSHA != entry.commitSHA {
                 return validateAndTrust(
