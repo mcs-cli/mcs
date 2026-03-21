@@ -21,9 +21,10 @@ struct CommandCheck: DoctorCheck {
     let section: String
     let command: String
     var isOptional: Bool = false
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let shell = ShellRunner(environment: Environment())
+        let shell = ShellRunner(environment: environment)
         if shell.commandExists(command) {
             return .pass("installed")
         }
@@ -44,14 +45,17 @@ struct MCPServerCheck: DoctorCheck {
     let serverName: String
     let projectRoot: URL?
 
-    init(name: String, serverName: String, projectRoot: URL? = nil) {
+    let environment: Environment
+
+    init(name: String, serverName: String, projectRoot: URL? = nil, environment: Environment = Environment()) {
         self.name = name
         self.serverName = serverName
         self.projectRoot = projectRoot
+        self.environment = environment
     }
 
     func check() -> CheckResult {
-        let claudeJSONPath = Environment().claudeJSON
+        let claudeJSONPath = environment.claudeJSON
         guard FileManager.default.fileExists(atPath: claudeJSONPath.path) else {
             return .fail("~/.claude.json not found")
         }
@@ -87,6 +91,8 @@ struct MCPServerCheck: DoctorCheck {
 
 struct PluginCheck: DoctorCheck {
     let pluginRef: PluginRef
+    var environment: Environment = .init()
+
     var name: String {
         pluginRef.bareName
     }
@@ -96,7 +102,7 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let settingsURL = Environment().claudeSettings
+        let settingsURL = environment.claudeSettings
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
             return .fail("settings.json not found")
         }
@@ -181,6 +187,7 @@ struct FileContentCheck: DoctorCheck {
 struct HookCheck: DoctorCheck {
     let hookName: String
     var isOptional: Bool = false
+    var environment: Environment = .init()
 
     var name: String {
         hookName
@@ -191,7 +198,7 @@ struct HookCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let hookPath = Environment().hooksDirectory.appendingPathComponent(hookName)
+        let hookPath = environment.hooksDirectory.appendingPathComponent(hookName)
         guard FileManager.default.fileExists(atPath: hookPath.path) else {
             return isOptional ? .skip("not installed (optional)") : .fail("missing")
         }
@@ -202,8 +209,7 @@ struct HookCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        let env = Environment()
-        let hookPath = env.hooksDirectory.appendingPathComponent(hookName)
+        let hookPath = environment.hooksDirectory.appendingPathComponent(hookName)
         let fm = FileManager.default
 
         // Only fix permissions — additive operations (installing/replacing hooks) are
@@ -226,6 +232,8 @@ struct HookCheck: DoctorCheck {
 }
 
 struct GitignoreCheck: DoctorCheck {
+    var environment: Environment = .init()
+
     var name: String {
         "Global gitignore"
     }
@@ -235,7 +243,7 @@ struct GitignoreCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: environment))
         let lines: Set<String>
         do {
             guard let result = try gitignoreManager.readLines() else {
@@ -253,7 +261,7 @@ struct GitignoreCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: environment))
         do {
             try gitignoreManager.addCoreEntries()
             return .fixed("added missing entries")
@@ -264,6 +272,8 @@ struct GitignoreCheck: DoctorCheck {
 }
 
 struct ProjectIndexCheck: DoctorCheck {
+    var environment: Environment = .init()
+
     var name: String {
         "Project index"
     }
@@ -273,8 +283,7 @@ struct ProjectIndexCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let env = Environment()
-        let indexFile = ProjectIndex(path: env.projectsIndexFile)
+        let indexFile = ProjectIndex(path: environment.projectsIndexFile)
         let data: ProjectIndex.IndexData
         do {
             data = try indexFile.load()
@@ -302,8 +311,7 @@ struct ProjectIndexCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        let env = Environment()
-        let indexFile = ProjectIndex(path: env.projectsIndexFile)
+        let indexFile = ProjectIndex(path: environment.projectsIndexFile)
         var data: ProjectIndex.IndexData
         do {
             data = try indexFile.load()
@@ -458,6 +466,7 @@ struct SettingsDriftCheck: DoctorCheck {
 struct PackGitignoreCheck: DoctorCheck {
     let entries: [String]
     let packName: String
+    var environment: Environment = .init()
 
     var name: String {
         "Gitignore entries (\(packName))"
@@ -468,7 +477,7 @@ struct PackGitignoreCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: Environment()))
+        let gitignoreManager = GitignoreManager(shell: ShellRunner(environment: environment))
         let lines: Set<String>
         do {
             guard let result = try gitignoreManager.readLines() else {

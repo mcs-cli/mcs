@@ -226,7 +226,8 @@ struct ExternalPackAdapter: TechPack {
             from: ext,
             packPath: packPath,
             projectRoot: projectRoot,
-            scriptRunner: scriptRunner
+            scriptRunner: scriptRunner,
+            environment: shell.environment
         )
     }
 }

@@ -33,24 +33,31 @@ struct DoctorRunner {
         let artifactsByPack: [String: PackArtifactRecord]
     }
 
+    let environment: Environment
+    let projectRootOverride: URL?
+
     init(
         fixMode: Bool,
         skipConfirmation: Bool = false,
         packFilter: String? = nil,
         globalOnly: Bool = false,
-        registry: TechPackRegistry
+        registry: TechPackRegistry,
+        environment: Environment = Environment(),
+        projectRootOverride: URL? = nil
     ) {
         self.fixMode = fixMode
         self.skipConfirmation = skipConfirmation
         self.packFilter = packFilter
         self.globalOnly = globalOnly
         self.registry = registry
+        self.environment = environment
+        self.projectRootOverride = projectRootOverride
     }
 
     mutating func run() throws {
         output.header("Managed Claude Stack — Doctor")
 
-        let env = Environment()
+        let env = environment
         let registry = registry
 
         // Resolve globally-configured pack IDs from global state.
@@ -101,7 +108,7 @@ struct DoctorRunner {
         }
 
         // Detect project root
-        let projectRoot = ProjectDetector.findProjectRoot()
+        let projectRoot = projectRootOverride ?? ProjectDetector.findProjectRoot()
 
         // Resolve check scopes (project, global, or both)
         let scopes = resolveCheckScopes(
@@ -145,7 +152,7 @@ struct DoctorRunner {
             for pack in scopePacks {
                 for component in pack.components {
                     let excluded = scope.excludedComponentIDs.contains(component.id)
-                    let checks = component.allDoctorChecks(projectRoot: scope.effectiveProjectRoot)
+                    let checks = component.allDoctorChecks(projectRoot: scope.effectiveProjectRoot, environment: env)
                     allChecks += checks.map { (check: $0, isExcluded: excluded) }
                 }
                 // Pack-level supplementary checks (cannot be derived from components)
@@ -466,7 +473,8 @@ struct DoctorRunner {
             checks.append((
                 check: PackGitignoreCheck(
                     entries: artifacts.gitignoreEntries,
-                    packName: pack.displayName
+                    packName: pack.displayName,
+                    environment: env
                 ),
                 isExcluded: false
             ))
@@ -482,10 +490,10 @@ struct DoctorRunner {
         var checks: [any DoctorCheck] = []
 
         // Gitignore (core entries)
-        checks.append(GitignoreCheck())
+        checks.append(GitignoreCheck(environment: environment))
 
         // Project index (cross-project tracking)
-        checks.append(ProjectIndexCheck())
+        checks.append(ProjectIndexCheck(environment: environment))
 
         return checks
     }

@@ -6,24 +6,25 @@ extension ComponentDefinition {
     /// Auto-generates doctor check(s) from installAction.
     /// Returns nil for actions that have no mechanical verification
     /// (e.g. .shellCommand, .settingsMerge, .gitignoreEntries).
-    func deriveDoctorCheck(projectRoot: URL? = nil) -> (any DoctorCheck)? {
+    func deriveDoctorCheck(projectRoot: URL? = nil, environment: Environment = Environment()) -> (any DoctorCheck)? {
         switch installAction {
         case let .mcpServer(config):
-            return MCPServerCheck(name: displayName, serverName: config.name, projectRoot: projectRoot)
+            return MCPServerCheck(name: displayName, serverName: config.name, projectRoot: projectRoot, environment: environment)
 
         case let .plugin(pluginName):
-            return PluginCheck(pluginRef: PluginRef(pluginName))
+            return PluginCheck(pluginRef: PluginRef(pluginName), environment: environment)
 
         case let .brewInstall(package):
             return CommandCheck(
                 name: displayName,
                 section: type.doctorSection,
                 command: package,
-                isOptional: !isRequired
+                isOptional: !isRequired,
+                environment: environment
             )
 
         case let .copyPackFile(_, destination, fileType):
-            let globalURL = fileType.destinationURL(in: Environment(), destination: destination)
+            let globalURL = fileType.destinationURL(in: environment, destination: destination)
             if let projectRoot {
                 let projectURL = fileType.projectBaseDirectory(projectPath: projectRoot)
                     .appendingPathComponent(destination)
@@ -43,8 +44,8 @@ extension ComponentDefinition {
     }
 
     /// All doctor checks for this component: auto-derived + supplementary.
-    func allDoctorChecks(projectRoot: URL? = nil) -> [any DoctorCheck] {
-        let derived: [any DoctorCheck] = deriveDoctorCheck(projectRoot: projectRoot).map { [$0] } ?? []
+    func allDoctorChecks(projectRoot: URL? = nil, environment: Environment = Environment()) -> [any DoctorCheck] {
+        let derived: [any DoctorCheck] = deriveDoctorCheck(projectRoot: projectRoot, environment: environment).map { [$0] } ?? []
         return derived + supplementaryChecks
     }
 }

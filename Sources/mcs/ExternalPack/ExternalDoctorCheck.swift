@@ -4,7 +4,7 @@ import Foundation
 
 /// A diagnostic check returned when a doctor check definition has missing required fields.
 /// Always reports a warning so the user knows the pack manifest is misconfigured.
-struct MisconfiguredDoctorCheck: DoctorCheck, Sendable {
+struct MisconfiguredDoctorCheck: DoctorCheck {
     let name: String
     let section: String
     let reason: String
@@ -24,20 +24,34 @@ struct MisconfiguredDoctorCheck: DoctorCheck, Sendable {
 /// - **No args**: only checks PATH presence (does not run the command — avoids hangs from
 ///   interactive CLIs like `ollama`).
 /// - **With args**: executes the resolved command with the given arguments and checks the exit code.
-struct ExternalCommandExistsCheck: DoctorCheck, Sendable {
+struct ExternalCommandExistsCheck: DoctorCheck {
     let name: String
     let section: String
     let command: String
     let args: [String]
     let fixCommand: String?
     let scriptRunner: ScriptRunner
+    let environment: Environment
+
+    init(
+        name: String, section: String, command: String, args: [String],
+        fixCommand: String?, scriptRunner: ScriptRunner, environment: Environment = Environment()
+    ) {
+        self.name = name
+        self.section = section
+        self.command = command
+        self.args = args
+        self.fixCommand = fixCommand
+        self.scriptRunner = scriptRunner
+        self.environment = environment
+    }
 
     var fixCommandPreview: String? {
         fixCommand
     }
 
     func check() -> CheckResult {
-        let shell = ShellRunner(environment: Environment())
+        let shell = ShellRunner(environment: environment)
 
         // Resolve bare command names to absolute paths. Process.executableURL
         // does not search PATH, so "ollama" must become "/opt/homebrew/bin/ollama".
@@ -80,7 +94,7 @@ struct ExternalCommandExistsCheck: DoctorCheck, Sendable {
 // MARK: - File Exists Check
 
 /// Checks that a file exists at the given path.
-struct ExternalFileExistsCheck: ScopedPathCheck, Sendable {
+struct ExternalFileExistsCheck: ScopedPathCheck {
     let name: String
     let section: String
     let path: String
@@ -107,7 +121,7 @@ struct ExternalFileExistsCheck: ScopedPathCheck, Sendable {
 // MARK: - Directory Exists Check
 
 /// Checks that a directory exists at the given path.
-struct ExternalDirectoryExistsCheck: ScopedPathCheck, Sendable {
+struct ExternalDirectoryExistsCheck: ScopedPathCheck {
     let name: String
     let section: String
     let path: String
@@ -135,7 +149,7 @@ struct ExternalDirectoryExistsCheck: ScopedPathCheck, Sendable {
 // MARK: - File Contains Check
 
 /// Checks that a file contains a given substring.
-struct ExternalFileContainsCheck: ScopedPathCheck, Sendable {
+struct ExternalFileContainsCheck: ScopedPathCheck {
     let name: String
     let section: String
     let path: String
@@ -166,7 +180,7 @@ struct ExternalFileContainsCheck: ScopedPathCheck, Sendable {
 // MARK: - File Not Contains Check
 
 /// Checks that a file does NOT contain a given substring.
-struct ExternalFileNotContainsCheck: ScopedPathCheck, Sendable {
+struct ExternalFileNotContainsCheck: ScopedPathCheck {
     let name: String
     let section: String
     let path: String
@@ -203,7 +217,7 @@ struct ExternalFileNotContainsCheck: ScopedPathCheck, Sendable {
 /// - 2 = warn
 /// - 3 = skip
 /// stdout is used as the message.
-struct ExternalShellScriptCheck: DoctorCheck, Sendable {
+struct ExternalShellScriptCheck: DoctorCheck {
     let name: String
     let section: String
     let scriptPath: URL
@@ -275,14 +289,15 @@ struct ExternalShellScriptCheck: DoctorCheck, Sendable {
 
 /// Checks that a hook event is registered in settings.json.
 /// Pack-contributed replacement for the engine-level HookEventCheck.
-struct ExternalHookEventExistsCheck: DoctorCheck, Sendable {
+struct ExternalHookEventExistsCheck: DoctorCheck {
     let name: String
     let section: String
     let event: String
     let isOptional: Bool
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let settingsURL = Environment().claudeSettings
+        let settingsURL = environment.claudeSettings
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
             return .fail("settings.json not found")
         }
@@ -310,14 +325,15 @@ struct ExternalHookEventExistsCheck: DoctorCheck, Sendable {
 /// Checks that a specific key in settings.json has an expected value.
 /// Uses dot-notation keyPath to navigate the raw JSON, ensuring forward compatibility
 /// with any key — not just those modeled by the Settings struct.
-struct ExternalSettingsKeyEqualsCheck: DoctorCheck, Sendable {
+struct ExternalSettingsKeyEqualsCheck: DoctorCheck {
     let name: String
     let section: String
     let keyPath: String
     let expectedValue: String
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let settingsURL = Environment().claudeSettings
+        let settingsURL = environment.claudeSettings
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
             return .fail("settings.json not found")
         }
@@ -372,7 +388,8 @@ enum ExternalDoctorCheckFactory {
         from definition: ExternalDoctorCheckDefinition,
         packPath: URL,
         projectRoot: URL?,
-        scriptRunner: ScriptRunner
+        scriptRunner: ScriptRunner,
+        environment: Environment = Environment()
     ) -> any DoctorCheck {
         let section = definition.section ?? "External Pack"
         let scope = definition.scope ?? .global
@@ -391,7 +408,8 @@ enum ExternalDoctorCheckFactory {
                 command: command,
                 args: definition.args ?? [],
                 fixCommand: definition.fixCommand,
-                scriptRunner: scriptRunner
+                scriptRunner: scriptRunner,
+                environment: environment
             )
 
         case .fileExists:
@@ -487,7 +505,8 @@ enum ExternalDoctorCheckFactory {
                 name: definition.name,
                 section: section,
                 event: event,
-                isOptional: definition.isOptional ?? false
+                isOptional: definition.isOptional ?? false,
+                environment: environment
             )
 
         case .settingsKeyEquals:
@@ -503,7 +522,8 @@ enum ExternalDoctorCheckFactory {
                 name: definition.name,
                 section: section,
                 keyPath: keyPath,
-                expectedValue: expectedValue
+                expectedValue: expectedValue,
+                environment: environment
             )
         }
     }
