@@ -4,33 +4,6 @@ import Testing
 
 // MARK: - Helpers
 
-private func makeSandboxProject(label: String = "runner") throws -> (home: URL, project: URL) {
-    let home = FileManager.default.temporaryDirectory
-        .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-    // Create ~/.claude/ and ~/.mcs/ subdirectories
-    try FileManager.default.createDirectory(
-        at: home.appendingPathComponent(".claude"),
-        withIntermediateDirectories: true
-    )
-    try FileManager.default.createDirectory(
-        at: home.appendingPathComponent(".mcs"),
-        withIntermediateDirectories: true
-    )
-    // Create a project dir with .git/ marker
-    let project = home.appendingPathComponent("test-project")
-    try FileManager.default.createDirectory(
-        at: project.appendingPathComponent(".git"),
-        withIntermediateDirectories: true
-    )
-    // Create .claude/ inside the project
-    try FileManager.default.createDirectory(
-        at: project.appendingPathComponent(".claude"),
-        withIntermediateDirectories: true
-    )
-    return (home, project)
-}
-
 private func makeRunner(
     home: URL,
     projectRoot: URL? = nil,

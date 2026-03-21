@@ -140,6 +140,22 @@ func makeGlobalTmpDir(label: String = "global") throws -> URL {
     return dir
 }
 
+/// Create a temp directory pre-configured as a project sandbox:
+/// home with `.claude/` + `.mcs/`, plus a nested project with `.git/` + `.claude/`.
+func makeSandboxProject(label: String = "project") throws -> (home: URL, project: URL) {
+    let home = try makeGlobalTmpDir(label: label)
+    let project = home.appendingPathComponent("test-project")
+    try FileManager.default.createDirectory(
+        at: project.appendingPathComponent(".git"),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: project.appendingPathComponent(Constants.FileNames.claudeDirectory),
+        withIntermediateDirectories: true
+    )
+    return (home, project)
+}
+
 /// Create a `Configurator` configured for global-scope sync.
 func makeGlobalConfigurator(
     home: URL,
