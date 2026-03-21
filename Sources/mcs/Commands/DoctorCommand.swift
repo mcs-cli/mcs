@@ -35,7 +35,8 @@ struct DoctorCommand: LockedCommand {
             skipConfirmation: yes,
             packFilter: pack,
             globalOnly: global,
-            registry: registry
+            registry: registry,
+            environment: env
         )
         try runner.run()
     }
