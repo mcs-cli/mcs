@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("Settings deep-merge")
 struct SettingsMergeTests {
     /// Create a unique temporary directory for test isolation.
     /// Caller is responsible for cleanup (typically via `defer`).

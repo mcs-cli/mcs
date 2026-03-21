@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("PluginRef")
 struct PluginRefTests {
     @Test("bare name defaults to official marketplace repo")
     func bareNameDefault() {

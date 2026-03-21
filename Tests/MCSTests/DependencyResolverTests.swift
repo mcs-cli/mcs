@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("DependencyResolver")
 struct DependencyResolverTests {
     /// Helper to create a minimal ComponentDefinition for testing.
     private func component(

@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("PackSourceResolver")
 struct PackSourceResolverTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

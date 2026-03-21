@@ -1,12 +1,12 @@
 import Foundation
 
 /// Git clone/fetch operations for external tech packs.
-struct PackFetcher: Sendable {
+struct PackFetcher {
     let shell: ShellRunner
     let output: CLIOutput
     let packsDirectory: URL // ~/.mcs/packs/
 
-    struct FetchResult: Sendable {
+    struct FetchResult {
         let localPath: URL // Where the pack was cloned to
         let commitSHA: String // The checked-out commit
         let ref: String? // The tag/branch if specified
@@ -193,7 +193,7 @@ struct PackFetcher: Sendable {
 // MARK: - Errors
 
 /// Errors that can occur during pack fetch operations.
-enum PackFetchError: Error, LocalizedError, Sendable {
+enum PackFetchError: Error, LocalizedError {
     case gitNotInstalled
     case cloneFailed(url: String, stderr: String)
     case fetchFailed(path: String, stderr: String)

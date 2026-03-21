@@ -3,7 +3,7 @@ import Yams
 
 /// Lightweight index tracking which projects use which packs (`~/.mcs/projects.yaml`).
 /// Used for reference counting global resources (brew packages, plugins) before removal.
-struct ProjectIndex: Sendable {
+struct ProjectIndex {
     let path: URL
 
     /// Sentinel path representing the global scope (`mcs sync --global`).
@@ -12,7 +12,7 @@ struct ProjectIndex: Sendable {
     /// Sentinel scope used during `mcs pack remove` (excludes all scopes).
     static let packRemoveSentinel = "__pack_remove__"
 
-    struct ProjectEntry: Codable, Sendable, Equatable {
+    struct ProjectEntry: Codable, Equatable {
         /// Absolute project path or `__global__` for the global scope.
         let path: String
         /// Pack identifiers configured in this scope.
@@ -21,7 +21,7 @@ struct ProjectIndex: Sendable {
         var lastSynced: String
     }
 
-    struct IndexData: Codable, Sendable {
+    struct IndexData: Codable {
         var indexVersion: Int = 1
         var projects: [ProjectEntry] = []
     }

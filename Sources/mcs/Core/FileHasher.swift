@@ -13,7 +13,7 @@ enum FileHasher {
     }
 
     /// Result of hashing all files in a directory, with per-file error resilience.
-    struct DirectoryHashResult: Sendable {
+    struct DirectoryHashResult {
         let hashes: [(relativePath: String, hash: String)]
         let failures: [(relativePath: String, error: any Error)]
     }

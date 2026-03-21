@@ -1,7 +1,7 @@
 import Foundation
 
 /// Result of running a shell command.
-struct ShellResult: Sendable {
+struct ShellResult {
     let exitCode: Int32
     let stdout: String
     let stderr: String
@@ -12,7 +12,7 @@ struct ShellResult: Sendable {
 }
 
 /// Runs shell commands and captures output.
-struct ShellRunner: Sendable {
+struct ShellRunner {
     let environment: Environment
 
     /// Check if a command exists on PATH.

@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("Environment")
 struct EnvironmentTests {
     /// Create a unique temp directory simulating a home directory.
     private func makeTmpHome() throws -> URL {

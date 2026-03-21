@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("FileLock")
 struct FileLockTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

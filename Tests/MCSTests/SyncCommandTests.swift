@@ -1,7 +1,6 @@
 @testable import mcs
 import Testing
 
-@Suite("SyncCommand argument parsing")
 struct SyncCommandTests {
     @Test("Parses with no arguments (defaults)")
     func parsesDefaults() throws {

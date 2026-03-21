@@ -4,12 +4,12 @@ import os
 /// Higher-level wrapper around `ShellRunner` for executing scripts from external packs.
 /// Adds pack-specific concerns: path containment validation, standard environment
 /// variables, timeout enforcement, and executable permission enforcement (auto-chmod).
-struct ScriptRunner: Sendable {
+struct ScriptRunner {
     let shell: ShellRunner
     let output: CLIOutput
 
     /// Result of running an external pack script.
-    struct ScriptResult: Sendable {
+    struct ScriptResult {
         let exitCode: Int32
         let stdout: String
         let stderr: String
@@ -20,7 +20,7 @@ struct ScriptRunner: Sendable {
     }
 
     /// Errors specific to script execution.
-    enum ScriptError: Error, Equatable, Sendable, LocalizedError {
+    enum ScriptError: Error, Equatable, LocalizedError {
         case pathTraversal(script: String, packPath: String)
         case scriptNotFound(String)
         case timeout(TimeInterval)

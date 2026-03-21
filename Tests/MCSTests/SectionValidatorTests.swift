@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("SectionValidator")
 struct SectionValidatorTests {
     /// Create a unique temp directory for each test.
     private func makeTmpDir() throws -> URL {

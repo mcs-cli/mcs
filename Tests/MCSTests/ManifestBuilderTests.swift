@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ManifestBuilder")
 struct ManifestBuilderTests {
     // MARK: - Helpers
 

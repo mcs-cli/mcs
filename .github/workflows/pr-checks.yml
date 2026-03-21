@@ -28,14 +28,43 @@ jobs:
       - name: SwiftLint
         run: swiftlint --strict --reporter github-actions-logging
 
-  resolve:
-    name: Resolve Dependencies
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-${{ matrix.os }}-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-${{ matrix.os }}-
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Test
+        run: swift test
+
+  build-universal:
+    name: Universal Binary
     needs: lint
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             .build/checkouts
@@ -46,41 +75,6 @@ jobs:
 
       - name: Resolve packages
         run: swift package resolve
-
-  test:
-    name: Test
-    needs: resolve
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
-
-      - name: Test
-        run: swift test
-
-  build:
-    name: Release Build
-    needs: resolve
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/cache/restore@v4
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
 
       - name: Build universal binary
         run: swift build -c release --arch arm64 --arch x86_64

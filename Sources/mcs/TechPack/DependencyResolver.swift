@@ -1,7 +1,7 @@
 import Foundation
 
 enum DependencyResolver {
-    struct ResolvedPlan: Sendable {
+    struct ResolvedPlan {
         let orderedComponents: [ComponentDefinition]
         let addedDependencies: [ComponentDefinition] // Auto-added deps not in original selection
     }

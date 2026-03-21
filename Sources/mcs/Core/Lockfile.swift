@@ -3,14 +3,14 @@ import Yams
 
 /// Codable model for `mcs.lock.yaml` — pins exact pack commits for reproducible setups.
 /// This file is committed to git so teammates get identical configurations.
-struct Lockfile: Codable, Equatable, Sendable {
+struct Lockfile: Codable, Equatable {
     let lockVersion: Int
     let generatedAt: String
     let mcsVersion: String
     var packs: [LockedPack]
 
     /// A single pack entry in the lockfile.
-    struct LockedPack: Codable, Equatable, Sendable {
+    struct LockedPack: Codable, Equatable {
         let identifier: String
         let sourceURL: String
         let commitSHA: String
@@ -99,7 +99,7 @@ struct Lockfile: Codable, Equatable, Sendable {
     }
 
     /// A mismatch between the lockfile and the current registry state.
-    struct Mismatch: Equatable, Sendable {
+    struct Mismatch: Equatable {
         let identifier: String
         let lockedSHA: String
         let currentSHA: String? // nil if pack not registered

@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("TemplateComposer")
 struct TemplateComposerTests {
     // MARK: - Composition
 
@@ -359,7 +358,6 @@ struct TemplateComposerTests {
 
 // MARK: - composeOrUpdate
 
-@Suite("TemplateComposer — composeOrUpdate")
 struct ComposeOrUpdateTests {
     private func packContribution(
         _ id: String,

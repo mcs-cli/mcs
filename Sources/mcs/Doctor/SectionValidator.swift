@@ -6,16 +6,16 @@ import Foundation
 /// Parses `<!-- mcs:begin/end -->` section markers, compares each section's
 /// content hash against the expected template, and can re-render outdated
 /// sections while preserving user content outside markers.
-struct SectionValidator: Sendable {
+enum SectionValidator {
     /// Describes a single section that was checked.
-    struct SectionStatus: Sendable {
+    struct SectionStatus {
         let identifier: String
         let isOutdated: Bool
         let detail: String
     }
 
     /// Result of validating all sections in a file.
-    struct ValidationResult: Sendable {
+    struct ValidationResult {
         let filePath: URL
         let sections: [SectionStatus]
 
@@ -137,7 +137,7 @@ struct SectionValidator: Sendable {
 /// Verifies managed CLAUDE.md sections via content-hash comparison against stored values.
 /// Used by both project-scoped (CLAUDE.local.md) and global-scoped (~/.claude/CLAUDE.md)
 /// doctor checks — the file path, state source, and display strings are configurable.
-struct CLAUDEMDFreshnessCheck: DoctorCheck, Sendable {
+struct CLAUDEMDFreshnessCheck: DoctorCheck {
     let fileURL: URL
     let stateLoader: @Sendable () throws -> ProjectState
     let registry: TechPackRegistry

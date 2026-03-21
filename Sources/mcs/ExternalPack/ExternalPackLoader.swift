@@ -4,12 +4,12 @@ import Foundation
 /// Git packs are loaded from `~/.mcs/packs/`; local packs from their registered absolute path.
 /// Reads the pack registry to find registered packs, then loads each one
 /// by parsing its `techpack.yaml` manifest and wrapping it in an `ExternalPackAdapter`.
-struct ExternalPackLoader: Sendable {
+struct ExternalPackLoader {
     let environment: Environment
     let registry: PackRegistryFile
 
     /// Errors specific to pack loading.
-    enum LoadError: Error, Equatable, Sendable, LocalizedError {
+    enum LoadError: Error, Equatable, LocalizedError {
         case manifestNotFound(String)
         case invalidManifest(identifier: String, reason: String)
         case incompatibleVersion(pack: String, required: String, current: String)

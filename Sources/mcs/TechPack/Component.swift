@@ -1,7 +1,7 @@
 import Foundation
 
 /// Types of components that can be installed
-enum ComponentType: String, Sendable, CaseIterable {
+enum ComponentType: String, CaseIterable {
     case mcpServer = "MCP Servers"
     case plugin = "Plugins"
     case skill = "Skills"
@@ -20,7 +20,7 @@ extension ComponentType {
 }
 
 /// Definition of an installable component
-struct ComponentDefinition: Sendable, Identifiable {
+struct ComponentDefinition: Identifiable {
     let id: String // Unique identifier, e.g., "core.docs-mcp-server"
     let displayName: String // e.g., "docs-mcp-server"
     let description: String // Human-readable description
@@ -63,7 +63,7 @@ struct ComponentDefinition: Sendable, Identifiable {
 }
 
 /// How to install a component
-enum ComponentInstallAction: Sendable {
+enum ComponentInstallAction {
     case mcpServer(MCPServerConfig)
     case plugin(name: String)
     case brewInstall(package: String)
@@ -74,7 +74,7 @@ enum ComponentInstallAction: Sendable {
 }
 
 /// File type for `copyPackFile` actions — determines the target directory.
-enum CopyFileType: String, Sendable {
+enum CopyFileType: String {
     case skill
     case hook
     case command
@@ -123,7 +123,7 @@ extension CopyFileType {
 }
 
 /// Configuration for an MCP server
-struct MCPServerConfig: Sendable {
+struct MCPServerConfig {
     let name: String
     let command: String
     let args: [String]

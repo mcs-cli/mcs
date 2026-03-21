@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ProjectDetector")
 struct ProjectDetectorTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -81,7 +80,6 @@ struct ProjectDetectorTests {
     }
 }
 
-@Suite("ProjectState")
 struct ProjectStateTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -421,7 +419,6 @@ struct ProjectStateTests {
 
 // MARK: - ProjectDoctorChecks
 
-@Suite("ProjectDoctorChecks")
 struct ProjectDoctorCheckTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

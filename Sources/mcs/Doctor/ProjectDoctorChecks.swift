@@ -1,7 +1,7 @@
 import Foundation
 
 /// Context passed to project-scoped doctor checks.
-struct ProjectDoctorContext: Sendable {
+struct ProjectDoctorContext {
     let projectRoot: URL
     let registry: TechPackRegistry
 }
@@ -29,7 +29,7 @@ enum ProjectDoctorChecks {
 
 /// Warns if CLAUDE.local.md exists but .mcs-project doesn't.
 /// Fix: infers packs from section markers and creates the file.
-struct ProjectStateFileCheck: DoctorCheck, Sendable {
+struct ProjectStateFileCheck: DoctorCheck {
     let projectRoot: URL
 
     var name: String {

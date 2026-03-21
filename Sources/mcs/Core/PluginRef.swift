@@ -5,7 +5,7 @@
 /// - `repo` is the marketplace repository (e.g. `anthropics/claude-plugins-official`)
 ///
 /// When no `@repo` suffix is present, the official Anthropic marketplace is assumed.
-struct PluginRef: Sendable, Equatable {
+struct PluginRef: Equatable {
     /// The bare plugin name (e.g. `pr-review-toolkit`).
     let bareName: String
 

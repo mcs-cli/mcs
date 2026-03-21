@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("GitignoreManager")
 struct GitignoreManagerTests {
     // MARK: - removeEntry
 

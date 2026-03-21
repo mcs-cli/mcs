@@ -1,7 +1,7 @@
 import Foundation
 
 /// Terminal output with ANSI color support and structured logging.
-struct CLIOutput: Sendable {
+struct CLIOutput {
     let colorsEnabled: Bool
 
     init(colorsEnabled: Bool? = nil) {
@@ -640,18 +640,18 @@ struct CLIOutput: Sendable {
 
 // MARK: - Multi-Select Types
 
-struct SelectableItem: Sendable {
+struct SelectableItem {
     let number: Int
     let name: String
     let description: String
     var isSelected: Bool
 }
 
-struct RequiredItem: Sendable {
+struct RequiredItem {
     let name: String
 }
 
-struct SelectableGroup: Sendable {
+struct SelectableGroup {
     let title: String
     var items: [SelectableItem]
     let requiredItems: [RequiredItem]
@@ -659,7 +659,7 @@ struct SelectableGroup: Sendable {
 
 // MARK: - Multi-Select Parser
 
-enum MultiSelectAction: Equatable, Sendable {
+enum MultiSelectAction: Equatable {
     case confirm
     case selectAll
     case selectNone

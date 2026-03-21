@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("Backup")
 struct BackupTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

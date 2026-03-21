@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ShellRunner")
 struct ShellRunnerTests {
     private var shell: ShellRunner {
         ShellRunner(environment: Environment())

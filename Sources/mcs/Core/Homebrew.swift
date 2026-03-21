@@ -1,7 +1,7 @@
 import Foundation
 
 /// Manages Homebrew package installation and service management.
-struct Homebrew: Sendable {
+struct Homebrew {
     /// Both Homebrew prefix paths — arm64 and x86_64.
     static let allPrefixes = ["/opt/homebrew", "/usr/local"]
 

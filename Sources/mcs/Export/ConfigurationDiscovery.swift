@@ -4,13 +4,13 @@ import Foundation
 /// This is the "read" side of the export wizard — it scans settings, MCP servers,
 /// .claude/ directories, CLAUDE.md sections, and gitignore to build a complete
 /// picture of what's currently configured.
-struct ConfigurationDiscovery: Sendable {
+struct ConfigurationDiscovery {
     let environment: Environment
     let output: CLIOutput
 
     // MARK: - Discovered Artifact Models
 
-    struct DiscoveredConfiguration: Sendable {
+    struct DiscoveredConfiguration {
         var mcpServers: [DiscoveredMCPServer] = []
         var hookFiles: [DiscoveredFile] = []
         var skillFiles: [DiscoveredFile] = []
@@ -32,7 +32,7 @@ struct ConfigurationDiscovery: Sendable {
         }
     }
 
-    struct DiscoveredMCPServer: Sendable {
+    struct DiscoveredMCPServer {
         let name: String
         let command: String?
         let args: [String]
@@ -45,7 +45,7 @@ struct ConfigurationDiscovery: Sendable {
         }
     }
 
-    struct DiscoveredFile: Sendable {
+    struct DiscoveredFile {
         let filename: String
         let absolutePath: URL
         let hookEvent: String?
@@ -57,7 +57,7 @@ struct ConfigurationDiscovery: Sendable {
         }
     }
 
-    struct DiscoveredClaudeSection: Sendable {
+    struct DiscoveredClaudeSection {
         let sectionIdentifier: String
         let content: String
     }

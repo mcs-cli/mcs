@@ -3,10 +3,10 @@ import Foundation
 
 /// Manages the trust lifecycle for external packs — analyzing executable content,
 /// prompting for user approval, and verifying script integrity before execution.
-struct PackTrustManager: Sendable {
+struct PackTrustManager {
     let output: CLIOutput
 
-    struct TrustDecision: Sendable {
+    struct TrustDecision {
         let approved: Bool
         let scriptHashes: [String: String] // relativePath -> SHA-256
     }
@@ -394,13 +394,13 @@ struct PackTrustManager: Sendable {
 // MARK: - TrustableItem
 
 /// An executable artifact within a pack that requires user trust approval.
-struct TrustableItem: Sendable {
+struct TrustableItem {
     let type: TrustableType
     let relativePath: String? // For script files
     let content: String // The actual content to display
     let description: String // Human-readable description
 
-    enum TrustableType: Sendable {
+    enum TrustableType {
         case shellCommand // From component install actions
         case hookFragment // From hook component files (runs on every session)
         case configureScript // From configureProject

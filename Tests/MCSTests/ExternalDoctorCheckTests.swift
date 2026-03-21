@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("ExternalDoctorCheck")
 struct ExternalDoctorCheckTests {
     /// Create a unique temp directory for each test.
     private func makeTmpDir() throws -> URL {

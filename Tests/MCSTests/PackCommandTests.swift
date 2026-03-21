@@ -4,7 +4,6 @@ import Testing
 
 // MARK: - Argument Parsing
 
-@Suite("PackCommand argument parsing")
 struct PackCommandParsingTests {
     // MARK: - AddPack
 
@@ -109,7 +108,6 @@ struct PackCommandParsingTests {
 
 // MARK: - ListPacks Pack Status
 
-@Suite("ListPacks pack status")
 struct ListPacksStatusTests {
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

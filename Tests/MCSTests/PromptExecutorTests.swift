@@ -2,7 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-@Suite("PromptExecutor")
 struct PromptExecutorTests {
     /// Create a unique temp directory for each test.
     private func makeTmpDir() throws -> URL {

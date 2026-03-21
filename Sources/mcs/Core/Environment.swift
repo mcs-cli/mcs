@@ -1,7 +1,7 @@
 import Foundation
 
 /// Paths, architecture detection, and system environment information.
-struct Environment: Sendable {
+struct Environment {
     let homeDirectory: URL
     let claudeDirectory: URL
     let claudeJSON: URL
@@ -20,7 +20,7 @@ struct Environment: Sendable {
     let brewPath: String
     let gitPath: String
 
-    enum Architecture: String, Sendable {
+    enum Architecture: String {
         case arm64
         case x86_64
     }

@@ -2,10 +2,10 @@ import Foundation
 import Yams
 
 /// Manages the `~/.mcs/registry.yaml` file that tracks installed external packs.
-struct PackRegistryFile: Sendable {
+struct PackRegistryFile {
     let path: URL // ~/.mcs/registry.yaml
 
-    struct PackEntry: Codable, Sendable, Equatable {
+    struct PackEntry: Codable, Equatable {
         let identifier: String
         let displayName: String
         let author: String?
@@ -34,7 +34,7 @@ struct PackRegistryFile: Sendable {
         }
     }
 
-    struct RegistryData: Codable, Sendable {
+    struct RegistryData: Codable {
         var packs: [PackEntry]
 
         init(packs: [PackEntry] = []) {
@@ -94,7 +94,7 @@ struct PackRegistryFile: Sendable {
     // MARK: - Collision Detection
 
     /// Input describing a new pack's artifacts for collision checking.
-    struct CollisionInput: Sendable {
+    struct CollisionInput {
         let identifier: String
         let mcpServerNames: [String]
         let skillDirectories: [String]
@@ -203,13 +203,13 @@ extension PackRegistryFile.CollisionInput {
 }
 
 /// A collision between two packs' artifacts.
-struct PackCollision: Sendable, Equatable {
+struct PackCollision: Equatable {
     let type: CollisionType
     let artifactName: String
     let existingPackIdentifier: String
     let newPackIdentifier: String
 
-    enum CollisionType: Sendable, Equatable {
+    enum CollisionType: Equatable {
         case mcpServerName
         case skillDirectory
         case templateSection
