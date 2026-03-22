@@ -155,7 +155,7 @@ struct ExternalPackAdapter: TechPack {
         let checksDefinitions = ext.doctorChecks
         let runner = scriptRunner
         let path = packPath
-        let supplementary: @Sendable (URL?, Environment) -> [any DoctorCheck] = { projectRoot, environment in
+        let supplementary: SupplementaryCheckFactory = { projectRoot, environment in
             guard let checks = checksDefinitions else { return [] }
             return checks.map {
                 ExternalDoctorCheckFactory.makeCheck(

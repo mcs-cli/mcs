@@ -1,5 +1,9 @@
 import Foundation
 
+/// Factory closure that defers doctor check construction to execution time,
+/// allowing callers to supply the correct `projectRoot` and `Environment`.
+typealias SupplementaryCheckFactory = @Sendable (URL?, Environment) -> [any DoctorCheck]
+
 /// Types of components that can be installed
 enum ComponentType: String, CaseIterable {
     case mcpServer = "MCP Servers"
@@ -35,9 +39,9 @@ struct ComponentDefinition: Identifiable {
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
     /// Used for components with .shellCommand or multi-step verification needs.
-    /// Factory closure defers construction to execution time so the caller can
-    /// supply the correct `projectRoot` and `Environment` for the current scope.
-    let supplementaryChecks: @Sendable (URL?, Environment) -> [any DoctorCheck]
+    /// Deferred to execution time because projectRoot and Environment vary per
+    /// doctor scope (project vs global).
+    let supplementaryChecks: SupplementaryCheckFactory
 
     init(
         id: String,
@@ -49,7 +53,7 @@ struct ComponentDefinition: Identifiable {
         isRequired: Bool,
         hookEvent: String? = nil,
         installAction: ComponentInstallAction,
-        supplementaryChecks: @escaping @Sendable (URL?, Environment) -> [any DoctorCheck] = { _, _ in [] }
+        supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
     ) {
         self.id = id
         self.displayName = displayName

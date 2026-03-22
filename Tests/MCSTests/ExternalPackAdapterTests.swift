@@ -594,6 +594,121 @@ struct ExternalPackAdapterTests {
         #expect(globalPrompts[0].key == "PREFIX")
     }
 
+    // MARK: - Component Doctor Checks
+
+    @Test("Component with inline doctorChecks produces deferred supplementary factory")
+    func componentWithDoctorChecks() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithComponents([
+            ExternalComponentDefinition(
+                id: "test-pack.tool",
+                displayName: "Tool",
+                description: "A tool",
+                type: .brewPackage,
+                dependencies: nil,
+                isRequired: nil,
+                hookEvent: nil,
+                installAction: .shellCommand(command: "echo install"),
+                doctorChecks: [
+                    ExternalDoctorCheckDefinition(
+                        type: .fileExists,
+                        name: "Config file",
+                        section: nil,
+                        command: nil,
+                        args: nil,
+                        path: "config.yml",
+                        pattern: nil,
+                        scope: .project,
+                        fixCommand: nil,
+                        fixScript: nil,
+                        event: nil,
+                        keyPath: nil,
+                        expectedValue: nil,
+                        isOptional: nil
+                    ),
+                ]
+            ),
+        ])
+        let adapter = ExternalPackAdapter(manifest: manifest, packPath: tmpDir)
+        let component = adapter.components[0]
+
+        // With nil projectRoot, project-scoped check should skip
+        let checksNoRoot = component.supplementaryChecks(nil, Environment())
+        #expect(checksNoRoot.count == 1)
+        if case .skip = checksNoRoot[0].check() {
+            // expected: no project root for project-scoped check
+        } else {
+            Issue.record("Expected .skip for project-scoped check with nil projectRoot")
+        }
+
+        // With a real projectRoot, check should fail (file doesn't exist) rather than skip
+        let checksWithRoot = component.supplementaryChecks(tmpDir, Environment())
+        #expect(checksWithRoot.count == 1)
+        if case .fail = checksWithRoot[0].check() {
+            // expected: file missing
+        } else {
+            Issue.record("Expected .fail for project-scoped check with valid projectRoot")
+        }
+    }
+
+    @Test("Component doctorChecks factory receives correct projectRoot via allDoctorChecks")
+    func componentDoctorChecksForwarding() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Create the file so the check passes
+        try "content".write(
+            to: tmpDir.appendingPathComponent("marker.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let manifest = manifestWithComponents([
+            ExternalComponentDefinition(
+                id: "test-pack.marker",
+                displayName: "Marker",
+                description: "Checks marker file",
+                type: .configuration,
+                dependencies: nil,
+                isRequired: nil,
+                hookEvent: nil,
+                installAction: .shellCommand(command: "echo setup"),
+                doctorChecks: [
+                    ExternalDoctorCheckDefinition(
+                        type: .fileExists,
+                        name: "Marker file",
+                        section: nil,
+                        command: nil,
+                        args: nil,
+                        path: "marker.txt",
+                        pattern: nil,
+                        scope: .project,
+                        fixCommand: nil,
+                        fixScript: nil,
+                        event: nil,
+                        keyPath: nil,
+                        expectedValue: nil,
+                        isOptional: nil
+                    ),
+                ]
+            ),
+        ])
+        let adapter = ExternalPackAdapter(manifest: manifest, packPath: tmpDir)
+        let component = adapter.components[0]
+
+        // allDoctorChecks with projectRoot should forward to supplementary factory
+        let checks = component.allDoctorChecks(projectRoot: tmpDir)
+        // shellCommand produces no derived check, only supplementary
+        #expect(checks.count == 1)
+        if case .pass = checks[0].check() {
+            // expected: file exists at projectRoot/marker.txt
+        } else {
+            Issue.record("Expected .pass when projectRoot is provided and file exists")
+        }
+    }
+
     // MARK: - Helpers
 
     private func minimalManifest() -> ExternalPackManifest {
