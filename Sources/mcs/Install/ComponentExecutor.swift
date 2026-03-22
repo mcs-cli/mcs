@@ -377,8 +377,11 @@ struct ComponentExecutor {
             if case .pass = check.check() { return true }
         }
 
-        // Try supplementary checks (component-specific extras)
-        for check in component.supplementaryChecks {
+        // Try supplementary checks (component-specific extras).
+        // nil projectRoot: project-scoped checks will .skip, which is safe because
+        // convergent actions (settings, gitignore, copyFile, MCP) are already short-
+        // circuited above, and shellCommand re-runs are idempotent by convention.
+        for check in component.supplementaryChecks(nil, Environment()) {
             if case .pass = check.check() { return true }
         }
 

@@ -46,6 +46,6 @@ extension ComponentDefinition {
     /// All doctor checks for this component: auto-derived + supplementary.
     func allDoctorChecks(projectRoot: URL? = nil, environment: Environment = Environment()) -> [any DoctorCheck] {
         let derived: [any DoctorCheck] = deriveDoctorCheck(projectRoot: projectRoot, environment: environment).map { [$0] } ?? []
-        return derived + supplementaryChecks
+        return derived + supplementaryChecks(projectRoot, environment)
     }
 }

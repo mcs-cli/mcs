@@ -152,12 +152,17 @@ struct ExternalPackAdapter: TechPack {
     private func convertComponent(_ ext: ExternalComponentDefinition) -> ComponentDefinition? {
         guard let action = convertInstallAction(ext.installAction) else { return nil }
 
-        let supplementary: [any DoctorCheck]
-        if let checks = ext.doctorChecks {
-            let projectRoot = ProjectDetector.findProjectRoot()
-            supplementary = checks.compactMap { convertDoctorCheck($0, scriptRunner: scriptRunner, projectRoot: projectRoot) }
-        } else {
-            supplementary = []
+        let checksDefinitions = ext.doctorChecks
+        let runner = scriptRunner
+        let path = packPath
+        let supplementary: SupplementaryCheckFactory = { projectRoot, environment in
+            guard let checks = checksDefinitions else { return [] }
+            return checks.map {
+                ExternalDoctorCheckFactory.makeCheck(
+                    from: $0, packPath: path, projectRoot: projectRoot,
+                    scriptRunner: runner, environment: environment
+                )
+            }
         }
 
         return ComponentDefinition(

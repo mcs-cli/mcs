@@ -275,6 +275,44 @@ struct DerivedDoctorCheckTests {
         #expect(checks.count == 1)
         #expect(checks.first?.name == "brew")
     }
+
+    @Test("allDoctorChecks forwards projectRoot and environment to supplementary factory")
+    func allDoctorChecksForwardsParams() {
+        let sentinel = URL(fileURLWithPath: "/tmp/sentinel-\(UUID().uuidString)")
+        let capture = ParamCapture()
+
+        let factory: SupplementaryCheckFactory = { projectRoot, environment in
+            capture.record(root: projectRoot, env: environment)
+            return []
+        }
+        let component = ComponentDefinition(
+            id: "test",
+            displayName: "Test",
+            description: "test",
+            type: .skill,
+            packIdentifier: nil,
+            dependencies: [],
+            isRequired: false,
+            installAction: .shellCommand(command: "echo"),
+            supplementaryChecks: factory
+        )
+
+        _ = component.allDoctorChecks(projectRoot: sentinel)
+
+        #expect(capture.receivedRoot == sentinel)
+        #expect(capture.receivedEnv != nil)
+    }
+}
+
+/// Thread-safe capture for verifying closure parameter forwarding in tests.
+private final class ParamCapture: @unchecked Sendable {
+    var receivedRoot: URL?
+    var receivedEnv: Environment?
+
+    func record(root: URL?, env: Environment) {
+        receivedRoot = root
+        receivedEnv = env
+    }
 }
 
 // MARK: - FileHasher directory hashing

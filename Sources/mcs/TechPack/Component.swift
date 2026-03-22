@@ -1,5 +1,9 @@
 import Foundation
 
+/// Factory closure that defers doctor check construction to execution time,
+/// allowing callers to supply the correct `projectRoot` and `Environment`.
+typealias SupplementaryCheckFactory = @Sendable (URL?, Environment) -> [any DoctorCheck]
+
 /// Types of components that can be installed
 enum ComponentType: String, CaseIterable {
     case mcpServer = "MCP Servers"
@@ -35,7 +39,9 @@ struct ComponentDefinition: Identifiable {
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
     /// Used for components with .shellCommand or multi-step verification needs.
-    let supplementaryChecks: [any DoctorCheck]
+    /// Deferred to execution time because projectRoot and Environment vary per
+    /// doctor scope (project vs global).
+    let supplementaryChecks: SupplementaryCheckFactory
 
     init(
         id: String,
@@ -47,7 +53,7 @@ struct ComponentDefinition: Identifiable {
         isRequired: Bool,
         hookEvent: String? = nil,
         installAction: ComponentInstallAction,
-        supplementaryChecks: [any DoctorCheck] = []
+        supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
     ) {
         self.id = id
         self.displayName = displayName
@@ -60,6 +66,35 @@ struct ComponentDefinition: Identifiable {
         self.installAction = installAction
         self.supplementaryChecks = supplementaryChecks
     }
+
+    #if DEBUG
+    /// Convenience initializer accepting a static array of checks (used in tests).
+    init(
+        id: String,
+        displayName: String,
+        description: String,
+        type: ComponentType,
+        packIdentifier: String?,
+        dependencies: [String],
+        isRequired: Bool,
+        hookEvent: String? = nil,
+        installAction: ComponentInstallAction,
+        supplementaryChecks checks: [any DoctorCheck]
+    ) {
+        self.init(
+            id: id,
+            displayName: displayName,
+            description: description,
+            type: type,
+            packIdentifier: packIdentifier,
+            dependencies: dependencies,
+            isRequired: isRequired,
+            hookEvent: hookEvent,
+            installAction: installAction,
+            supplementaryChecks: { _, _ in checks }
+        )
+    }
+    #endif
 }
 
 /// How to install a component

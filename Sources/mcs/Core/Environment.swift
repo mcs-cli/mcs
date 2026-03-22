@@ -45,9 +45,9 @@ struct Environment {
         mcsDirectory = home.appendingPathComponent(".mcs")
 
         #if arch(arm64)
-            architecture = .arm64
+        architecture = .arm64
         #else
-            architecture = .x86_64
+        architecture = .x86_64
         #endif
 
         if let resolvedBrew = Self.resolvedBrewPath {
@@ -57,9 +57,9 @@ struct Environment {
                 .deletingLastPathComponent().deletingLastPathComponent().path
         } else {
             #if arch(arm64)
-                brewPrefix = "/opt/homebrew"
+            brewPrefix = "/opt/homebrew"
             #else
-                brewPrefix = "/usr/local"
+            brewPrefix = "/usr/local"
             #endif
             brewPath = "\(brewPrefix)/bin/brew"
         }
