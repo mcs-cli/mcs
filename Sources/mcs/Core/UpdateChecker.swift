@@ -234,24 +234,25 @@ struct UpdateChecker {
 
     // MARK: - Output Formatting
 
-    /// Print human-readable update notices. Returns true if anything was printed.
-    /// When `isHook` is true, prepends a prompt instructing Claude to notify the user.
+    /// Print update notices. Returns true if anything was printed.
+    /// In hook mode, outputs structured JSON with `additionalContext` for Claude Code.
+    /// In user mode, outputs colored terminal text.
     @discardableResult
     static func printHumanReadable(_ result: CheckResult, output: CLIOutput, isHook: Bool = false) -> Bool {
         guard !result.isEmpty else { return false }
 
         if isHook {
-            // Hook mode: plain text only (no ANSI codes) — stdout is injected into Claude's context
-            output.plain("[mcs] IMPORTANT: Updates are available. Notify the user about these updates before proceeding with their request:")
-            if let cli = result.cliUpdate {
-                output.plain(
-                    "- mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
-                )
-            }
-            if !result.packUpdates.isEmpty {
-                let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
-                output.plain("- \(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+            // Structured JSON for Claude Code SessionStart hook
+            let context = buildContextString(result)
+            let hookOutput: [String: Any] = [
+                "hookSpecificOutput": [
+                    "hookEventName": Constants.HookEvent.sessionStart.rawValue,
+                    "additionalContext": context,
+                ] as [String: String],
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: hookOutput, options: [.sortedKeys]),
+               let json = String(data: data, encoding: .utf8) {
+                print(json)
             }
         } else {
             // User-invoked: colored output for terminal readability
@@ -268,6 +269,23 @@ struct UpdateChecker {
         }
 
         return true
+    }
+
+    /// Build a plain-text context string for Claude from check results.
+    private static func buildContextString(_ result: CheckResult) -> String {
+        var lines: [String] = []
+        lines.append("[mcs] IMPORTANT: Updates are available. Notify the user about these updates before proceeding with their request:")
+        if let cli = result.cliUpdate {
+            lines.append(
+                "- mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
+                    + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+            )
+        }
+        if !result.packUpdates.isEmpty {
+            let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
+            lines.append("- \(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Pack Filtering
