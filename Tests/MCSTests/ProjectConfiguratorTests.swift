@@ -590,7 +590,7 @@ struct AutoDerivedSettingsTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: hookSource,
                     destination: "session_start.sh",
@@ -743,7 +743,7 @@ struct AutoDerivedSettingsTests {
                     packIdentifier: "test-pack",
                     dependencies: [],
                     isRequired: true,
-                    hookEvent: "SessionStart",
+                    hookRegistration: HookRegistration(event: "SessionStart"),
                     installAction: .copyPackFile(
                         source: hookSource,
                         destination: "session_start.sh",

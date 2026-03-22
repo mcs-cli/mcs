@@ -108,8 +108,8 @@ private struct LifecycleTestBed {
 
     func hookComponent(
         pack: String, id: String, source: URL, destination: String,
-        hookEvent: String? = nil, isRequired: Bool = true,
-        hookTimeout: Int? = nil, hookAsync: Bool? = nil, hookStatusMessage: String? = nil
+        isRequired: Bool = true,
+        hookRegistration: HookRegistration? = nil
     ) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -119,10 +119,7 @@ private struct LifecycleTestBed {
             packIdentifier: pack,
             dependencies: [],
             isRequired: isRequired,
-            hookEvent: hookEvent,
-            hookTimeout: hookTimeout,
-            hookAsync: hookAsync,
-            hookStatusMessage: hookStatusMessage,
+            hookRegistration: hookRegistration,
             installAction: .copyPackFile(source: source, destination: destination, fileType: .hook)
         )
     }
@@ -215,7 +212,7 @@ struct SinglePackLifecycleTests {
             identifier: "test-pack",
             displayName: "Test Pack",
             components: [
-                bed.hookComponent(pack: "test-pack", id: "lint-hook", source: hookSource, destination: "lint.sh", hookEvent: "PostToolUse"),
+                bed.hookComponent(pack: "test-pack", id: "lint-hook", source: hookSource, destination: "lint.sh", hookRegistration: HookRegistration(event: "PostToolUse")),
                 bed.mcpComponent(pack: "test-pack", id: "mcp-server", name: "test-mcp", args: ["-y", "test-server"], env: ["API_KEY": "test-key"]),
                 bed.settingsComponent(pack: "test-pack", id: "settings", source: settingsSource),
             ],
@@ -770,9 +767,10 @@ struct HookMetadataLifecycleTests {
                 bed.hookComponent(
                     pack: "meta-pack", id: "lint",
                     source: hookSource, destination: "lint.sh",
-                    hookEvent: "PostToolUse",
-                    hookTimeout: 30, hookAsync: true,
-                    hookStatusMessage: "Running lint..."
+                    hookRegistration: HookRegistration(
+                        event: "PostToolUse", timeout: 30,
+                        isAsync: true, statusMessage: "Running lint..."
+                    )
                 ),
             ]
         )
@@ -814,7 +812,7 @@ struct HookMetadataLifecycleTests {
                 bed.hookComponent(
                     pack: "plain-pack", id: "guard",
                     source: hookSource, destination: "guard.sh",
-                    hookEvent: "PreToolUse"
+                    hookRegistration: HookRegistration(event: "PreToolUse")
                 ),
             ]
         )

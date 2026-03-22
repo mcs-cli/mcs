@@ -23,6 +23,25 @@ extension ComponentType {
     }
 }
 
+/// Metadata for registering a hook file component in Claude Code's settings.
+///
+/// Groups the hook event name with optional handler fields (timeout, async, statusMessage).
+/// When a component has a `HookRegistration`, the engine auto-registers the hook
+/// in `settings.local.json` with the specified handler fields.
+struct HookRegistration: Equatable {
+    let event: String
+    let timeout: Int?
+    let isAsync: Bool?
+    let statusMessage: String?
+
+    init(event: String, timeout: Int? = nil, isAsync: Bool? = nil, statusMessage: String? = nil) {
+        self.event = event
+        self.timeout = timeout
+        self.isAsync = isAsync
+        self.statusMessage = statusMessage
+    }
+}
+
 /// Definition of an installable component
 struct ComponentDefinition: Identifiable {
     let id: String // Unique identifier, e.g., "core.docs-mcp-server"
@@ -32,14 +51,9 @@ struct ComponentDefinition: Identifiable {
     let packIdentifier: String? // nil for core components
     let dependencies: [String] // IDs of components this depends on
     let isRequired: Bool // If true, always installed with its pack/core
-    /// Claude Code hook event name (e.g. "SessionStart") for hookFile components.
-    /// When set, the engine auto-registers this hook in settings.local.json.
-    /// The `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map to
-    /// the corresponding Claude Code hook handler fields on the emitted entry.
-    let hookEvent: String?
-    let hookTimeout: Int?
-    let hookAsync: Bool?
-    let hookStatusMessage: String?
+    /// Hook registration metadata for hookFile components. When set, the engine
+    /// auto-registers this hook in settings.local.json with the specified handler fields.
+    let hookRegistration: HookRegistration?
     let installAction: ComponentInstallAction
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
@@ -56,10 +70,7 @@ struct ComponentDefinition: Identifiable {
         packIdentifier: String?,
         dependencies: [String],
         isRequired: Bool,
-        hookEvent: String? = nil,
-        hookTimeout: Int? = nil,
-        hookAsync: Bool? = nil,
-        hookStatusMessage: String? = nil,
+        hookRegistration: HookRegistration? = nil,
         installAction: ComponentInstallAction,
         supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
     ) {
@@ -70,10 +81,7 @@ struct ComponentDefinition: Identifiable {
         self.packIdentifier = packIdentifier
         self.dependencies = dependencies
         self.isRequired = isRequired
-        self.hookEvent = hookEvent
-        self.hookTimeout = hookTimeout
-        self.hookAsync = hookAsync
-        self.hookStatusMessage = hookStatusMessage
+        self.hookRegistration = hookRegistration
         self.installAction = installAction
         self.supplementaryChecks = supplementaryChecks
     }
@@ -88,10 +96,7 @@ struct ComponentDefinition: Identifiable {
         packIdentifier: String?,
         dependencies: [String],
         isRequired: Bool,
-        hookEvent: String? = nil,
-        hookTimeout: Int? = nil,
-        hookAsync: Bool? = nil,
-        hookStatusMessage: String? = nil,
+        hookRegistration: HookRegistration? = nil,
         installAction: ComponentInstallAction,
         supplementaryChecks checks: [any DoctorCheck]
     ) {
@@ -103,10 +108,7 @@ struct ComponentDefinition: Identifiable {
             packIdentifier: packIdentifier,
             dependencies: dependencies,
             isRequired: isRequired,
-            hookEvent: hookEvent,
-            hookTimeout: hookTimeout,
-            hookAsync: hookAsync,
-            hookStatusMessage: hookStatusMessage,
+            hookRegistration: hookRegistration,
             installAction: installAction,
             supplementaryChecks: { _, _ in checks }
         )

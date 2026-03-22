@@ -48,7 +48,7 @@ struct ManifestBuilderTests {
             ConfigurationDiscovery.DiscoveredFile(
                 filename: "pre_tool_use.sh",
                 absolutePath: hookURL,
-                hookEvent: "PreToolUse"
+                hookRegistration: HookRegistration(event: "PreToolUse")
             ),
         ]
 
@@ -162,7 +162,7 @@ struct ManifestBuilderTests {
 
         // 5. Verify hook with hookEvent
         let hookComp = try #require(components.first { $0.type == .hookFile })
-        #expect(hookComp.hookEvent == "PreToolUse")
+        #expect(hookComp.hookRegistration?.event == "PreToolUse")
         guard case let .copyPackFile(hookFile) = hookComp.installAction else {
             Issue.record("Expected copyPackFile for hook")
             return

@@ -219,7 +219,7 @@ struct ExportCommand: ParsableCommand {
         // Hook files
         if !config.hookFiles.isEmpty {
             let items = appendItems(config.hookFiles.map { hook in
-                let eventInfo = hook.hookEvent.map { " → \($0)" } ?? " (unknown event)"
+                let eventInfo = hook.hookRegistration.map { " → \($0.event)" } ?? " (unknown event)"
                 return (name: hook.filename, description: "Hook script\(eventInfo)")
             }, category: .hooks)
             groups.append(SelectableGroup(title: "Hooks", items: items, requiredItems: []))
@@ -342,7 +342,7 @@ struct ExportCommand: ParsableCommand {
         }
 
         // Check for hooks without matched events
-        let unmatchedHooks = config.hookFiles.filter { $0.hookEvent == nil }
+        let unmatchedHooks = config.hookFiles.filter { $0.hookRegistration == nil }
         if !unmatchedHooks.isEmpty {
             hints.append("Hook files without matched events: \(unmatchedHooks.map(\.filename).joined(separator: ", "))")
             hints.append("Add `hookEvent:` to these components in techpack.yaml")

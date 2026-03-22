@@ -1997,8 +1997,43 @@ struct ExternalPackManifestTests {
         }
     }
 
-    @Test("Validation rejects hook metadata without hookEvent")
-    func rejectHookMetadataWithoutEvent() throws {
+    @Test("Validation rejects zero hookTimeout")
+    func rejectZeroHookTimeout() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: hook
+            description: A hook
+            hookEvent: SessionStart
+            hookTimeout: 0
+            hook:
+              source: hooks/test.sh
+              destination: test.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let raw = try ExternalPackManifest.load(from: file)
+        let manifest = try raw.normalized()
+
+        #expect(throws: ManifestError.invalidHookMetadata(
+            componentID: "my-pack.hook",
+            reason: "hookTimeout must be positive (got 0)"
+        )) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Decode rejects hook metadata without hookEvent")
+    func rejectOrphanedHookMetadata() throws {
         let yaml = """
         schemaVersion: 1
         identifier: my-pack
@@ -2021,13 +2056,13 @@ struct ExternalPackManifestTests {
         let file = tmpDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let manifest = try ExternalPackManifest.load(from: file)
-
-        #expect(throws: ManifestError.invalidHookMetadata(
-            componentID: "my-pack.node",
-            reason: "hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
-        )) {
-            try manifest.validate()
+        do {
+            _ = try ExternalPackManifest.load(from: file)
+            Issue.record("Expected DecodingError for orphaned hook metadata")
+        } catch let DecodingError.dataCorrupted(context) {
+            #expect(context.debugDescription.contains("hookTimeout/hookAsync/hookStatusMessage require hookEvent"))
+        } catch {
+            Issue.record("Expected DecodingError.dataCorrupted, got \(type(of: error)): \(error)")
         }
     }
 
@@ -2271,7 +2306,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .hookFile)
-        #expect(comp.hookEvent == "SessionStart")
+        #expect(comp.hookRegistration?.event == "SessionStart")
         guard case let .copyPackFile(config) = comp.installAction else {
             Issue.record("Expected copyPackFile"); return
         }
@@ -2309,10 +2344,10 @@ struct ExternalPackManifestTests {
         let manifest = try ExternalPackManifest.load(from: file)
         let comp = try #require(manifest.components?.first)
 
-        #expect(comp.hookEvent == "PostToolUse")
-        #expect(comp.hookTimeout == 30)
-        #expect(comp.hookAsync == true)
-        #expect(comp.hookStatusMessage == "Running lint...")
+        #expect(comp.hookRegistration?.event == "PostToolUse")
+        #expect(comp.hookRegistration?.timeout == 30)
+        #expect(comp.hookRegistration?.isAsync == true)
+        #expect(comp.hookRegistration?.statusMessage == "Running lint...")
         #expect(comp.type == .hookFile)
     }
 
@@ -2342,9 +2377,10 @@ struct ExternalPackManifestTests {
         let manifest = try ExternalPackManifest.load(from: file)
         let comp = try #require(manifest.components?.first)
 
-        #expect(comp.hookTimeout == nil)
-        #expect(comp.hookAsync == nil)
-        #expect(comp.hookStatusMessage == nil)
+        let reg = try #require(comp.hookRegistration)
+        #expect(reg.timeout == nil)
+        #expect(reg.isAsync == nil)
+        #expect(reg.statusMessage == nil)
     }
 
     // MARK: - Shorthand: command
@@ -2777,7 +2813,7 @@ struct ExternalPackManifestTests {
         #expect(comp.type == .hookFile)
         #expect(comp.dependencies == ["my-pack.jq"])
         #expect(comp.isRequired == true)
-        #expect(comp.hookEvent == "SessionStart")
+        #expect(comp.hookRegistration?.event == "SessionStart")
         #expect(comp.doctorChecks?.count == 1)
     }
 }

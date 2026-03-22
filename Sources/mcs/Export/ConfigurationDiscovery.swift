@@ -8,14 +8,6 @@ struct ConfigurationDiscovery {
     let environment: Environment
     let output: CLIOutput
 
-    /// Hook metadata extracted from a settings hook entry for export correlation.
-    struct HookInfo {
-        let event: String
-        let timeout: Int?
-        let isAsync: Bool?
-        let statusMessage: String?
-    }
-
     // MARK: - Discovered Artifact Models
 
     struct DiscoveredConfiguration {
@@ -56,21 +48,12 @@ struct ConfigurationDiscovery {
     struct DiscoveredFile {
         let filename: String
         let absolutePath: URL
-        let hookEvent: String?
-        let hookTimeout: Int?
-        let hookAsync: Bool?
-        let hookStatusMessage: String?
+        let hookRegistration: HookRegistration?
 
-        init(
-            filename: String, absolutePath: URL, hookEvent: String? = nil,
-            hookTimeout: Int? = nil, hookAsync: Bool? = nil, hookStatusMessage: String? = nil
-        ) {
+        init(filename: String, absolutePath: URL, hookRegistration: HookRegistration? = nil) {
             self.filename = filename
             self.absolutePath = absolutePath
-            self.hookEvent = hookEvent
-            self.hookTimeout = hookTimeout
-            self.hookAsync = hookAsync
-            self.hookStatusMessage = hookStatusMessage
+            self.hookRegistration = hookRegistration
         }
     }
 
@@ -213,7 +196,7 @@ struct ConfigurationDiscovery {
 
     /// Discovers settings and returns hook command → metadata mappings for file correlation.
     @discardableResult
-    private func discoverSettings(at settingsPath: URL, into config: inout DiscoveredConfiguration) -> [String: HookInfo]? {
+    private func discoverSettings(at settingsPath: URL, into config: inout DiscoveredConfiguration) -> [String: HookRegistration]? {
         let settings: Settings
         do {
             settings = try Settings.load(from: settingsPath)
@@ -250,12 +233,12 @@ struct ConfigurationDiscovery {
         // Extract hook command → event/metadata mappings for file correlation
         guard let hooks = settings.hooks else { return nil }
 
-        var commandToHookInfo: [String: HookInfo] = [:]
+        var commandToReg: [String: HookRegistration] = [:]
         for (event, groups) in hooks {
             for group in groups {
                 for entry in group.hooks ?? [] {
                     if let command = entry.command {
-                        commandToHookInfo[command] = HookInfo(
+                        commandToReg[command] = HookRegistration(
                             event: event,
                             timeout: entry.timeout,
                             isAsync: entry.isAsync,
@@ -265,12 +248,12 @@ struct ConfigurationDiscovery {
                 }
             }
         }
-        return commandToHookInfo.isEmpty ? nil : commandToHookInfo
+        return commandToReg.isEmpty ? nil : commandToReg
     }
 
     // MARK: - File Discovery
 
-    private func discoverFiles(in hooksDir: URL, hookCommands: [String: HookInfo]?, into config: inout DiscoveredConfiguration) {
+    private func discoverFiles(in hooksDir: URL, hookCommands: [String: HookRegistration]?, into config: inout DiscoveredConfiguration) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: hooksDir.path) else { return }
 
@@ -282,7 +265,7 @@ struct ConfigurationDiscovery {
             return
         }
 
-        let commandToHookInfo = hookCommands ?? [:]
+        let commandToReg = hookCommands ?? [:]
 
         for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let filename = file.lastPathComponent
@@ -297,17 +280,14 @@ struct ConfigurationDiscovery {
             }
 
             // Try to match this file to a hook event via settings commands
-            let matchedInfo = commandToHookInfo.first { command, _ in
+            let matchedReg = commandToReg.first { command, _ in
                 command.contains(filename)
             }?.value
 
             config.hookFiles.append(DiscoveredFile(
                 filename: filename,
                 absolutePath: file,
-                hookEvent: matchedInfo?.event,
-                hookTimeout: matchedInfo?.timeout,
-                hookAsync: matchedInfo?.isAsync,
-                hookStatusMessage: matchedInfo?.statusMessage
+                hookRegistration: matchedReg
             ))
         }
     }

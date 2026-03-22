@@ -106,7 +106,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     artifacts.files.append(relativePath)
                     artifacts.fileHashes.merge(result.hashes) { _, new in new }
                     if component.type == .hookFile,
-                       component.hookEvent != nil,
+                       component.hookRegistration != nil,
                        fileType == .hook {
                         artifacts.hookCommands.append("\(scope.hookCommandPrefix)\(destination)")
                     }

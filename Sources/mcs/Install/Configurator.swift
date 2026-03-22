@@ -464,7 +464,7 @@ struct Configurator {
                         output.warn("  Could not remove '\(relativePath)' — will retry on next sync")
                     }
                     if component.type == .hookFile,
-                       component.hookEvent != nil,
+                       component.hookRegistration != nil,
                        fileType == .hook {
                         let hookCmd = "\(scope.hookCommandPrefix)\(destination)"
                         artifacts.hookCommands.removeAll { $0 == hookCmd }

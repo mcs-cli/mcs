@@ -196,15 +196,15 @@ enum ConfiguratorSupport {
                 guard !excluded.contains(component.id) else { continue }
 
                 if component.type == .hookFile,
-                   let hookEvent = component.hookEvent,
+                   let reg = component.hookRegistration,
                    case let .copyPackFile(_, destination, .hook) = component.installAction {
                     let command = "\(hookCommandPrefix)\(destination)"
                     if settings.addHookEntry(
-                        event: hookEvent,
+                        event: reg.event,
                         command: command,
-                        timeout: component.hookTimeout,
-                        isAsync: component.hookAsync,
-                        statusMessage: component.hookStatusMessage
+                        timeout: reg.timeout,
+                        isAsync: reg.isAsync,
+                        statusMessage: reg.statusMessage
                     ) {
                         hasContent = true
                     }

@@ -205,7 +205,7 @@ struct GlobalSettingsCompositionTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: hookSource,
                     destination: "start.sh",
@@ -251,7 +251,7 @@ struct GlobalSettingsCompositionTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: hookSource,
                     destination: "start.sh",
@@ -292,7 +292,7 @@ struct GlobalSettingsCompositionTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: settingsPath, // dummy, won't be reached
                     destination: "hook.sh",
@@ -351,7 +351,7 @@ struct GlobalSettingsCompositionTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: hookSource,
                     destination: "start.sh",
@@ -812,7 +812,7 @@ struct GlobalUnconfigurePackTests {
                 packIdentifier: "test-pack",
                 dependencies: [],
                 isRequired: true,
-                hookEvent: "SessionStart",
+                hookRegistration: HookRegistration(event: "SessionStart"),
                 installAction: .copyPackFile(
                     source: hookSource,
                     destination: "hook.sh",

@@ -181,7 +181,7 @@ struct ManifestBuilder {
             CopyFileSpec(
                 files: config.hookFiles, selected: options.selectedHookFiles,
                 idPrefix: "hook", componentType: .hookFile, fileType: .hook,
-                descriptionFor: { "Hook script for \($0.hookEvent ?? "unknown event")" }
+                descriptionFor: { "Hook script for \($0.hookRegistration?.event ?? "unknown event")" }
             ),
             CopyFileSpec(
                 files: config.skillFiles, selected: options.selectedSkillFiles,
@@ -211,10 +211,7 @@ struct ManifestBuilder {
                     displayName: id,
                     description: spec.descriptionFor(file),
                     type: spec.componentType,
-                    hookEvent: file.hookEvent,
-                    hookTimeout: file.hookTimeout,
-                    hookAsync: file.hookAsync,
-                    hookStatusMessage: file.hookStatusMessage,
+                    hookRegistration: file.hookRegistration,
                     installAction: .copyPackFile(ExternalCopyPackFileConfig(
                         source: "\(directory)/\(file.filename)",
                         destination: file.filename,
@@ -460,20 +457,20 @@ struct ManifestBuilder {
             yaml.line("    isRequired: true")
         }
 
-        // hookEvent and hook handler fields
-        if let hookEvent = comp.hookEvent {
-            yaml.line("    hookEvent: \(yamlQuote(hookEvent))")
+        // hookRegistration fields
+        if let reg = comp.hookRegistration {
+            yaml.line("    hookEvent: \(yamlQuote(reg.event))")
+            if let timeout = reg.timeout {
+                yaml.line("    hookTimeout: \(timeout)")
+            }
+            if let hookAsync = reg.isAsync {
+                yaml.line("    hookAsync: \(hookAsync)")
+            }
+            if let statusMessage = reg.statusMessage {
+                yaml.line("    hookStatusMessage: \(yamlQuote(statusMessage))")
+            }
         } else if comp.type == .hookFile {
             yaml.comment("    TODO: Add hookEvent (e.g. SessionStart, PreToolUse, Stop)", indent: 4)
-        }
-        if let timeout = comp.hookTimeout {
-            yaml.line("    hookTimeout: \(timeout)")
-        }
-        if let hookAsync = comp.hookAsync {
-            yaml.line("    hookAsync: \(hookAsync)")
-        }
-        if let statusMessage = comp.hookStatusMessage {
-            yaml.line("    hookStatusMessage: \(yamlQuote(statusMessage))")
         }
 
         // Install action → shorthand key (exhaustive switch = compile-time safety)

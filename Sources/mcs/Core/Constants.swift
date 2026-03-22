@@ -83,11 +83,12 @@ enum Constants {
             "PreToolUse", "PermissionRequest", "PostToolUse", "PostToolUseFailure",
             "Notification",
             "SubagentStart", "SubagentStop",
-            "Stop",
+            "Stop", "StopFailure",
             "TeammateIdle", "TaskCompleted",
-            "ConfigChange",
+            "ConfigChange", "InstructionsLoaded",
             "WorktreeCreate", "WorktreeRemove",
-            "PreCompact", "SessionEnd",
+            "PreCompact", "PostCompact", "SessionEnd",
+            "Elicitation", "ElicitationResult",
         ]
     }
 
