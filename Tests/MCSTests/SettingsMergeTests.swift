@@ -661,7 +661,7 @@ struct SettingsMergeTests {
     }
 
     @Test("addHookEntry passes through timeout, async, and statusMessage")
-    func addHookEntryWithMetadata() {
+    func addHookEntryWithMetadata() throws {
         var settings = Settings()
         settings.addHookEntry(
             event: "PostToolUse", command: "bash lint.sh",
@@ -669,10 +669,83 @@ struct SettingsMergeTests {
         )
 
         let groups = settings.hooks?["PostToolUse"] ?? []
-        let entry = try? #require(groups.first?.hooks?.first)
-        #expect(entry?.timeout == 60)
-        #expect(entry?.isAsync == false)
-        #expect(entry?.statusMessage == "Running lint...")
+        let entry = try #require(groups.first?.hooks?.first)
+        #expect(entry.timeout == 60)
+        #expect(entry.isAsync == false)
+        #expect(entry.statusMessage == "Running lint...")
+    }
+
+    @Test("addHookEntry updates metadata in place when command matches")
+    func addHookEntryUpdateInPlace() throws {
+        var settings = Settings()
+        // First add
+        let added = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting v1..."
+        )
+        #expect(added == true)
+
+        // Re-add same command with different metadata
+        let updated = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 60, isAsync: true, statusMessage: "Linting v2..."
+        )
+        #expect(updated == true)
+
+        // Should still be one group, not two
+        let groups = settings.hooks?["PostToolUse"] ?? []
+        #expect(groups.count == 1)
+
+        let entry = try #require(groups.first?.hooks?.first)
+        #expect(entry.timeout == 60)
+        #expect(entry.isAsync == true)
+        #expect(entry.statusMessage == "Linting v2...")
+    }
+
+    @Test("addHookEntry returns false when command and metadata are identical")
+    func addHookEntryNoOpWhenIdentical() {
+        var settings = Settings()
+        settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting..."
+        )
+        let result = settings.addHookEntry(
+            event: "PostToolUse", command: "bash lint.sh",
+            timeout: 30, statusMessage: "Linting..."
+        )
+        #expect(result == false)
+        #expect(settings.hooks?["PostToolUse"]?.count == 1)
+    }
+
+    @Test("merge preserves existing hook metadata (existing-wins semantics)")
+    func mergeHookExistingWins() throws {
+        var base = Settings(hooks: [
+            "PostToolUse": [
+                Settings.HookGroup(matcher: nil, hooks: [
+                    Settings.HookEntry(type: "command", command: "bash lint.sh", timeout: 30),
+                ]),
+            ],
+        ])
+        let other = Settings(hooks: [
+            "PostToolUse": [
+                Settings.HookGroup(matcher: nil, hooks: [
+                    Settings.HookEntry(
+                        type: "command", command: "bash lint.sh",
+                        timeout: 60, isAsync: true, statusMessage: "New message"
+                    ),
+                ]),
+            ],
+        ])
+
+        base.merge(with: other)
+
+        let groups = base.hooks?["PostToolUse"] ?? []
+        #expect(groups.count == 1)
+        let entry = try #require(groups.first?.hooks?.first)
+        // Existing wins — metadata from `other` is not applied
+        #expect(entry.timeout == 30)
+        #expect(entry.isAsync == nil)
+        #expect(entry.statusMessage == nil)
     }
 
     @Test("HookEntry fields survive full Settings save/load round-trip")

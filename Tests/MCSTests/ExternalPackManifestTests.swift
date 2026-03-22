@@ -1962,6 +1962,75 @@ struct ExternalPackManifestTests {
         }
     }
 
+    @Test("Validation rejects negative hookTimeout")
+    func rejectNegativeHookTimeout() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: hook
+            description: A hook
+            hookEvent: SessionStart
+            hookTimeout: -5
+            hook:
+              source: hooks/test.sh
+              destination: test.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let raw = try ExternalPackManifest.load(from: file)
+        let manifest = try raw.normalized()
+
+        #expect(throws: ManifestError.invalidHookMetadata(
+            componentID: "my-pack.hook",
+            reason: "hookTimeout must be positive (got -5)"
+        )) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Validation rejects hook metadata without hookEvent")
+    func rejectHookMetadataWithoutEvent() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        version: "1.0.0"
+        components:
+          - id: my-pack.node
+            description: Node.js
+            type: brewPackage
+            hookTimeout: 30
+            installAction:
+              type: brewInstall
+              package: node
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+
+        #expect(throws: ManifestError.invalidHookMetadata(
+            componentID: "my-pack.node",
+            reason: "hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
+        )) {
+            try manifest.validate()
+        }
+    }
+
     // MARK: - Shorthand: brew
 
     @Test("Shorthand brew: infers brewPackage type and brewInstall action")
