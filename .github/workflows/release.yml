@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: |
             .build/checkouts
@@ -55,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           path: |
             .build/checkouts
@@ -74,7 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v5
         with:
           path: |
             .build/checkouts
