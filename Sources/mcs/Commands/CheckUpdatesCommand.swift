@@ -52,7 +52,7 @@ struct CheckUpdatesCommand: ParsableCommand {
         if json {
             printJSON(result)
         } else {
-            UpdateChecker.printHumanReadable(result, output: output)
+            UpdateChecker.printHumanReadable(result, output: output, isHook: hook)
         }
     }
 

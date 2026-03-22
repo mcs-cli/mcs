@@ -202,9 +202,14 @@ struct UpdateChecker {
     // MARK: - Output Formatting
 
     /// Print human-readable update notices. Returns true if anything was printed.
+    /// When `isHook` is true, prepends a prompt instructing Claude to notify the user.
     @discardableResult
-    static func printHumanReadable(_ result: CheckResult, output: CLIOutput) -> Bool {
+    static func printHumanReadable(_ result: CheckResult, output: CLIOutput, isHook: Bool = false) -> Bool {
         guard !result.isEmpty else { return false }
+
+        if isHook {
+            output.plain("The following mcs updates are available. Please inform the user:")
+        }
 
         if let cli = result.cliUpdate {
             output.warn(
