@@ -223,7 +223,7 @@ struct DoctorRunner {
         output.header("Summary")
         output.doctorSummary(
             passed: passCount,
-            fixed: fixedCount,
+            fixed: 0,
             warnings: warnCount,
             issues: failCount
         )
@@ -231,6 +231,10 @@ struct DoctorRunner {
         // Phase 2: Confirm and execute pending fixes (after summary)
         if fixMode {
             executePendingFixes()
+            if fixedCount > 0 {
+                output.plain("")
+                output.success("Applied \(fixedCount) fix\(fixedCount == 1 ? "" : "es").")
+            }
         }
     }
 

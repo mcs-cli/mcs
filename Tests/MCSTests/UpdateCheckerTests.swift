@@ -33,29 +33,17 @@ struct UpdateCheckerCacheTests {
         UpdateChecker.CheckResult(packUpdates: [], cliUpdate: nil)
     }
 
-    @Test("isCacheStale returns true when file does not exist")
-    func staleWhenFileMissing() throws {
+    @Test("loadCache returns nil when file does not exist")
+    func cacheNilWhenMissing() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let checker = makeChecker(home: tmpDir)
-        #expect(checker.isCacheStale())
+        #expect(checker.loadCache() == nil)
     }
 
-    @Test("isCacheStale returns true when timestamp is expired")
-    func staleWhenExpired() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let env = Environment(home: tmpDir)
-        try writeCacheFile(at: env, timestamp: Date().addingTimeInterval(-700_000), result: emptyResult)
-
-        let checker = makeChecker(home: tmpDir)
-        #expect(checker.isCacheStale())
-    }
-
-    @Test("isCacheStale returns false when timestamp is fresh")
-    func freshWhenRecent() throws {
+    @Test("loadCache returns cached result when file is valid")
+    func cacheLoadsValidFile() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -63,11 +51,13 @@ struct UpdateCheckerCacheTests {
         try writeCacheFile(at: env, timestamp: Date().addingTimeInterval(-3600), result: emptyResult)
 
         let checker = makeChecker(home: tmpDir)
-        #expect(!checker.isCacheStale())
+        let cached = checker.loadCache()
+        #expect(cached != nil)
+        #expect(cached?.result.isEmpty == true)
     }
 
-    @Test("isCacheStale returns true when file content is corrupt")
-    func staleWhenCorrupt() throws {
+    @Test("loadCache returns nil when file content is corrupt")
+    func cacheNilWhenCorrupt() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -77,7 +67,7 @@ struct UpdateCheckerCacheTests {
         try "not-json".write(to: env.updateCheckCacheFile, atomically: true, encoding: .utf8)
 
         let checker = makeChecker(home: tmpDir)
-        #expect(checker.isCacheStale())
+        #expect(checker.loadCache() == nil)
     }
 
     @Test("saveCache writes a decodable cache file")

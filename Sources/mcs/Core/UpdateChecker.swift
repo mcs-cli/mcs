@@ -54,7 +54,13 @@ struct UpdateChecker {
     /// Run an update check and print results. Used by sync and doctor (user-invoked, no cooldown).
     static func checkAndPrint(env: Environment, shell: ShellRunner, output: CLIOutput) {
         let packRegistry = PackRegistryFile(path: env.packsRegistry)
-        let allEntries = (try? packRegistry.load().packs) ?? []
+        let allEntries: [PackRegistryFile.PackEntry]
+        do {
+            allEntries = try packRegistry.load().packs
+        } catch {
+            output.warn("Could not load pack registry: \(error.localizedDescription)")
+            allEntries = []
+        }
         let relevantEntries = filterEntries(allEntries, environment: env)
         let checker = UpdateChecker(environment: env, shell: shell)
         let result = checker.performCheck(
@@ -136,16 +142,6 @@ struct UpdateChecker {
     /// Delete the cache file (e.g., after `mcs pack update`).
     static func invalidateCache(environment: Environment) {
         try? FileManager.default.removeItem(at: environment.updateCheckCacheFile)
-    }
-
-    /// Returns `true` if the cache is stale or missing.
-    func isCacheStale(cooldownInterval: TimeInterval = UpdateChecker.cooldownInterval) -> Bool {
-        guard let cached = loadCache(),
-              let lastCheck = ISO8601DateFormatter().date(from: cached.timestamp)
-        else {
-            return true
-        }
-        return Date().timeIntervalSince(lastCheck) >= cooldownInterval
     }
 
     // MARK: - Pack Checks
@@ -252,9 +248,14 @@ struct UpdateChecker {
                     "additionalContext": context,
                 ] as [String: String],
             ]
-            if let data = try? JSONSerialization.data(withJSONObject: hookOutput, options: [.sortedKeys]),
-               let json = String(data: data, encoding: .utf8) {
-                print(json)
+            do {
+                let data = try JSONSerialization.data(withJSONObject: hookOutput, options: [.sortedKeys])
+                if let json = String(data: data, encoding: .utf8) {
+                    print(json)
+                }
+            } catch {
+                // Fallback to plain text if JSON serialization fails
+                print(context)
             }
         } else {
             // User-invoked: colored output for terminal readability

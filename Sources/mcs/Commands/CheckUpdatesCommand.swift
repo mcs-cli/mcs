@@ -23,6 +23,9 @@ struct CheckUpdatesCommand: ParsableCommand {
         do {
             registryData = try registry.load()
         } catch {
+            if !hook {
+                output.warn("Could not read pack registry: \(error.localizedDescription)")
+            }
             registryData = PackRegistryFile.RegistryData()
         }
 
@@ -77,10 +80,15 @@ struct CheckUpdatesCommand: ParsableCommand {
             ] as [String: String]
         }
 
-        if let data = try? JSONSerialization.data(
-            withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]
-        ), let string = String(data: data, encoding: .utf8) {
-            print(string)
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]
+            )
+            if let string = String(data: data, encoding: .utf8) {
+                print(string)
+            }
+        } catch {
+            CLIOutput().error("JSON encoding failed: \(error.localizedDescription)")
         }
     }
 }
