@@ -271,19 +271,21 @@ struct UpdateChecker {
         return true
     }
 
-    /// Build a plain-text context string for Claude from check results.
+    /// Build a context string for Claude from check results.
+    /// Uses strong directive language to ensure Claude relays the notification.
     private static func buildContextString(_ result: CheckResult) -> String {
         var lines: [String] = []
-        lines.append("[mcs] IMPORTANT: Updates are available. Notify the user about these updates before proceeding with their request:")
+        lines.append("STOP. Before doing ANY work, you MUST relay the following update notifications to the user. This is non-negotiable even if the user's message is a task request.")
+        lines.append("")
         if let cli = result.cliUpdate {
             lines.append(
-                "- mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                    + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion)). "
+                    + "The user should run: brew upgrade \(Constants.MCSRepo.brewFormula)"
             )
         }
         if !result.packUpdates.isEmpty {
-            let noun = result.packUpdates.count == 1 ? "pack has" : "packs have"
-            lines.append("- \(result.packUpdates.count) \(noun) updates available. Run 'mcs pack update' to update.")
+            let noun = result.packUpdates.count == 1 ? "tech pack has" : "tech packs have"
+            lines.append("- \(result.packUpdates.count) \(noun) updates available. The user should run: mcs pack update")
         }
         return lines.joined(separator: "\n")
     }
