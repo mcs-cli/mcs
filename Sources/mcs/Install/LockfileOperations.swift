@@ -5,7 +5,7 @@ import Foundation
 struct LockfileOperations {
     let environment: Environment
     let output: CLIOutput
-    let shell: ShellRunner
+    let shell: any ShellRunning
 
     /// Checkout exact pack commits from the lockfile.
     /// Aborts if any checkout fails, since `--lock` guarantees reproducibility for git packs.

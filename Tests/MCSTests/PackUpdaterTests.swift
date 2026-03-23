@@ -23,13 +23,6 @@ struct PackUpdaterTests {
 
     // MARK: - Helpers
 
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-packupdater-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func git(
         _ shell: ShellRunner, _ arguments: [String],
         context: String

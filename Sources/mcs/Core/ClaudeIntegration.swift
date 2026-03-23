@@ -18,7 +18,7 @@ protocol ClaudeCLI: Sendable {
 
 /// Wrapper for the `claude` CLI to manage MCP servers and plugins.
 struct ClaudeIntegration: ClaudeCLI {
-    let shell: ShellRunner
+    let shell: any ShellRunning
 
     var isAvailable: Bool {
         shell.commandExists(Constants.CLI.claudeCommand)

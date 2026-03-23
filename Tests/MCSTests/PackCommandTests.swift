@@ -109,13 +109,6 @@ struct PackCommandParsingTests {
 // MARK: - ListPacks Pack Status
 
 struct ListPacksStatusTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-packstatus-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func makeEntry(
         identifier: String = "test-pack",
         sourceURL: String = "https://github.com/user/repo.git",

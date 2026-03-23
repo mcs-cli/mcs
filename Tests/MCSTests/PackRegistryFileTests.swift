@@ -3,14 +3,6 @@ import Foundation
 import Testing
 
 struct PackRegistryFileTests {
-    /// Create a unique temp directory for each test.
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-registry-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func sampleEntry(
         identifier: String = "test-pack"
     ) -> PackRegistryFile.PackEntry {

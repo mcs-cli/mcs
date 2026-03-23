@@ -3,13 +3,6 @@ import Foundation
 import Testing
 
 struct ComponentExecutorTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-compexec-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func makeExecutor() -> ComponentExecutor {
         let env = Environment()
         return ComponentExecutor(

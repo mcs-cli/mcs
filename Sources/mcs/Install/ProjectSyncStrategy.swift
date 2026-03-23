@@ -18,7 +18,7 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     // MARK: - Template Values
 
-    func resolveBuiltInValues(shell: ShellRunner, output: CLIOutput) -> [String: String] {
+    func resolveBuiltInValues(shell: any ShellRunning, output: CLIOutput) -> [String: String] {
         let repoName = resolveRepoName(shell: shell, output: output)
         let projectDirName = resolveProjectDirName(shell: shell)
         return [
@@ -45,7 +45,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
         executor: inout ComponentExecutor,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         output: CLIOutput
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
@@ -254,7 +254,7 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     // MARK: - Private Helpers
 
-    private func resolveRepoName(shell: ShellRunner, output: CLIOutput) -> String {
+    private func resolveRepoName(shell: any ShellRunning, output: CLIOutput) -> String {
         let remoteResult = shell.run(
             shell.environment.gitPath,
             arguments: ["-C", projectPath.path, "remote", "get-url", "origin"]
@@ -271,7 +271,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         return resolveProjectDirName(shell: shell)
     }
 
-    private func resolveProjectDirName(shell: ShellRunner) -> String {
+    private func resolveProjectDirName(shell: any ShellRunning) -> String {
         let gitResult = shell.run(
             shell.environment.gitPath,
             arguments: ["-C", projectPath.path, "rev-parse", "--show-toplevel"]

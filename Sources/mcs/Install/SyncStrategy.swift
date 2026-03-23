@@ -14,7 +14,7 @@ protocol SyncStrategy {
     ///
     /// Project scope resolves `REPO_NAME` and `PROJECT_DIR_NAME` from git.
     /// Global scope returns an empty dictionary.
-    func resolveBuiltInValues(shell: ShellRunner, output: CLIOutput) -> [String: String]
+    func resolveBuiltInValues(shell: any ShellRunning, output: CLIOutput) -> [String: String]
 
     /// Build the `ProjectConfigContext` for template value resolution.
     func makeConfigContext(output: CLIOutput, resolvedValues: [String: String]) -> ProjectConfigContext
@@ -33,7 +33,7 @@ protocol SyncStrategy {
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
         executor: inout ComponentExecutor,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         output: CLIOutput
     ) -> PackArtifactRecord
 

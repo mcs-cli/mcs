@@ -11,8 +11,57 @@ struct ShellResult {
     }
 }
 
+/// Protocol for shell command execution, enabling test mocks to avoid real process spawning.
+protocol ShellRunning: Sendable {
+    /// The environment providing paths and configuration.
+    var environment: Environment { get }
+
+    /// Check if a command exists on PATH.
+    func commandExists(_ command: String) -> Bool
+
+    /// Run an executable with arguments, capturing stdout and stderr.
+    @discardableResult
+    func run(
+        _ executable: String,
+        arguments: [String],
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
+    ) -> ShellResult
+
+    /// Run a shell command string via /bin/bash -c.
+    @discardableResult
+    func shell(
+        _ command: String,
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
+    ) -> ShellResult
+}
+
+// MARK: - Default Parameter Values
+
+extension ShellRunning {
+    @discardableResult
+    func run(
+        _ executable: String,
+        arguments: [String] = [],
+        workingDirectory: String? = nil,
+        additionalEnvironment: [String: String] = [:]
+    ) -> ShellResult {
+        run(executable, arguments: arguments, workingDirectory: workingDirectory, additionalEnvironment: additionalEnvironment)
+    }
+
+    @discardableResult
+    func shell(
+        _ command: String,
+        workingDirectory: String? = nil,
+        additionalEnvironment: [String: String] = [:]
+    ) -> ShellResult {
+        shell(command, workingDirectory: workingDirectory, additionalEnvironment: additionalEnvironment)
+    }
+}
+
 /// Runs shell commands and captures output.
-struct ShellRunner {
+struct ShellRunner: ShellRunning {
     let environment: Environment
 
     /// Check if a command exists on PATH.
@@ -25,9 +74,9 @@ struct ShellRunner {
     @discardableResult
     func run(
         _ executable: String,
-        arguments: [String] = [],
-        workingDirectory: String? = nil,
-        additionalEnvironment: [String: String] = [:]
+        arguments: [String],
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
     ) -> ShellResult {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
@@ -83,8 +132,8 @@ struct ShellRunner {
     @discardableResult
     func shell(
         _ command: String,
-        workingDirectory: String? = nil,
-        additionalEnvironment: [String: String] = [:]
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
     ) -> ShellResult {
         run(
             Constants.CLI.bash,

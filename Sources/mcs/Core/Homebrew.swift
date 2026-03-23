@@ -5,7 +5,7 @@ struct Homebrew {
     /// Both Homebrew prefix paths — arm64 and x86_64.
     static let allPrefixes = ["/opt/homebrew", "/usr/local"]
 
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let environment: Environment
 
     /// Whether Homebrew is installed and accessible.

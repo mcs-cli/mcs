@@ -62,6 +62,85 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     }
 }
 
+/// Mock `ShellRunning` that records calls without executing real processes.
+final class MockShellRunner: ShellRunning, @unchecked Sendable {
+    struct RunCall: Equatable {
+        let executable: String
+        let arguments: [String]
+        let workingDirectory: String?
+        let additionalEnvironment: [String: String]
+    }
+
+    struct ShellCall: Equatable {
+        let command: String
+        let workingDirectory: String?
+        let additionalEnvironment: [String: String]
+    }
+
+    let environment: Environment
+
+    var runCalls: [RunCall] = []
+    var shellCalls: [ShellCall] = []
+    var commandExistsCalls: [String] = []
+
+    /// Result returned from `run()` and `shell()`. Defaults to success.
+    var result = ShellResult(exitCode: 0, stdout: "", stderr: "")
+
+    /// Sequential results for `run()`: pops first element when non-empty, falls back to `result`.
+    var runResults: [ShellResult] = []
+
+    /// Sequential results for `shell()`: pops first element when non-empty, falls back to `result`.
+    var shellResults: [ShellResult] = []
+
+    /// Controls what `commandExists()` returns. Defaults to `true`.
+    var commandExistsResult = true
+
+    init(environment: Environment = Environment()) {
+        self.environment = environment
+    }
+
+    func commandExists(_ command: String) -> Bool {
+        commandExistsCalls.append(command)
+        return commandExistsResult
+    }
+
+    @discardableResult
+    func run(
+        _ executable: String,
+        arguments: [String],
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
+    ) -> ShellResult {
+        runCalls.append(RunCall(
+            executable: executable,
+            arguments: arguments,
+            workingDirectory: workingDirectory,
+            additionalEnvironment: additionalEnvironment
+        ))
+        if !runResults.isEmpty {
+            return runResults.removeFirst()
+        }
+        return result
+    }
+
+    @discardableResult
+    func shell(
+        _ command: String,
+        workingDirectory: String?,
+        additionalEnvironment: [String: String]
+    ) -> ShellResult {
+        shellCalls.append(ShellCall(
+            command: command,
+            workingDirectory: workingDirectory,
+            additionalEnvironment: additionalEnvironment
+        ))
+        if !shellResults.isEmpty {
+            return shellResults.removeFirst()
+        }
+        return result
+    }
+}
+
 /// Minimal TechPack implementation for tests.
 struct MockTechPack: TechPack {
     let identifier: String
@@ -122,7 +201,56 @@ final class TrackingMockTechPack: TechPack, @unchecked Sendable {
     }
 }
 
-// MARK: - Global Test Helpers
+// MARK: - PackEntry Factories
+
+/// Create a `PackRegistryFile.PackEntry` for tests.
+func makeRegistryEntry(
+    identifier: String,
+    commitSHA: String = "abc123def456",
+    sourceURL: String? = nil
+) -> PackRegistryFile.PackEntry {
+    PackRegistryFile.PackEntry(
+        identifier: identifier,
+        displayName: identifier,
+        author: nil,
+        sourceURL: sourceURL ?? "https://example.com/\(identifier).git",
+        ref: nil,
+        commitSHA: commitSHA,
+        localPath: identifier,
+        addedAt: "2026-01-01T00:00:00Z",
+        trustedScriptHashes: [:],
+        isLocal: nil
+    )
+}
+
+/// Create a local `PackRegistryFile.PackEntry` for tests.
+func makeLocalRegistryEntry(
+    identifier: String,
+    localPath: String = "/Users/dev/local-pack"
+) -> PackRegistryFile.PackEntry {
+    PackRegistryFile.PackEntry(
+        identifier: identifier,
+        displayName: identifier,
+        author: nil,
+        sourceURL: localPath,
+        ref: nil,
+        commitSHA: "local",
+        localPath: localPath,
+        addedAt: "2026-01-01T00:00:00Z",
+        trustedScriptHashes: [:],
+        isLocal: true
+    )
+}
+
+// MARK: - Temp Directory Helpers
+
+/// Create a bare temp directory with a UUID-unique name.
+func makeTmpDir(label: String = "test") throws -> URL {
+    let dir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return dir
+}
 
 /// Create a temp directory pre-configured for global-scope tests (`.claude/` + `.mcs/` subdirectories).
 func makeGlobalTmpDir(label: String = "global") throws -> URL {
@@ -159,13 +287,14 @@ func makeSandboxProject(label: String = "project") throws -> (home: URL, project
 /// Create a `Configurator` configured for global-scope sync.
 func makeGlobalConfigurator(
     home: URL,
-    mockCLI: MockClaudeCLI = MockClaudeCLI()
+    mockCLI: MockClaudeCLI = MockClaudeCLI(),
+    shell: (any ShellRunning)? = nil
 ) -> Configurator {
     let env = Environment(home: home)
     return Configurator(
         environment: env,
         output: CLIOutput(colorsEnabled: false),
-        shell: ShellRunner(environment: env),
+        shell: shell ?? ShellRunner(environment: env),
         strategy: GlobalSyncStrategy(environment: env),
         claudeCLI: mockCLI
     )

@@ -6,7 +6,7 @@ import Foundation
 /// Returns `false` if the user declines installation or installation fails.
 @discardableResult
 func ensureClaudeCLI(
-    shell: ShellRunner,
+    shell: any ShellRunning,
     environment: Environment,
     output: CLIOutput
 ) -> Bool {

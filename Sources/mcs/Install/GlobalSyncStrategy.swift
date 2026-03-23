@@ -16,7 +16,7 @@ struct GlobalSyncStrategy: SyncStrategy {
 
     // MARK: - Template Values
 
-    func resolveBuiltInValues(shell _: ShellRunner, output _: CLIOutput) -> [String: String] {
+    func resolveBuiltInValues(shell _: any ShellRunning, output _: CLIOutput) -> [String: String] {
         [:]
     }
 
@@ -39,7 +39,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
         executor: inout ComponentExecutor,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         output: CLIOutput
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()

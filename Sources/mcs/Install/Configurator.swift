@@ -8,7 +8,7 @@ import Foundation
 struct Configurator {
     let environment: Environment
     let output: CLIOutput
-    let shell: ShellRunner
+    let shell: any ShellRunning
     var registry: TechPackRegistry
     let strategy: any SyncStrategy
     let claudeCLI: any ClaudeCLI
@@ -16,7 +16,7 @@ struct Configurator {
     init(
         environment: Environment,
         output: CLIOutput,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         registry: TechPackRegistry = .shared,
         strategy: any SyncStrategy,
         claudeCLI: (any ClaudeCLI)? = nil
