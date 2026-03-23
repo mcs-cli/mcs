@@ -21,7 +21,7 @@ struct UpdateChecker {
     @discardableResult
     static func addHook(to settings: inout Settings) -> Bool {
         settings.addHookEntry(
-            event: Constants.HookEvent.sessionStart.rawValue,
+            event: Constants.HookEvent.sessionStart,
             command: hookCommand,
             timeout: hookTimeout,
             statusMessage: hookStatusMessage
@@ -30,7 +30,7 @@ struct UpdateChecker {
 
     @discardableResult
     static func removeHook(from settings: inout Settings) -> Bool {
-        settings.removeHookEntry(event: Constants.HookEvent.sessionStart.rawValue, command: hookCommand)
+        settings.removeHookEntry(event: Constants.HookEvent.sessionStart, command: hookCommand)
     }
 
     /// Ensure the SessionStart hook in `~/.claude/settings.json` matches the config.

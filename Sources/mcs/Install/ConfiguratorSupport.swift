@@ -200,7 +200,7 @@ enum ConfiguratorSupport {
                    case let .copyPackFile(_, destination, .hook) = component.installAction {
                     let command = "\(hookCommandPrefix)\(destination)"
                     if settings.addHookEntry(
-                        event: reg.event.rawValue,
+                        event: reg.event,
                         command: command,
                         timeout: reg.timeout,
                         isAsync: reg.isAsync,

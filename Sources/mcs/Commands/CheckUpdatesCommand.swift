@@ -59,31 +59,33 @@ struct CheckUpdatesCommand: ParsableCommand {
         }
     }
 
-    private func printJSON(_ result: UpdateChecker.CheckResult) {
-        var dict: [String: Any] = [:]
+    /// Codable DTO for the `--json` output format.
+    private struct JSONOutput: Codable {
+        let cli: CLIStatus
+        let packs: [UpdateChecker.PackUpdate]
 
-        var cliDict: [String: Any] = [
-            "current": MCSVersion.current,
-            "updateAvailable": result.cliUpdate != nil,
-        ]
-        if let cli = result.cliUpdate {
-            cliDict["latest"] = cli.latestVersion
-        }
-        dict["cli"] = cliDict
-
-        dict["packs"] = result.packUpdates.map { update in
-            [
-                "identifier": update.identifier,
-                "displayName": update.displayName,
-                "localSHA": update.localSHA,
-                "remoteSHA": update.remoteSHA,
-            ] as [String: String]
+        struct CLIStatus: Codable {
+            let current: String
+            let updateAvailable: Bool
+            let latest: String?
         }
 
-        do {
-            let data = try JSONSerialization.data(
-                withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]
+        init(result: UpdateChecker.CheckResult) {
+            cli = CLIStatus(
+                current: MCSVersion.current,
+                updateAvailable: result.cliUpdate != nil,
+                latest: result.cliUpdate?.latestVersion
             )
+            packs = result.packUpdates
+        }
+    }
+
+    private func printJSON(_ result: UpdateChecker.CheckResult) {
+        let jsonOutput = JSONOutput(result: result)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            let data = try encoder.encode(jsonOutput)
             if let string = String(data: data, encoding: .utf8) {
                 print(string)
             }

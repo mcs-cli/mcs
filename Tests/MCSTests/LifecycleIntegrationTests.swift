@@ -828,4 +828,93 @@ struct HookMetadataLifecycleTests {
         #expect(!rawJSON.contains("\"async\""))
         #expect(!rawJSON.contains("\"statusMessage\""))
     }
+
+    // MARK: - Update check hook injection
+
+    @Test("Project sync injects update check hook when config enabled")
+    func projectSyncInjectsUpdateHook() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Enable update checks in config
+        var config = MCSConfig()
+        config.updateCheckPacks = true
+        try config.save(to: bed.env.mcsConfigFile)
+
+        // Sync with a minimal pack
+        let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+
+        // Verify the hook is in settings.local.json
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let sessionStartGroups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
+        let commands = sessionStartGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(commands.contains(UpdateChecker.hookCommand))
+    }
+
+    @Test("Project sync omits update check hook when config disabled")
+    func projectSyncOmitsHookWhenDisabled() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Disable update checks in config
+        var config = MCSConfig()
+        config.updateCheckPacks = false
+        config.updateCheckCLI = false
+        try config.save(to: bed.env.mcsConfigFile)
+
+        let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+
+        // Verify no update check hook in settings
+        let fm = FileManager.default
+        if fm.fileExists(atPath: bed.settingsLocalPath.path) {
+            let settings = try Settings.load(from: bed.settingsLocalPath)
+            let sessionStartGroups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
+            let commands = sessionStartGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+            #expect(!commands.contains(UpdateChecker.hookCommand))
+        }
+    }
+
+    @Test("Project sync converges hook on re-sync: enable then disable")
+    func projectSyncConvergesHook() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
+        let registry = TechPackRegistry(packs: [pack])
+
+        // First sync: enabled
+        var config = MCSConfig()
+        config.updateCheckPacks = true
+        try config.save(to: bed.env.mcsConfigFile)
+
+        var configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+
+        let settings1 = try Settings.load(from: bed.settingsLocalPath)
+        let commands1 = (settings1.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? [])
+            .flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(commands1.contains(UpdateChecker.hookCommand))
+
+        // Second sync: disabled
+        config.updateCheckPacks = false
+        config.updateCheckCLI = false
+        try config.save(to: bed.env.mcsConfigFile)
+
+        configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+
+        // Project strategy rebuilds from scratch — hook should be absent
+        if FileManager.default.fileExists(atPath: bed.settingsLocalPath.path) {
+            let settings2 = try Settings.load(from: bed.settingsLocalPath)
+            let commands2 = (settings2.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? [])
+                .flatMap { $0.hooks ?? [] }.compactMap(\.command)
+            #expect(!commands2.contains(UpdateChecker.hookCommand))
+        }
+    }
 }

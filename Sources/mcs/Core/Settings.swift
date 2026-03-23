@@ -110,6 +110,21 @@ struct Settings: Codable {
         return true
     }
 
+    /// Type-safe overload accepting `HookEvent`.
+    @discardableResult
+    mutating func addHookEntry(
+        event: Constants.HookEvent,
+        command: String,
+        timeout: Int? = nil,
+        isAsync: Bool? = nil,
+        statusMessage: String? = nil
+    ) -> Bool {
+        addHookEntry(
+            event: event.rawValue, command: command,
+            timeout: timeout, isAsync: isAsync, statusMessage: statusMessage
+        )
+    }
+
     /// Remove a hook entry by command string from the given event.
     /// Returns `true` if the entry was found and removed.
     @discardableResult
@@ -124,6 +139,12 @@ struct Settings: Codable {
         }
         if hooks?.isEmpty == true { hooks = nil }
         return groups.count < before
+    }
+
+    /// Type-safe overload accepting `HookEvent`.
+    @discardableResult
+    mutating func removeHookEntry(event: Constants.HookEvent, command: String) -> Bool {
+        removeHookEntry(event: event.rawValue, command: command)
     }
 
     // MARK: - Deep Merge
