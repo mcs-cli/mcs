@@ -7,13 +7,13 @@ import Foundation
 struct PackInstaller {
     let environment: Environment
     let output: CLIOutput
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let registry: TechPackRegistry
 
     init(
         environment: Environment,
         output: CLIOutput,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         registry: TechPackRegistry = .shared
     ) {
         self.environment = environment

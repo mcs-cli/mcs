@@ -5,7 +5,7 @@ import Foundation
 struct ComponentExecutor {
     let environment: Environment
     let output: CLIOutput
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let claudeCLI: any ClaudeCLI
 
     // MARK: - Brew Packages

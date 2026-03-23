@@ -3,7 +3,7 @@ import Foundation
 /// Manages the global gitignore file. Resolves the correct path,
 /// creates the file if needed, and adds entries idempotently.
 struct GitignoreManager {
-    let shell: ShellRunner
+    let shell: any ShellRunning
 
     /// Core entries managed by mcs (not pack-specific).
     static let coreEntries: [String] = [

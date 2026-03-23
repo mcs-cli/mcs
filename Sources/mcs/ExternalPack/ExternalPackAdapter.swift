@@ -6,14 +6,14 @@ import Foundation
 struct ExternalPackAdapter: TechPack {
     let manifest: ExternalPackManifest
     let packPath: URL
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let output: CLIOutput
     let scriptRunner: ScriptRunner
 
     init(
         manifest: ExternalPackManifest,
         packPath: URL,
-        shell: ShellRunner = ShellRunner(environment: Environment()),
+        shell: any ShellRunning = ShellRunner(environment: Environment()),
         output: CLIOutput = CLIOutput(),
         scriptRunner: ScriptRunner? = nil
     ) {

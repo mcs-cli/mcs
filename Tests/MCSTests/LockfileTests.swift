@@ -3,57 +3,14 @@ import Foundation
 import Testing
 
 struct LockfileTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-lockfile-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func makeEntry(
-        identifier: String,
-        commitSHA: String = "abc123def456"
-    ) -> PackRegistryFile.PackEntry {
-        PackRegistryFile.PackEntry(
-            identifier: identifier,
-            displayName: identifier,
-            author: nil,
-            sourceURL: "https://example.com/\(identifier)",
-            ref: nil,
-            commitSHA: commitSHA,
-            localPath: identifier,
-            addedAt: "2026-01-01T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: nil
-        )
-    }
-
-    private func makeLocalEntry(
-        identifier: String,
-        localPath: String = "/Users/dev/local-pack"
-    ) -> PackRegistryFile.PackEntry {
-        PackRegistryFile.PackEntry(
-            identifier: identifier,
-            displayName: identifier,
-            author: nil,
-            sourceURL: localPath,
-            ref: nil,
-            commitSHA: "local",
-            localPath: localPath,
-            addedAt: "2026-01-01T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: true
-        )
-    }
-
     // MARK: - Generation
 
     @Test("Generate lockfile from registry entries and selected packs")
     func generateLockfile() {
         let entries = [
-            makeEntry(identifier: "ios", commitSHA: "sha-ios"),
-            makeEntry(identifier: "web", commitSHA: "sha-web"),
-            makeEntry(identifier: "unselected", commitSHA: "sha-unused"),
+            makeRegistryEntry(identifier: "ios", commitSHA: "sha-ios"),
+            makeRegistryEntry(identifier: "web", commitSHA: "sha-web"),
+            makeRegistryEntry(identifier: "unselected", commitSHA: "sha-unused"),
         ]
 
         let lockfile = Lockfile.generate(
@@ -73,8 +30,8 @@ struct LockfileTests {
     @Test("Generate lockfile only includes selected packs")
     func generateExcludesUnselected() {
         let entries = [
-            makeEntry(identifier: "ios"),
-            makeEntry(identifier: "web"),
+            makeRegistryEntry(identifier: "ios"),
+            makeRegistryEntry(identifier: "web"),
         ]
 
         let lockfile = Lockfile.generate(
@@ -94,7 +51,7 @@ struct LockfileTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let lockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "sha123")],
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "sha123")],
             selectedPackIDs: ["ios"]
         )
         try lockfile.save(projectRoot: tmpDir)
@@ -122,7 +79,7 @@ struct LockfileTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let lockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios")],
+            registryEntries: [makeRegistryEntry(identifier: "ios")],
             selectedPackIDs: ["ios"]
         )
         try lockfile.save(projectRoot: tmpDir)
@@ -137,11 +94,11 @@ struct LockfileTests {
     @Test("No mismatches when SHAs match")
     func noMismatches() {
         let lockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "sha1")],
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "sha1")],
             selectedPackIDs: ["ios"]
         )
         let mismatches = lockfile.detectMismatches(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "sha1")]
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "sha1")]
         )
         #expect(mismatches.isEmpty)
     }
@@ -149,11 +106,11 @@ struct LockfileTests {
     @Test("Detects SHA mismatch")
     func shaMismatch() {
         let lockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "locked-sha")],
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "locked-sha")],
             selectedPackIDs: ["ios"]
         )
         let mismatches = lockfile.detectMismatches(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "different-sha")]
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "different-sha")]
         )
         #expect(mismatches.count == 1)
         #expect(mismatches[0].identifier == "ios")
@@ -164,7 +121,7 @@ struct LockfileTests {
     @Test("Detects missing pack in registry")
     func missingPack() {
         let lockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "sha1")],
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "sha1")],
             selectedPackIDs: ["ios"]
         )
         let mismatches = lockfile.detectMismatches(registryEntries: [])
@@ -178,8 +135,8 @@ struct LockfileTests {
     @Test("Local pack is included in lockfile with commitSHA 'local'")
     func localPackInLockfile() {
         let entries = [
-            makeEntry(identifier: "ios", commitSHA: "sha-ios"),
-            makeLocalEntry(identifier: "my-local", localPath: "/path/to/my-local"),
+            makeRegistryEntry(identifier: "ios", commitSHA: "sha-ios"),
+            makeLocalRegistryEntry(identifier: "my-local", localPath: "/path/to/my-local"),
         ]
 
         let lockfile = Lockfile.generate(

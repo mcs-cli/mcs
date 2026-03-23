@@ -6,57 +6,13 @@ import Testing
 struct LockfileOperationsTests {
     // MARK: - Helpers
 
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-lockops-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func makeEntry(
-        identifier: String,
-        commitSHA: String = "abc123def456",
-        sourceURL: String? = nil
-    ) -> PackRegistryFile.PackEntry {
-        PackRegistryFile.PackEntry(
-            identifier: identifier,
-            displayName: identifier,
-            author: nil,
-            sourceURL: sourceURL ?? "https://example.com/\(identifier).git",
-            ref: nil,
-            commitSHA: commitSHA,
-            localPath: identifier,
-            addedAt: "2026-01-01T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: nil
-        )
-    }
-
-    private func makeLocalEntry(
-        identifier: String,
-        localPath: String = "/Users/dev/local-pack"
-    ) -> PackRegistryFile.PackEntry {
-        PackRegistryFile.PackEntry(
-            identifier: identifier,
-            displayName: identifier,
-            author: nil,
-            sourceURL: localPath,
-            ref: nil,
-            commitSHA: "local",
-            localPath: localPath,
-            addedAt: "2026-01-01T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: true
-        )
-    }
-
     /// Create an Environment rooted at a temp directory, plus the LockfileOperations instance.
-    private func makeOperations(home: URL) -> LockfileOperations {
+    private func makeOperations(home: URL, shell: (any ShellRunning)? = nil) -> LockfileOperations {
         let env = Environment(home: home)
         return LockfileOperations(
             environment: env,
             output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env)
+            shell: shell ?? ShellRunner(environment: env)
         )
     }
 
@@ -94,8 +50,8 @@ struct LockfileOperationsTests {
         }
 
         let entries = [
-            makeEntry(identifier: "ios", commitSHA: "aabbccdd"),
-            makeEntry(identifier: "web", commitSHA: "11223344"),
+            makeRegistryEntry(identifier: "ios", commitSHA: "aabbccdd"),
+            makeRegistryEntry(identifier: "web", commitSHA: "11223344"),
         ]
         try writeRegistry(entries, home: home)
         try writeProjectState(packs: ["ios", "web"], at: project)
@@ -122,9 +78,9 @@ struct LockfileOperationsTests {
         }
 
         let entries = [
-            makeEntry(identifier: "ios", commitSHA: "aabbccdd"),
-            makeEntry(identifier: "web", commitSHA: "11223344"),
-            makeEntry(identifier: "unused", commitSHA: "deadbeef"),
+            makeRegistryEntry(identifier: "ios", commitSHA: "aabbccdd"),
+            makeRegistryEntry(identifier: "web", commitSHA: "11223344"),
+            makeRegistryEntry(identifier: "unused", commitSHA: "deadbeef"),
         ]
         try writeRegistry(entries, home: home)
         try writeProjectState(packs: ["ios"], at: project)
@@ -169,13 +125,13 @@ struct LockfileOperationsTests {
 
         // Write initial lockfile
         let oldLockfile = Lockfile.generate(
-            registryEntries: [makeEntry(identifier: "ios", commitSHA: "oldsha")],
+            registryEntries: [makeRegistryEntry(identifier: "ios", commitSHA: "oldsha")],
             selectedPackIDs: ["ios"]
         )
         try oldLockfile.save(projectRoot: project)
 
         // Now update registry with new SHA and write again
-        let entries = [makeEntry(identifier: "ios", commitSHA: "newsha")]
+        let entries = [makeRegistryEntry(identifier: "ios", commitSHA: "newsha")]
         try writeRegistry(entries, home: home)
         try writeProjectState(packs: ["ios"], at: project)
 
@@ -469,5 +425,81 @@ struct LockfileOperationsTests {
         let ops = makeOperations(home: home)
         // Should not throw — early return for empty registry
         try ops.updatePacks()
+    }
+
+    // MARK: - checkoutLockedCommits: Git operations (mock-based)
+
+    /// Set up a locked pack with a real pack directory and lockfile, returning
+    /// the dirs and mock shell for further configuration.
+    private func makeLockedPackFixture() throws -> (home: URL, project: URL, shell: MockShellRunner) {
+        let home = try makeTmpDir()
+        let project = try makeTmpDir()
+        let env = Environment(home: home)
+        let packPath = env.packsDirectory.appendingPathComponent("ios")
+        try FileManager.default.createDirectory(at: packPath, withIntermediateDirectories: true)
+
+        let lockfile = Lockfile(
+            lockVersion: 1, generatedAt: "now", mcsVersion: "test",
+            packs: [.init(identifier: "ios", sourceURL: "https://example.com/ios.git", commitSHA: "abcdef0123")]
+        )
+        try lockfile.save(projectRoot: project)
+        return (home, project, MockShellRunner(environment: env))
+    }
+
+    @Test("checkout calls git checkout with correct SHA")
+    func checkoutCallsGitCheckout() throws {
+        let (home, project, mockShell) = try makeLockedPackFixture()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        let ops = makeOperations(home: home, shell: mockShell)
+        try ops.checkoutLockedCommits(at: project)
+
+        #expect(mockShell.runCalls.count == 1)
+        let call = mockShell.runCalls[0]
+        #expect(call.arguments.contains("checkout"))
+        #expect(call.arguments.contains("abcdef0123"))
+        #expect(call.arguments.contains("-C"))
+    }
+
+    @Test("checkout retries with fetch on initial failure")
+    func checkoutRetriesWithFetch() throws {
+        let (home, project, mockShell) = try makeLockedPackFixture()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        mockShell.runResults = [
+            ShellResult(exitCode: 1, stdout: "", stderr: "error: pathspec"),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+        ]
+
+        let ops = makeOperations(home: home, shell: mockShell)
+        try ops.checkoutLockedCommits(at: project)
+
+        #expect(mockShell.runCalls.count == 3)
+        #expect(mockShell.runCalls[0].arguments.contains("checkout"))
+        #expect(mockShell.runCalls[1].arguments.contains("fetch"))
+        #expect(mockShell.runCalls[2].arguments.contains("checkout"))
+    }
+
+    @Test("checkout fails when retry also fails")
+    func checkoutFailsWhenRetryFails() throws {
+        let (home, project, mockShell) = try makeLockedPackFixture()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: project)
+        }
+
+        mockShell.result = ShellResult(exitCode: 1, stdout: "", stderr: "error: pathspec")
+
+        let ops = makeOperations(home: home, shell: mockShell)
+        #expect(throws: ExitCode.self) {
+            try ops.checkoutLockedCommits(at: project)
+        }
     }
 }

@@ -5,7 +5,7 @@ import os
 /// Adds pack-specific concerns: path containment validation, standard environment
 /// variables, timeout enforcement, and executable permission enforcement (auto-chmod).
 struct ScriptRunner {
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let output: CLIOutput
 
     /// Result of running an external pack script.

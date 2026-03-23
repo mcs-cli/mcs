@@ -8,7 +8,7 @@ enum ConfiguratorSupport {
     static func makeExecutor(
         environment: Environment,
         output: CLIOutput,
-        shell: ShellRunner,
+        shell: any ShellRunning,
         claudeCLI: (any ClaudeCLI)? = nil
     ) -> ComponentExecutor {
         ComponentExecutor(
@@ -20,7 +20,7 @@ enum ConfiguratorSupport {
     }
 
     /// Ensure global gitignore core entries are present.
-    static func ensureGitignoreEntries(shell: ShellRunner) throws {
+    static func ensureGitignoreEntries(shell: any ShellRunning) throws {
         let manager = GitignoreManager(shell: shell)
         try manager.addCoreEntries()
     }

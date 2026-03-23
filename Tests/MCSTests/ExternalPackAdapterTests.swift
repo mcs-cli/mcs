@@ -745,13 +745,6 @@ struct ExternalPackAdapterTests {
         )
     }
 
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func makeAdapter(
         manifest: ExternalPackManifest
     ) throws -> (ExternalPackAdapter, URL) {

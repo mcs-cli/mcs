@@ -2,7 +2,7 @@ import Foundation
 
 /// Git clone/fetch operations for external tech packs.
 struct PackFetcher {
-    let shell: ShellRunner
+    let shell: any ShellRunning
     let output: CLIOutput
     let packsDirectory: URL // ~/.mcs/packs/
 
