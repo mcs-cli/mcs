@@ -125,8 +125,8 @@ struct Settings: Codable {
         )
     }
 
-    /// Remove all hook groups whose first hook command matches `command` from the given event.
-    /// Cleans up empty event keys and nils `hooks` when the last event is removed.
+    /// Remove a hook entry by command string from the given event.
+    /// Returns `true` if the entry was found and removed.
     @discardableResult
     mutating func removeHookEntry(event: String, command: String) -> Bool {
         guard var groups = hooks?[event] else { return false }
