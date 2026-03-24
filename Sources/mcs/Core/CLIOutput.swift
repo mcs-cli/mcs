@@ -513,11 +513,6 @@ struct CLIOutput {
     ) -> String {
         var output = ""
 
-        output += "\n"
-        output += "  Use \(bold)\u{2191}\u{2193}\(reset) to move, "
-        output += "\(bold)space\(reset) to toggle, "
-        output += "\(bold)enter\(reset) to confirm\n"
-
         var flatIndex = 0
         for group in groups where !group.items.isEmpty {
             output += "\n"
@@ -545,6 +540,7 @@ struct CLIOutput {
         }
 
         output += "\n"
+        output += "  \(dim)\u{2191}/\u{2193} Move \u{00B7} Space Toggle \u{00B7} Enter Confirm\(reset)\n"
         return output
     }
 
