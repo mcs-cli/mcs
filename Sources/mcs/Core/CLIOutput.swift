@@ -3,6 +3,7 @@ import Foundation
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
     let colorsEnabled: Bool
+    let isInteractiveTerminal: Bool
 
     init(colorsEnabled: Bool? = nil) {
         if let explicit = colorsEnabled {
@@ -10,6 +11,7 @@ struct CLIOutput {
         } else {
             self.colorsEnabled = isatty(STDOUT_FILENO) != 0
         }
+        isInteractiveTerminal = self.colorsEnabled && isatty(STDIN_FILENO) != 0
     }
 
     // MARK: - ANSI Codes
@@ -168,7 +170,15 @@ struct CLIOutput {
     // MARK: - Prompts
 
     /// Ask a yes/no question. Returns true for yes, false for no.
+    /// Uses arrow-key navigation on TTY, falls back to text input otherwise.
     func askYesNo(_ prompt: String, default defaultValue: Bool = true) -> Bool {
+        if isInteractiveTerminal {
+            return interactiveYesNo(prompt, default: defaultValue)
+        }
+        return fallbackYesNo(prompt, default: defaultValue)
+    }
+
+    private func fallbackYesNo(_ prompt: String, default defaultValue: Bool) -> Bool {
         let hint = defaultValue ? "[Y/n]" : "[y/N]"
         while true {
             write("  \(bold)\(prompt)\(reset) \(hint): ")
@@ -189,6 +199,86 @@ struct CLIOutput {
         }
     }
 
+    private func interactiveYesNo(_ prompt: String, default defaultValue: Bool) -> Bool {
+        withRawTerminal {
+            var selected = defaultValue
+
+            renderYesNo(prompt: prompt, selected: selected)
+
+            while true {
+                let byte = readByte()
+
+                switch byte {
+                case 0x0A, 0x0D, 0x20: // Enter or Space — confirm
+                    write("\n")
+                    return selected
+
+                case 0x1B: // Escape sequence (arrow keys)
+                    if let arrow = readCSIArrowKey() {
+                        switch arrow {
+                        case 0x43: // Right → move to No
+                            if selected {
+                                selected = false
+                                rerenderYesNo(prompt: prompt, selected: selected)
+                            }
+                        case 0x44: // Left → move to Yes
+                            if !selected {
+                                selected = true
+                                rerenderYesNo(prompt: prompt, selected: selected)
+                            }
+                        default:
+                            break
+                        }
+                    }
+
+                case 0x79, 0x59: // 'y' or 'Y'
+                    write("\n")
+                    return true
+
+                case 0x6E, 0x4E: // 'n' or 'N'
+                    write("\n")
+                    return false
+
+                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                    write("\n")
+                    return defaultValue
+
+                default:
+                    break
+                }
+            }
+        }
+    }
+
+    private func buildYesNoString(
+        prompt: String,
+        selected: Bool
+    ) -> String {
+        var output = ""
+        output += "\n"
+        output += "  \(bold)\(prompt)\(reset)\n"
+
+        let yesLabel = selected
+            ? "\(cyan)\u{203A} \(bold)Yes\(reset)"
+            : "  \(bold)Yes\(reset)"
+        let noLabel = selected
+            ? "  \(bold)No\(reset)"
+            : "\(cyan)\u{203A} \(bold)No\(reset)"
+
+        output += "  \(yesLabel)   \(noLabel)\n"
+        output += "  \(dim)\u{2190}/\u{2192} Toggle \u{00B7} Enter Confirm\(reset)\n"
+        return output
+    }
+
+    private func renderYesNo(prompt: String, selected: Bool) {
+        write(buildYesNoString(prompt: prompt, selected: selected))
+    }
+
+    private func rerenderYesNo(prompt: String, selected: Bool) {
+        let output = buildYesNoString(prompt: prompt, selected: selected)
+        rerenderInPlace(output, columns: terminalColumns)
+    }
+
     /// Inline text prompt where the user types on the same line as the label.
     func promptInline(_ prompt: String, default defaultValue: String? = nil) -> String {
         let hint = defaultValue.map { " (\($0))" } ?? ""
@@ -204,7 +294,7 @@ struct CLIOutput {
     /// Use arrow keys to move, space to toggle, Enter to confirm.
     /// Falls back to number-based input when not a TTY.
     func multiSelect(groups: inout [SelectableGroup]) -> Set<Int> {
-        if colorsEnabled, isatty(STDIN_FILENO) != 0 {
+        if isInteractiveTerminal {
             return interactiveMultiSelect(groups: &groups)
         }
         return fallbackMultiSelect(groups: &groups)
@@ -218,7 +308,7 @@ struct CLIOutput {
     func singleSelect(title: String, items: [(name: String, description: String)]) -> Int {
         guard !items.isEmpty else { return 0 }
 
-        if colorsEnabled, isatty(STDIN_FILENO) != 0 {
+        if isInteractiveTerminal {
             return interactiveSingleSelect(title: title, items: items)
         }
         return fallbackSingleSelect(title: title, items: items)
@@ -228,57 +318,40 @@ struct CLIOutput {
         title: String,
         items: [(name: String, description: String)]
     ) -> Int {
-        var cursor = 0
+        withRawTerminal {
+            var cursor = 0
 
-        // Enter raw mode
-        var originalTermios = termios()
-        tcgetattr(STDIN_FILENO, &originalTermios)
-        var raw = originalTermios
-        raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1 // VMIN = 1
-        raw.c_cc.17 = 0 // VTIME = 0
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+            renderSingleSelectList(title: title, items: items, cursor: cursor)
 
-        // Hide cursor
-        write("\u{1B}[?25l")
+            while true {
+                let byte = readByte()
 
-        defer {
-            write("\u{1B}[?25h")
-            tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
-        }
+                switch byte {
+                case 0x0A, 0x0D, 0x20: // Enter or Space — confirm selection
+                    write("\n")
+                    return cursor
 
-        renderSingleSelectList(title: title, items: items, cursor: cursor)
-
-        while true {
-            let byte = readByte()
-
-            switch byte {
-            case 0x0A, 0x0D, 0x20: // Enter or Space — confirm selection
-                write("\n")
-                return cursor
-
-            case 0x1B: // Escape sequence (arrow keys)
-                let next = readByte()
-                if next == 0x5B { // '['
-                    let arrow = readByte()
-                    switch arrow {
-                    case 0x41: // Up
-                        if cursor > 0 { cursor -= 1 }
-                        rerenderSingleSelectList(title: title, items: items, cursor: cursor)
-                    case 0x42: // Down
-                        if cursor < items.count - 1 { cursor += 1 }
-                        rerenderSingleSelectList(title: title, items: items, cursor: cursor)
-                    default:
-                        break
+                case 0x1B: // Escape sequence (arrow keys)
+                    if let arrow = readCSIArrowKey() {
+                        switch arrow {
+                        case 0x41: // Up
+                            if cursor > 0 { cursor -= 1 }
+                            rerenderSingleSelectList(title: title, items: items, cursor: cursor)
+                        case 0x42: // Down
+                            if cursor < items.count - 1 { cursor += 1 }
+                            rerenderSingleSelectList(title: title, items: items, cursor: cursor)
+                        default:
+                            break
+                        }
                     }
+
+                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                    write("\n")
+                    return cursor
+
+                default:
+                    break
                 }
-
-            case 0x03, 0x04: // Ctrl+C, Ctrl+D
-                write("\n")
-                return cursor
-
-            default:
-                break
             }
         }
     }
@@ -362,7 +435,6 @@ struct CLIOutput {
     // MARK: - Interactive Multi-Select (raw terminal)
 
     private func interactiveMultiSelect(groups: inout [SelectableGroup]) -> Set<Int> {
-        // Build a flat index of selectable rows for cursor navigation
         var flatItems: [(groupIndex: Int, itemIndex: Int)] = []
         for gi in groups.indices {
             for ii in groups[gi].items.indices {
@@ -374,79 +446,61 @@ struct CLIOutput {
             return collectSelected(from: groups)
         }
 
-        var cursor = 0
+        return withRawTerminal {
+            var cursor = 0
 
-        // Enter raw mode
-        var originalTermios = termios()
-        tcgetattr(STDIN_FILENO, &originalTermios)
-        var raw = originalTermios
-        raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1 // VMIN = 1
-        raw.c_cc.17 = 0 // VTIME = 0
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+            renderInteractiveList(groups: groups, cursor: cursor)
 
-        // Hide cursor
-        write("\u{1B}[?25l")
+            while true {
+                let byte = readByte()
 
-        defer {
-            // Show cursor and restore terminal
-            write("\u{1B}[?25h")
-            tcsetattr(STDIN_FILENO, TCSANOW, &originalTermios)
-        }
+                switch byte {
+                case 0x0A, 0x0D: // Enter
+                    write("\n")
+                    return collectSelected(from: groups)
 
-        renderInteractiveList(groups: groups, cursor: cursor)
+                case 0x20: // Space — toggle current item
+                    let (gi, ii) = flatItems[cursor]
+                    groups[gi].items[ii].isSelected.toggle()
+                    rerenderInteractiveList(groups: groups, cursor: cursor)
 
-        while true {
-            let byte = readByte()
-
-            switch byte {
-            case 0x0A, 0x0D: // Enter
-                write("\n")
-                return collectSelected(from: groups)
-
-            case 0x20: // Space — toggle current item
-                let (gi, ii) = flatItems[cursor]
-                groups[gi].items[ii].isSelected.toggle()
-                rerenderInteractiveList(groups: groups, cursor: cursor)
-
-            case 0x61: // 'a' — select all
-                for gi in groups.indices {
-                    for ii in groups[gi].items.indices {
-                        groups[gi].items[ii].isSelected = true
+                case 0x61: // 'a' — select all
+                    for gi in groups.indices {
+                        for ii in groups[gi].items.indices {
+                            groups[gi].items[ii].isSelected = true
+                        }
                     }
-                }
-                rerenderInteractiveList(groups: groups, cursor: cursor)
+                    rerenderInteractiveList(groups: groups, cursor: cursor)
 
-            case 0x6E: // 'n' — select none
-                for gi in groups.indices {
-                    for ii in groups[gi].items.indices {
-                        groups[gi].items[ii].isSelected = false
+                case 0x6E: // 'n' — select none
+                    for gi in groups.indices {
+                        for ii in groups[gi].items.indices {
+                            groups[gi].items[ii].isSelected = false
+                        }
                     }
-                }
-                rerenderInteractiveList(groups: groups, cursor: cursor)
+                    rerenderInteractiveList(groups: groups, cursor: cursor)
 
-            case 0x1B: // Escape sequence (arrow keys)
-                let next = readByte()
-                if next == 0x5B { // '['
-                    let arrow = readByte()
-                    switch arrow {
-                    case 0x41: // Up
-                        if cursor > 0 { cursor -= 1 }
-                        rerenderInteractiveList(groups: groups, cursor: cursor)
-                    case 0x42: // Down
-                        if cursor < flatItems.count - 1 { cursor += 1 }
-                        rerenderInteractiveList(groups: groups, cursor: cursor)
-                    default:
-                        break
+                case 0x1B: // Escape sequence (arrow keys)
+                    if let arrow = readCSIArrowKey() {
+                        switch arrow {
+                        case 0x41: // Up
+                            if cursor > 0 { cursor -= 1 }
+                            rerenderInteractiveList(groups: groups, cursor: cursor)
+                        case 0x42: // Down
+                            if cursor < flatItems.count - 1 { cursor += 1 }
+                            rerenderInteractiveList(groups: groups, cursor: cursor)
+                        default:
+                            break
+                        }
                     }
+
+                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                    write("\n")
+                    return collectSelected(from: groups)
+
+                default:
+                    break
                 }
-
-            case 0x03, 0x04: // Ctrl+C, Ctrl+D
-                write("\n")
-                return collectSelected(from: groups)
-
-            default:
-                break
             }
         }
     }
@@ -480,7 +534,6 @@ struct CLIOutput {
             }
         }
 
-        // Always-included section
         let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
             output += "\n"
@@ -524,6 +577,31 @@ struct CLIOutput {
         var byte: UInt8 = 0
         _ = Darwin.read(STDIN_FILENO, &byte, 1)
         return byte
+    }
+
+    /// Reads a CSI arrow key escape sequence after the initial 0x1B byte.
+    /// Returns the arrow byte (0x41=Up, 0x42=Down, 0x43=Right, 0x44=Left), or nil if not a CSI sequence.
+    private func readCSIArrowKey() -> UInt8? {
+        guard readByte() == 0x5B else { return nil }
+        return readByte()
+    }
+
+    /// Enters raw terminal mode (no echo, no canonical processing, hidden cursor),
+    /// runs the body closure, then restores the terminal on return.
+    private func withRawTerminal<T>(_ body: () -> T) -> T {
+        var original = termios()
+        tcgetattr(STDIN_FILENO, &original)
+        var raw = original
+        raw.c_lflag &= ~UInt(ICANON | ECHO)
+        raw.c_cc.16 = 1 // VMIN = 1
+        raw.c_cc.17 = 0 // VTIME = 0
+        tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+        write("\u{1B}[?25l")
+        defer {
+            write("\u{1B}[?25h")
+            tcsetattr(STDIN_FILENO, TCSANOW, &original)
+        }
+        return body()
     }
 
     // MARK: - Fallback Multi-Select (non-TTY)
