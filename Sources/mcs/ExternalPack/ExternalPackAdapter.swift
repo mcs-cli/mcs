@@ -9,6 +9,7 @@ struct ExternalPackAdapter: TechPack {
     let shell: any ShellRunning
     let output: CLIOutput
     let scriptRunner: ScriptRunner
+    private(set) var components: [ComponentDefinition] = []
 
     init(
         manifest: ExternalPackManifest,
@@ -22,6 +23,7 @@ struct ExternalPackAdapter: TechPack {
         self.shell = shell
         self.output = output
         self.scriptRunner = scriptRunner ?? ScriptRunner(shell: shell, output: output)
+        components = manifest.components?.compactMap { convertComponent($0) } ?? []
     }
 
     // MARK: - TechPack Identity
@@ -36,15 +38,6 @@ struct ExternalPackAdapter: TechPack {
 
     var description: String {
         manifest.description
-    }
-
-    // MARK: - Components
-
-    var components: [ComponentDefinition] {
-        guard let externalComponents = manifest.components else { return [] }
-        return externalComponents.compactMap { ext in
-            convertComponent(ext)
-        }
     }
 
     // MARK: - Templates

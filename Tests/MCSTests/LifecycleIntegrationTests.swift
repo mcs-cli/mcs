@@ -190,6 +190,16 @@ private struct LifecycleTestBed {
     var claudeLocalPath: URL {
         project.appendingPathComponent("CLAUDE.local.md")
     }
+
+    /// Derive the expected hook command string for a project-scoped hook destination.
+    func projectHookCommand(_ destination: String) -> String {
+        "bash .claude/hooks/\(destination)"
+    }
+
+    /// Derive the expected hook command string for a global-scoped hook destination.
+    func globalHookCommand(_ destination: String) -> String {
+        "bash ~/.claude/hooks/\(destination)"
+    }
 }
 
 // MARK: - Scenario 1: Single-Pack Lifecycle
@@ -246,7 +256,7 @@ struct SinglePackLifecycleTests {
         let settings = try Settings.load(from: bed.settingsLocalPath)
         let postToolGroups = settings.hooks?["PostToolUse"] ?? []
         let hookCommands = postToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(hookCommands.contains("bash .claude/hooks/lint.sh"))
+        #expect(hookCommands.contains(bed.projectHookCommand("lint.sh")))
 
         // Verify MCP server was registered via MockClaudeCLI with local scope
         #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" && $0.scope == "local" })
@@ -258,7 +268,7 @@ struct SinglePackLifecycleTests {
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
         #expect(artifacts?.settingsKeys.contains("env") == true)
-        #expect(artifacts?.hookCommands.contains("bash .claude/hooks/lint.sh") == true)
+        #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
         // === Step 2: Doctor passes ===
@@ -432,15 +442,15 @@ struct CrossPackCollisionTests {
         let settings = try Settings.load(from: bed.settingsLocalPath)
         let preToolGroups = settings.hooks?["PreToolUse"] ?? []
         let hookCommands = preToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(hookCommands.contains("bash .claude/hooks/pack-a/lint.sh"))
-        #expect(hookCommands.contains("bash .claude/hooks/pack-b/lint.sh"))
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
 
         // Verify artifact records are distinct
         let state = try bed.projectState()
         let artifactsA = state.artifacts(for: "pack-a")
         let artifactsB = state.artifacts(for: "pack-b")
-        #expect(artifactsA?.hookCommands.contains("bash .claude/hooks/pack-a/lint.sh") == true)
-        #expect(artifactsB?.hookCommands.contains("bash .claude/hooks/pack-b/lint.sh") == true)
+        #expect(artifactsA?.hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")) == true)
+        #expect(artifactsB?.hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")) == true)
 
         // === Step 2: Remove pack A — pack B's file and hook must survive ===
         try configurator.configure(packs: [packB], confirmRemovals: false)
@@ -451,8 +461,8 @@ struct CrossPackCollisionTests {
         let afterSettings = try Settings.load(from: bed.settingsLocalPath)
         let afterGroups = afterSettings.hooks?["PreToolUse"] ?? []
         let afterCommands = afterGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(!afterCommands.contains("bash .claude/hooks/pack-a/lint.sh"))
-        #expect(afterCommands.contains("bash .claude/hooks/pack-b/lint.sh"))
+        #expect(!afterCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
+        #expect(afterCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
     }
 }
 
@@ -864,7 +874,7 @@ struct HookMetadataLifecycleTests {
         let hookEntries = try #require(firstGroup["hooks"] as? [[String: Any]])
         let entry = try #require(hookEntries.first)
 
-        #expect(entry["command"] as? String == "bash .claude/hooks/lint.sh")
+        #expect(entry["command"] as? String == bed.projectHookCommand("lint.sh"))
         #expect(entry["timeout"] as? Int == 30)
         #expect(entry["async"] as? Bool == true)
         #expect(entry["statusMessage"] as? String == "Running lint...")
