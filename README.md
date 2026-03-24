@@ -88,7 +88,7 @@ Packs are modular — mix and match what you need instead of one monolith:
 
 | Pack | Description | Highlights |
 |------|-------------|------------|
-| [**dev**](https://github.com/mcs-cli/dev) | Foundational settings, plugins, git workflows, and code navigation | Serena (LSP), plan mode, `/commit`, PR review agents, session-start git status |
+| [**dev**](https://github.com/mcs-cli/dev) | Foundational settings, plugins, git workflows, and code navigation | Plan mode, `/commit`, `/pr`, PR review agents, session-start git status |
 | [**memory**](https://github.com/mcs-cli/memory) | Persistent memory and knowledge management across sessions | Ollama embeddings, semantic search via `docs-mcp-server`, auto-extracted learnings |
 | [**ios**](https://github.com/mcs-cli/ios) | Xcode integration, simulator management, and Apple documentation | XcodeBuildMCP, Sosumi docs, auto-detected project config, simulator hooks |
 
