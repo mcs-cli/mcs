@@ -266,6 +266,7 @@ struct CLIOutput {
             : "\(cyan)\u{203A} \(bold)No\(reset)"
 
         output += "  \(yesLabel)   \(noLabel)\n"
+        output += "\n"
         output += "  \(dim)\u{2190}/\u{2192} Toggle \u{00B7} Enter Confirm\(reset)\n"
         return output
     }
