@@ -317,6 +317,10 @@ struct Configurator {
             removedFiles.insert(path)
         }
         remaining.files.removeAll { removedFiles.contains($0) }
+        // Purge fileHashes: remove hashes for deleted files and any orphaned entries
+        // (entries whose key has no corresponding files entry, e.g. from past state inconsistencies)
+        let trackedFiles = Set(remaining.files)
+        remaining.fileHashes = remaining.fileHashes.filter { trackedFiles.contains($0.key) }
 
         // Remove auto-derived hook commands and contributed settings keys
         let hasHooksToRemove = !artifacts.hookCommands.isEmpty

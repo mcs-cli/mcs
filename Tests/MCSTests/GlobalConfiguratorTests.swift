@@ -899,6 +899,34 @@ struct GlobalUnconfigurePackTests {
         #expect(state.configuredPacks.contains("pack-b"))
         #expect(!state.configuredPacks.contains("pack-a"))
     }
+
+    @Test("unconfigurePack clears orphaned fileHashes and fully removes pack from state")
+    func unconfigureClearsOrphanedFileHashes() throws {
+        let tmpDir = try makeGlobalTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Seed state with a pack that has orphaned fileHashes (entries without
+        // corresponding files entries) — reproduces the bug where unconfigure
+        // could never clear such packs because PackArtifactRecord.isEmpty
+        // checks fileHashes.isEmpty.
+        let env = Environment(home: tmpDir)
+        var state = try ProjectState(stateFile: env.globalStateFile)
+        state.recordPack("orphan-pack")
+        var record = PackArtifactRecord()
+        record.fileHashes = [
+            "hooks/orphan-pack/hook.sh": "abc123",
+            "skills/orphan-skill/SKILL.md": "def456",
+        ]
+        state.setArtifacts(record, for: "orphan-pack")
+        try state.save()
+
+        let configurator = makeGlobalConfigurator(home: tmpDir)
+        try configurator.configure(packs: [], confirmRemovals: false)
+
+        let after = try ProjectState(stateFile: env.globalStateFile)
+        #expect(!after.configuredPacks.contains("orphan-pack"))
+        #expect(after.artifacts(for: "orphan-pack") == nil)
+    }
 }
 
 // MARK: - Global Dry Run Tests
