@@ -13,10 +13,17 @@ jobs:
     name: Auto Release
     runs-on: ubuntu-latest
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout with full history
         uses: actions/checkout@v6
         with:
-          ssh-key: ${{ secrets.AUTO_RELEASE_KEY }}
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - name: Calculate version from today's UTC date
