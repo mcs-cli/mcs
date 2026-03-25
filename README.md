@@ -1,8 +1,12 @@
 <div align="center">
 
-# ⚡ Managed Claude Stack (`mcs`)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://mcs-cli.dev/assets/logo.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://mcs-cli.dev/assets/logo-light.svg">
+  <img alt="mcs" src="https://mcs-cli.dev/assets/logo-light.svg" width="280">
+</picture>
 
-**Your Claude Code environment — packaged, portable, and reproducible.**
+### Your Claude Code environment — packaged, portable, and reproducible.
 
 [![Swift 6.0+](https://img.shields.io/badge/Swift-6.0+-F05138.svg?logo=swift&logoColor=white)](https://swift.org)
 [![macOS](https://img.shields.io/badge/macOS-13+-000000.svg?logo=apple&logoColor=white)](https://www.apple.com/macos/)
