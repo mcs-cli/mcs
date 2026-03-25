@@ -397,13 +397,14 @@ struct CrossPackCollisionTests {
         let hookSourceA = try bed.makeHookSource(name: "lint-a.sh", content: "#!/bin/bash\necho pack-a")
         let hookSourceB = try bed.makeHookSource(name: "lint-b.sh", content: "#!/bin/bash\necho pack-b")
 
+        // Raw destinations — resolver detects the collision and namespaces them
         let packA = MockTechPack(
             identifier: "pack-a",
             displayName: "Pack A",
             components: [
                 bed.hookComponent(
                     pack: "pack-a", id: "lint",
-                    source: hookSourceA, destination: "pack-a/lint.sh",
+                    source: hookSourceA, destination: "lint.sh",
                     hookRegistration: HookRegistration(event: .preToolUse)
                 ),
             ],
@@ -415,7 +416,7 @@ struct CrossPackCollisionTests {
             components: [
                 bed.hookComponent(
                     pack: "pack-b", id: "lint",
-                    source: hookSourceB, destination: "pack-b/lint.sh",
+                    source: hookSourceB, destination: "lint.sh",
                     hookRegistration: HookRegistration(event: .preToolUse)
                 ),
             ],
@@ -424,7 +425,7 @@ struct CrossPackCollisionTests {
         let registry = TechPackRegistry(packs: [packA, packB])
         let configurator = bed.makeConfigurator(registry: registry)
 
-        // === Step 1: Configure both packs ===
+        // === Step 1: Configure both packs — collision resolver namespaces both ===
         try configurator.configure(packs: [packA, packB], confirmRemovals: false)
 
         // Verify both files exist at distinct namespaced paths
@@ -447,17 +448,58 @@ struct CrossPackCollisionTests {
         #expect(artifactsA?.hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")) == true)
         #expect(artifactsB?.hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")) == true)
 
-        // === Step 2: Remove pack A — pack B's file and hook must survive ===
+        // === Step 2: Remove pack A — pack B now has no collision, moves to flat path ===
         try configurator.configure(packs: [packB], confirmRemovals: false)
 
         #expect(!FileManager.default.fileExists(atPath: fileA.path))
-        #expect(FileManager.default.fileExists(atPath: fileB.path))
+        // Pack B's file should now be at the flat (non-namespaced) path
+        let flatFileB = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: flatFileB.path))
+        // Old namespaced path should be cleaned up by reconcileStaleArtifacts
+        #expect(!FileManager.default.fileExists(atPath: fileB.path))
 
         let afterSettings = try Settings.load(from: bed.settingsLocalPath)
         let afterGroups = afterSettings.hooks?["PreToolUse"] ?? []
         let afterCommands = afterGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
         #expect(!afterCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
-        #expect(afterCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
+        #expect(afterCommands.contains(bed.projectHookCommand("lint.sh")))
+    }
+
+    @Test("Single pack installs files at flat (non-namespaced) paths")
+    func singlePackFlatPaths() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "lint.sh", content: "#!/bin/bash\necho lint")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "my-pack", id: "lint",
+                    source: hookSource, destination: "lint.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // With no collision, file should be at flat path (no pack-id subdirectory)
+        let flatFile = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        let namespacedFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: flatFile.path))
+        #expect(!FileManager.default.fileExists(atPath: namespacedFile.path))
+
+        // Hook command should use flat path
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let preToolGroups = settings.hooks?["PreToolUse"] ?? []
+        let hookCommands = preToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains(bed.projectHookCommand("lint.sh")))
     }
 }
 

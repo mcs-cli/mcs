@@ -147,7 +147,10 @@ struct DoctorRunner {
         for scope in scopes {
             allPackIDs.formUnion(scope.packIDs)
 
-            let scopePacks = availablePacks.filter { scope.packIDs.contains($0.identifier) }
+            let scopePacks = DestinationCollisionResolver.resolveCollisions(
+                packs: availablePacks.filter { scope.packIDs.contains($0.identifier) },
+                output: output
+            )
 
             for pack in scopePacks {
                 for component in pack.components {
