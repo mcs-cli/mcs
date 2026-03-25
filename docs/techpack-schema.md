@@ -135,6 +135,8 @@ Infers: `type: plugin`, `installAction: plugin`
 
 Use with `hookEvent` to register the hook in `settings.local.json`. The optional `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map directly to Claude Code's hook handler fields (`timeout`, `async`, `statusMessage`).
 
+If two packs declare the same `destination`, both are automatically namespaced with a `<pack-id>/` subdirectory prefix to prevent collisions.
+
 Infers: `type: hookFile`, `installAction: copyPackFile(fileType: hook)`
 
 ---
@@ -153,6 +155,8 @@ Infers: `type: hookFile`, `installAction: copyPackFile(fileType: hook)`
 |-------|------|----------|-------------|
 | `source` | `String` | Yes | Path to command file in the pack repo |
 | `destination` | `String` | Yes | Filename in `<project>/.claude/commands/` |
+
+If two packs declare the same `destination`, both are automatically namespaced with a `<pack-id>/` subdirectory prefix to prevent collisions.
 
 Infers: `type: command`, `installAction: copyPackFile(fileType: command)`
 
@@ -173,6 +177,8 @@ Infers: `type: command`, `installAction: copyPackFile(fileType: command)`
 | `source` | `String` | Yes | Path to skill directory in the pack repo |
 | `destination` | `String` | Yes | Directory name in `<project>/.claude/skills/` |
 
+If two packs declare the same `destination`, the first pack keeps the clean name and subsequent packs get `-<pack-id>` appended to the directory name (e.g., `my-skill-pack-b`). A warning is shown during sync. Skills cannot use subdirectory namespacing because Claude Code requires a flat one-level directory for skill discovery.
+
 Infers: `type: skill`, `installAction: copyPackFile(fileType: skill)`
 
 ---
@@ -191,6 +197,8 @@ Infers: `type: skill`, `installAction: copyPackFile(fileType: skill)`
 |-------|------|----------|-------------|
 | `source` | `String` | Yes | Path to agent Markdown file in the pack repo |
 | `destination` | `String` | Yes | Filename in `<project>/.claude/agents/` |
+
+If two packs declare the same `destination`, both are automatically namespaced with a `<pack-id>/` subdirectory prefix to prevent collisions.
 
 Infers: `type: agent`, `installAction: copyPackFile(fileType: agent)`
 

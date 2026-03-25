@@ -107,6 +107,7 @@ struct Configurator {
 
     /// Compute and display what `configure` would do, without making any changes.
     func dryRun(packs: [any TechPack]) throws {
+        let packs = DestinationCollisionResolver.resolveCollisions(packs: packs, output: output)
         let state = try ProjectState(stateFile: scope.stateFile)
         let headerLabel = scope.isGlobalScope ? "Plan (Global)" : "Plan"
         ConfiguratorSupport.dryRunSummary(
@@ -132,6 +133,7 @@ struct Configurator {
         confirmRemovals: Bool = true,
         excludedComponents: [String: Set<String>] = [:]
     ) throws {
+        let packs = DestinationCollisionResolver.resolveCollisions(packs: packs, output: output)
         let selectedIDs = Set(packs.map(\.identifier))
 
         var state = try ProjectState(stateFile: scope.stateFile)

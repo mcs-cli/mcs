@@ -218,6 +218,8 @@ enum ComponentInstallAction {
 }
 ```
 
+`copyPackFile` destinations are installed flat by default (e.g., `.claude/commands/pr.md`). When two or more packs define the same `(destination, fileType)`, the `DestinationCollisionResolver` auto-namespaces them: subdirectory prefix (`<pack-id>/`) for hooks, commands, agents, and generic files, or directory name suffix (`-<pack-id>`) for skills (which require flat one-level directories for Claude Code discovery).
+
 ### MCP Server Scopes
 
 `MCPServerConfig` includes a `scope` field:

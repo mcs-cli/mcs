@@ -598,6 +598,8 @@ mcs sync                  # Local packs pick up changes automatically
 
 **Add `fixCommand`** to doctor checks when auto-repair is possible. Users love `mcs doctor --fix`.
 
+**Name collisions are handled automatically.** When two packs define the same destination filename for commands, hooks, or agents, `mcs` silently namespaces them with the pack identifier as a subdirectory (e.g., `.claude/commands/pack-a/pr.md`). For skills, which require a flat directory structure, collisions are resolved by appending `-<pack-id>` to the directory name (e.g., `my-skill-pack-b`) — the first pack keeps the clean name. A warning is shown so the user knows about the rename.
+
 ---
 
 ## Further Reading

@@ -187,7 +187,7 @@ struct ExternalPackAdapterTests {
         #expect(component.type == .agent)
         if case let .copyPackFile(source, destination, fileType) = component.installAction {
             #expect(source == packPath.appendingPathComponent("agents/code-reviewer.md"))
-            #expect(destination == "test-pack/code-reviewer.md")
+            #expect(destination == "code-reviewer.md")
             #expect(fileType == .agent)
         } else {
             Issue.record("Expected .copyPackFile action")
