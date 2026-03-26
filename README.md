@@ -12,8 +12,8 @@
 [![macOS](https://img.shields.io/badge/macOS-13+-000000.svg?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-FBB040.svg?logo=homebrew&logoColor=white)](https://github.com/mcs-cli/homebrew-tap)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcs-cli/mcs)
 [![Tech Packs](https://img.shields.io/badge/Tech_Packs-Browse-8B5CF6.svg)](https://techpacks.mcs-cli.dev)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcs-cli/mcs)
 
 </div>
 
