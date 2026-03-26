@@ -12,6 +12,7 @@
 [![macOS](https://img.shields.io/badge/macOS-13+-000000.svg?logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-FBB040.svg?logo=homebrew&logoColor=white)](https://github.com/mcs-cli/homebrew-tap)
+[![Tech Packs](https://img.shields.io/badge/Tech_Packs-Browse-8B5CF6.svg)](https://techpacks.mcs-cli.dev)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcs-cli/mcs)
 
 </div>
@@ -26,10 +27,10 @@ brew install mcs-cli/tap/mcs
 
 ### 2. Add tech packs
 
+Browse available packs at **[techpacks.mcs-cli.dev](https://techpacks.mcs-cli.dev)**, then add them:
+
 ```bash
-# this is a real tech pack as example
-# more info about tech packs below
-mcs pack add mcs-cli/memory
+mcs pack add owner/pack-name
 ```
 
 ### 3. Sync a project
@@ -86,17 +87,13 @@ You've spent hours getting Claude Code just right — MCP servers, plugins, hook
 
 ---
 
-## 🔍 Real-World Examples
+## 🔍 Explore Tech Packs
 
-Packs are modular — mix and match what you need instead of one monolith:
+Packs are modular — mix and match what you need instead of one monolith. Browse the full catalog, search by category, and find install commands:
 
-| Pack | Description | Highlights |
-|------|-------------|------------|
-| [**dev**](https://github.com/mcs-cli/dev) | Foundational settings, plugins, git workflows, and code navigation | Plan mode, `/commit`, `/pr`, PR review agents, session-start git status |
-| [**memory**](https://github.com/mcs-cli/memory) | Persistent memory and knowledge management across sessions | Ollama embeddings, semantic search via `docs-mcp-server`, auto-extracted learnings |
-| [**ios**](https://github.com/mcs-cli/ios) | Xcode integration, simulator management, and Apple documentation | XcodeBuildMCP, Sosumi docs, auto-detected project config, simulator hooks |
+**[techpacks.mcs-cli.dev](https://techpacks.mcs-cli.dev)**
 
-> 💡 Use these as a starting point — fork one to build your own, or combine all three with `mcs pack add` for a complete setup.
+> 💡 Can't find what you need? Build your own — see [Creating Tech Packs](docs/creating-tech-packs.md).
 
 ---
 
