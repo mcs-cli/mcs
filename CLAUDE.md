@@ -70,8 +70,13 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `Backup.swift` — timestamped backups for mixed-ownership files (CLAUDE.local.md), backup discovery and deletion
 - `GitignoreManager.swift` — global gitignore management, core entry list
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/remove`
+- `ClaudePrerequisite.swift` — Claude Code CLI availability check with optional Homebrew auto-install
 - `Homebrew.swift` — brew detection, package install/uninstall
+- `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
+- `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
 - `Lockfile.swift` — `mcs.lock.yaml` model for pinning pack commits
+- `PathContainment.swift` — centralized path-boundary checks and relative-path utilities (symlink-safe containment, traversal prevention)
+- `PluginRef.swift` — parsed `name@repo` plugin references with marketplace resolution
 - `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
 - `SettingsHasher.swift` — deterministic SHA-256 hashing of per-pack settings key-value pairs for drift detection
 - `ProjectState.swift` — per-project `.claude/.mcs-project` JSON state (configured packs, per-pack `PackArtifactRecord` with ownership tracking, version)
@@ -120,13 +125,16 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ManifestBuilder.swift` — converts selected artifacts into YAML using custom renderer (ordered metadata, section comments, proper quoting)
 - `PackWriter.swift` — writes output directory with symlink resolution for copied files
 
-### Install (`Sources/mcs/Install/`)
+### Sync (`Sources/mcs/Sync/`)
 - `Configurator.swift` — unified multi-pack convergence engine parameterized by `SyncStrategy` (artifact tracking, settings composition, CLAUDE file writing, gitignore). `unconfigurePack()` handles removal for both `mcs sync` (deselection) and `mcs pack remove` (federated across all affected scopes)
+- `ConfiguratorSupport.swift` — shared utilities for `Configurator` and `SyncStrategy` implementations (executor factory, gitignore setup, dry-run summary, settings composition helpers)
 - `SyncScope.swift` — pure data struct capturing path-level differences between project and global scopes
 - `SyncStrategy.swift` — protocol isolating scope-specific behavior (artifact installation, settings/CLAUDE composition, file removal)
 - `ProjectSyncStrategy.swift` — project-scope strategy (settings.local.json, CLAUDE.local.md, repo name resolution)
 - `GlobalSyncStrategy.swift` — global-scope strategy (settings.json preservation, brew/plugin ownership, MCP scope override to "user")
 - `ComponentExecutor.swift` — dispatches install actions (brew, MCP servers, plugins, gitignore, project-scoped file copy/removal)
+- `CrossPackPromptResolver.swift` — deduplicates shared prompt keys across multiple packs (groups by key, executes once for shared `input`/`select` prompts)
+- `DestinationCollisionResolver.swift` — auto-namespaces `copyPackFile` destinations when multiple packs target the same `(destination, fileType)` pair
 - `PackInstaller.swift` — auto-installs missing pack components
 - `PackUpdater.swift` — shared fetch → validate → trust cycle for updating a single git pack (used by `UpdatePack` and `LockfileOperations`)
 - `ResourceRefCounter.swift` — two-tier reference counting (global artifacts + project index manifests) for safe brew/plugin removal

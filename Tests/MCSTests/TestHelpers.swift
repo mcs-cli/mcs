@@ -285,7 +285,7 @@ func makeSandboxProject(label: String = "project") throws -> (home: URL, project
 }
 
 /// Create a `Configurator` configured for global-scope sync.
-func makeGlobalConfigurator(
+func makeGlobalSyncConfigurator(
     home: URL,
     mockCLI: MockClaudeCLI = MockClaudeCLI(),
     shell: (any ShellRunning)? = nil

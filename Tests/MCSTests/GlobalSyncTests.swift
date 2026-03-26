@@ -11,7 +11,7 @@ struct GlobalMCPScopeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -42,7 +42,7 @@ struct GlobalMCPScopeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -72,7 +72,7 @@ struct GlobalMCPScopeTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -106,7 +106,7 @@ struct GlobalMCPScopeTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         // Pack v1: two MCP servers
         let packV1 = MockTechPack(
@@ -186,7 +186,7 @@ struct GlobalSettingsCompositionTests {
         """
         try userSettings.write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         // Pack with a hook file that will add hooks to settings
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
@@ -233,7 +233,7 @@ struct GlobalSettingsCompositionTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -280,7 +280,7 @@ struct GlobalSettingsCompositionTests {
         let settingsPath = tmpDir.appendingPathComponent(".claude/settings.json")
         try "{ invalid json".write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(
             identifier: "test-pack",
             displayName: "Test Pack",
@@ -317,7 +317,7 @@ struct GlobalSettingsCompositionTests {
         let settingsPath = tmpDir.appendingPathComponent(".claude/settings.json")
         try "{}".write(to: settingsPath, atomically: true, encoding: .utf8)
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(
             identifier: "test-pack",
             displayName: "Test Pack"
@@ -333,7 +333,7 @@ struct GlobalSettingsCompositionTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -389,7 +389,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -409,7 +409,7 @@ struct GlobalClaudeCompositionTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -432,7 +432,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Simulate user appending custom content outside section markers
@@ -465,7 +465,7 @@ struct GlobalClaudeCompositionTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -503,7 +503,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/skills/my-skill.md")
@@ -535,7 +535,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/hooks/test-pack/start.sh")
@@ -567,7 +567,7 @@ struct GlobalFileInstallationTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -615,7 +615,7 @@ struct GlobalFileInstallationTests {
             ]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [packV1], confirmRemovals: false)
 
         let destB = tmpDir.appendingPathComponent(".claude/skills/skill-b.md")
@@ -675,7 +675,7 @@ struct GlobalConvergenceFlowTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         #expect(pack.configureProjectCallCount == 0)
@@ -691,7 +691,7 @@ struct GlobalUnconfigurePackTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -747,7 +747,7 @@ struct GlobalUnconfigurePackTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let dest = tmpDir.appendingPathComponent(".claude/skills/my-skill.md")
@@ -774,7 +774,7 @@ struct GlobalUnconfigurePackTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let claudePath = tmpDir.appendingPathComponent(".claude/CLAUDE.md")
@@ -794,7 +794,7 @@ struct GlobalUnconfigurePackTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
@@ -842,7 +842,7 @@ struct GlobalUnconfigurePackTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let packA = MockTechPack(
             identifier: "pack-a",
@@ -920,7 +920,7 @@ struct GlobalUnconfigurePackTests {
         state.setArtifacts(record, for: "orphan-pack")
         try state.save()
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [], confirmRemovals: false)
 
         let after = try ProjectState(stateFile: env.globalStateFile)
@@ -959,7 +959,7 @@ struct GlobalDryRunTests {
             )]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.dryRun(packs: [pack])
 
         // No state file should be created
@@ -976,7 +976,7 @@ struct GlobalDryRunTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         // Install a pack first
         let packA = MockTechPack(
@@ -1024,7 +1024,7 @@ struct GlobalExcludedComponentsTests {
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalConfigurator(home: tmpDir, mockCLI: mockCLI)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
 
         let pack = MockTechPack(
             identifier: "test-pack",
@@ -1112,7 +1112,7 @@ struct GlobalExcludedComponentsTests {
             ]
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         // First sync: both installed
         try configurator.configure(packs: [pack], confirmRemovals: false)
@@ -1146,7 +1146,7 @@ struct GlobalStateAndIndexTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -1163,7 +1163,7 @@ struct GlobalStateAndIndexTests {
             displayName: "Test Pack"
         )
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let env = Environment(home: tmpDir)
@@ -1191,7 +1191,7 @@ struct GlobalHookInjectionTests {
         // Create empty settings.json so the strategy can load it
         try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
         try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
 
@@ -1217,7 +1217,7 @@ struct GlobalHookInjectionTests {
         try initial.save(to: env.claudeSettings)
 
         // Sync should strip and re-inject (idempotent)
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
         try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
 
@@ -1245,7 +1245,7 @@ struct GlobalHookInjectionTests {
         UpdateChecker.addHook(to: &initial)
         try initial.save(to: env.claudeSettings)
 
-        let configurator = makeGlobalConfigurator(home: tmpDir)
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
         try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
 

@@ -43,7 +43,7 @@ private struct LifecycleTestBed {
         )
     }
 
-    func makeGlobalConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
+    func makeGlobalSyncConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
         Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false),
@@ -803,7 +803,7 @@ struct GlobalScopeLifecycleTests {
         let registry = TechPackRegistry(packs: [pack])
 
         // === Configure global scope ===
-        let configurator = bed.makeGlobalConfigurator(registry: registry)
+        let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Verify hook installed in ~/.claude/hooks/
@@ -976,7 +976,7 @@ struct GlobalScopeExclusionTests {
         let registry = TechPackRegistry(packs: [pack])
 
         // === Step 1: Configure global with both ===
-        let configurator = bed.makeGlobalConfigurator(registry: registry)
+        let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let hookAPath = bed.env.hooksDirectory.appendingPathComponent("global-pack/globalA.sh")
