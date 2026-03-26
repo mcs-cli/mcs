@@ -69,7 +69,7 @@ enum DestinationCollisionResolver {
         var packComponentOverrides: [Int: [Int: String]] = [:]
         var collisionMap: [DestinationKey: [CollisionEntry]] = [:]
 
-        // Phase 1: Build collision map and always-namespace hooks (single pass).
+        // Phase 0: Build collision map and always-namespace hooks (single pass).
         for (packIndex, pack) in packs.enumerated() {
             for (componentIndex, component) in pack.components.enumerated() {
                 guard case let .copyPackFile(_, destination, fileType) = component.installAction else {
@@ -90,7 +90,7 @@ enum DestinationCollisionResolver {
         }
 
         // Phase 1a: Apply cross-pack collision namespacing (2+ distinct packs).
-        // Guards skip entries already resolved above.
+        // Guards skip entries already resolved by Phase 0.
         for (key, entries) in collisionMap {
             let distinctPackIndices = Set(entries.map(\.packIndex))
             guard distinctPackIndices.count >= 2 else { continue }
@@ -108,8 +108,8 @@ enum DestinationCollisionResolver {
         }
 
         // Phase 1b: User-file conflict detection.
-        // For non-hook entries not yet resolved, check if the destination is occupied
-        // by a file not tracked by any pack.
+        // For entries not yet resolved by Phase 0 or 1a, check if the destination
+        // is occupied by a file not tracked by any pack.
         if let ctx = filesystemContext {
             for (packIndex, pack) in packs.enumerated() {
                 for (componentIndex, component) in pack.components.enumerated() {

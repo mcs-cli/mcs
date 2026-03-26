@@ -74,6 +74,8 @@ protocol SyncStrategy {
     ///
     /// Returns a `CollisionFilesystemContext` that enables the resolver to detect
     /// pre-existing user files at `copyPackFile` destinations.
+    /// Every conformance must implement this — returning `nil` disables user-file protection
+    /// and hook namespacing (only cross-pack collisions are resolved).
     func makeCollisionContext(trackedFiles: Set<String>) -> (any CollisionFilesystemContext)?
 
     /// Derive the relative file path that artifact tracking records for a `copyPackFile` component.
@@ -100,11 +102,6 @@ protocol SyncStrategy {
 // MARK: - Default Implementations
 
 extension SyncStrategy {
-    /// Default: no filesystem context (backward compat — cross-pack collisions only).
-    func makeCollisionContext(trackedFiles _: Set<String>) -> (any CollisionFilesystemContext)? {
-        nil
-    }
-
     /// Default removal summary — prints all non-empty artifact fields.
     ///
     /// Uses `scope.claudeFilePath.lastPathComponent` for template section labels.

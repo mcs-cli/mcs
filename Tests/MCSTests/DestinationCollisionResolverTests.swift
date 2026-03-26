@@ -371,6 +371,25 @@ struct UserFileConflictTests {
         }
     }
 
+    @Test("Untracked generic file on disk — pack namespaced to <pack-id>/")
+    func userFileGenericConflict() {
+        let pack = makeCollisionPack(id: "my-pack", components: [
+            makeCollisionComponent(pack: "my-pack", id: "config", destination: "config.yaml", fileType: .generic),
+        ])
+        let ctx = MockCollisionContext(
+            existingFiles: ["config.yaml"], // .generic has empty subdirectory
+            trackedFiles: []
+        )
+
+        let result = DestinationCollisionResolver.resolveCollisions(
+            packs: [pack], output: collisionTestOutput, filesystemContext: ctx
+        )
+
+        if case let .copyPackFile(_, destination, _) = result[0].components[0].installAction {
+            #expect(destination == "my-pack/config.yaml")
+        }
+    }
+
     @Test("File does not exist on disk — no namespacing for non-hook")
     func noFileNoConflict() {
         let pack = makeCollisionPack(id: "my-pack", components: [
