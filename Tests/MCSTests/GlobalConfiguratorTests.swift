@@ -365,7 +365,7 @@ struct GlobalSettingsCompositionTests {
         let settingsPath = tmpDir.appendingPathComponent(".claude/settings.json")
         let result = try Settings.load(from: settingsPath)
         let command = result.hooks?["SessionStart"]?.first?.hooks?.first?.command
-        #expect(command == "bash ~/.claude/hooks/start.sh")
+        #expect(command == "bash ~/.claude/hooks/test-pack/start.sh")
         // Must NOT use project-relative path
         #expect(command?.hasPrefix("bash .claude/") != true)
     }
@@ -538,7 +538,7 @@ struct GlobalFileInstallationTests {
         let configurator = makeGlobalConfigurator(home: tmpDir)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        let dest = tmpDir.appendingPathComponent(".claude/hooks/start.sh")
+        let dest = tmpDir.appendingPathComponent(".claude/hooks/test-pack/start.sh")
         #expect(FileManager.default.fileExists(atPath: dest.path))
     }
 

@@ -638,7 +638,7 @@ struct AutoDerivedSettingsTests {
         let sessionGroups = result.hooks?["SessionStart"] ?? []
         #expect(!sessionGroups.isEmpty)
         let command = sessionGroups.first?.hooks?.first?.command
-        #expect(command == "bash .claude/hooks/session_start.sh")
+        #expect(command == "bash .claude/hooks/test-pack/session_start.sh")
         // Should NOT use global path
         #expect(command?.contains("~/.claude") != true)
     }
@@ -775,7 +775,7 @@ struct AutoDerivedSettingsTests {
         // Should have both entries (different commands — project-local vs global)
         let sessionGroups = result.hooks?["SessionStart"] ?? []
         let commands = sessionGroups.compactMap { $0.hooks?.first?.command }
-        #expect(commands.contains("bash .claude/hooks/session_start.sh"))
+        #expect(commands.contains("bash .claude/hooks/test-pack/session_start.sh"))
         #expect(commands.contains("bash ~/.claude/hooks/session_start.sh"))
         #expect(sessionGroups.count == 2)
     }
@@ -797,7 +797,7 @@ struct AutoDerivedSettingsTests {
         let state = try ProjectState(projectRoot: tmpDir)
         let artifacts = state.artifacts(for: "test-pack")
         #expect(artifacts != nil)
-        #expect(artifacts?.hookCommands.contains("bash .claude/hooks/session_start.sh") == true)
+        #expect(artifacts?.hookCommands.contains("bash .claude/hooks/test-pack/session_start.sh") == true)
     }
 }
 

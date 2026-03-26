@@ -36,6 +36,12 @@ struct ProjectSyncStrategy: SyncStrategy {
         )
     }
 
+    // MARK: - Collision Context
+
+    func makeCollisionContext(trackedFiles: Set<String>) -> (any CollisionFilesystemContext)? {
+        ProjectCollisionContext(projectPath: projectPath, trackedFiles: trackedFiles)
+    }
+
     // MARK: - Artifact Installation
 
     func installArtifacts(

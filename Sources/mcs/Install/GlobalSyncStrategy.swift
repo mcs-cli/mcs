@@ -30,6 +30,12 @@ struct GlobalSyncStrategy: SyncStrategy {
         )
     }
 
+    // MARK: - Collision Context
+
+    func makeCollisionContext(trackedFiles: Set<String>) -> (any CollisionFilesystemContext)? {
+        GlobalCollisionContext(environment: environment, trackedFiles: trackedFiles)
+    }
+
     // MARK: - Artifact Installation
 
     func installArtifacts(

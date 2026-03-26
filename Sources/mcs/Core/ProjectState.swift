@@ -35,6 +35,11 @@ struct PackArtifactRecord: Codable, Equatable {
             && gitignoreEntries.isEmpty && fileHashes.isEmpty
     }
 
+    /// Union of all tracked file paths across a collection of artifact records.
+    static func allTrackedFiles(from records: some Collection<PackArtifactRecord>) -> Set<String> {
+        Set(records.flatMap(\.files))
+    }
+
     /// Custom decoder for backward compatibility — existing JSON files may lack
     /// newer keys (brewPackages, plugins, gitignoreEntries, fileHashes).
     init(from decoder: Decoder) throws {
@@ -160,6 +165,12 @@ struct ProjectState {
     /// The MCS version that last wrote this file.
     var mcsVersion: String? {
         storage.mcsVersion
+    }
+
+    /// All file paths tracked across all configured packs.
+    /// Used by `DestinationCollisionResolver` to distinguish mcs-managed files from user files.
+    var allTrackedFiles: Set<String> {
+        PackArtifactRecord.allTrackedFiles(from: storage.packArtifacts.values)
     }
 
     // MARK: - Pack Artifacts

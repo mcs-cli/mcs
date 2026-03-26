@@ -139,6 +139,30 @@ private struct LifecycleTestBed {
         )
     }
 
+    func commandComponent(
+        pack: String, id: String, source: URL, destination: String
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Command \(id)",
+            type: .command,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: true,
+            installAction: .copyPackFile(source: source, destination: destination, fileType: .command)
+        )
+    }
+
+    /// Create a command source file in a temp pack directory.
+    func makeCommandSource(name: String, content: String = "# Command\nDo the thing.") throws -> URL {
+        let packDir = home.appendingPathComponent("pack-source/commands")
+        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+        let file = packDir.appendingPathComponent(name)
+        try content.write(to: file, atomically: true, encoding: .utf8)
+        return file
+    }
+
     func settingsComponent(pack: String, id: String, source: URL) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -234,7 +258,7 @@ struct SinglePackLifecycleTests {
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Verify artifacts on disk
-        let hookFile = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        let hookFile = bed.project.appendingPathComponent(".claude/hooks/test-pack/lint.sh")
         #expect(FileManager.default.fileExists(atPath: hookFile.path))
 
         let settingsData = try Data(contentsOf: bed.settingsLocalPath)
@@ -251,7 +275,7 @@ struct SinglePackLifecycleTests {
         let settings = try Settings.load(from: bed.settingsLocalPath)
         let postToolGroups = settings.hooks?["PostToolUse"] ?? []
         let hookCommands = postToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(hookCommands.contains(bed.projectHookCommand("lint.sh")))
+        #expect(hookCommands.contains(bed.projectHookCommand("test-pack/lint.sh")))
 
         // Verify MCP server was registered via MockClaudeCLI with local scope
         #expect(bed.mockCLI.mcpAddCalls.contains { $0.name == "test-mcp" && $0.scope == "local" })
@@ -263,7 +287,7 @@ struct SinglePackLifecycleTests {
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
         #expect(artifacts?.settingsKeys.contains("env") == true)
-        #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("lint.sh")) == true)
+        #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("test-pack/lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
         // === Step 2: Doctor passes ===
@@ -448,25 +472,22 @@ struct CrossPackCollisionTests {
         #expect(artifactsA?.hookCommands.contains(bed.projectHookCommand("pack-a/lint.sh")) == true)
         #expect(artifactsB?.hookCommands.contains(bed.projectHookCommand("pack-b/lint.sh")) == true)
 
-        // === Step 2: Remove pack A — pack B now has no collision, moves to flat path ===
+        // === Step 2: Remove pack A — pack B stays namespaced (hooks always use <pack-id>/) ===
         try configurator.configure(packs: [packB], confirmRemovals: false)
 
         #expect(!FileManager.default.fileExists(atPath: fileA.path))
-        // Pack B's file should now be at the flat (non-namespaced) path
-        let flatFileB = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
-        #expect(FileManager.default.fileExists(atPath: flatFileB.path))
-        // Old namespaced path should be cleaned up by reconcileStaleArtifacts
-        #expect(!FileManager.default.fileExists(atPath: fileB.path))
+        // Pack B stays at its namespaced path (hooks are always namespaced)
+        #expect(FileManager.default.fileExists(atPath: fileB.path))
 
         let afterSettings = try Settings.load(from: bed.settingsLocalPath)
         let afterGroups = afterSettings.hooks?["PreToolUse"] ?? []
         let afterCommands = afterGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
         #expect(!afterCommands.contains(bed.projectHookCommand("pack-a/lint.sh")))
-        #expect(afterCommands.contains(bed.projectHookCommand("lint.sh")))
+        #expect(afterCommands.contains(bed.projectHookCommand("pack-b/lint.sh")))
     }
 
-    @Test("Single pack installs files at flat (non-namespaced) paths")
-    func singlePackFlatPaths() throws {
+    @Test("Single pack hook installs to namespaced path (hooks always use <pack-id>/)")
+    func singlePackNamespacedHook() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
@@ -489,17 +510,174 @@ struct CrossPackCollisionTests {
 
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        // With no collision, file should be at flat path (no pack-id subdirectory)
-        let flatFile = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        // Hooks are always namespaced into <pack-id>/ subdirectory
         let namespacedFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/lint.sh")
-        #expect(FileManager.default.fileExists(atPath: flatFile.path))
-        #expect(!FileManager.default.fileExists(atPath: namespacedFile.path))
+        let flatFile = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: namespacedFile.path))
+        #expect(!FileManager.default.fileExists(atPath: flatFile.path))
 
-        // Hook command should use flat path
+        // Hook command should use namespaced path
         let settings = try Settings.load(from: bed.settingsLocalPath)
         let preToolGroups = settings.hooks?["PreToolUse"] ?? []
         let hookCommands = preToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
-        #expect(hookCommands.contains(bed.projectHookCommand("lint.sh")))
+        #expect(hookCommands.contains(bed.projectHookCommand("my-pack/lint.sh")))
+    }
+}
+
+// MARK: - Scenario 2b: Pre-existing User File Protection
+
+struct UserFileProtectionTests {
+    @Test("Pre-existing user hook is preserved — pack hook installs to namespaced path")
+    func preExistingUserHookPreserved() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // User manually creates a hook before mcs sync
+        let userHookDir = bed.project.appendingPathComponent(".claude/hooks")
+        try FileManager.default.createDirectory(at: userHookDir, withIntermediateDirectories: true)
+        let userHookFile = userHookDir.appendingPathComponent("lint.sh")
+        try "#!/bin/bash\necho user-hook".write(to: userHookFile, atomically: true, encoding: .utf8)
+
+        let hookSource = try bed.makeHookSource(name: "pack-lint.sh", content: "#!/bin/bash\necho pack-hook")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "my-pack", id: "lint",
+                    source: hookSource, destination: "lint.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // User's file is untouched (hooks always namespace, so pack goes to my-pack/lint.sh)
+        let userContent = try String(contentsOf: userHookFile, encoding: .utf8)
+        #expect(userContent.contains("user-hook"))
+
+        // Pack's hook is at namespaced path
+        let packHookFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: packHookFile.path))
+        let packContent = try String(contentsOf: packHookFile, encoding: .utf8)
+        #expect(packContent.contains("pack-hook"))
+
+        // Hook command uses namespaced path
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let preToolGroups = settings.hooks?["PreToolUse"] ?? []
+        let hookCommands = preToolGroups.flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains(bed.projectHookCommand("my-pack/lint.sh")))
+    }
+
+    @Test("Pre-existing user command is preserved — pack command installs to namespaced path")
+    func preExistingUserCommandPreserved() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // User manually creates a command before mcs sync
+        let userCmdDir = bed.project.appendingPathComponent(".claude/commands")
+        try FileManager.default.createDirectory(at: userCmdDir, withIntermediateDirectories: true)
+        let userCmdFile = userCmdDir.appendingPathComponent("pr.md")
+        try "# My PR command\nuser content".write(to: userCmdFile, atomically: true, encoding: .utf8)
+
+        let cmdSource = try bed.makeCommandSource(name: "pr.md", content: "# Pack PR\npack content")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                bed.commandComponent(
+                    pack: "my-pack", id: "pr",
+                    source: cmdSource, destination: "pr.md"
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // User's file is untouched
+        let userContent = try String(contentsOf: userCmdFile, encoding: .utf8)
+        #expect(userContent.contains("user content"))
+
+        // Pack's command is at namespaced path
+        let packCmdFile = bed.project.appendingPathComponent(".claude/commands/my-pack/pr.md")
+        #expect(FileManager.default.fileExists(atPath: packCmdFile.path))
+        let packContent = try String(contentsOf: packCmdFile, encoding: .utf8)
+        #expect(packContent.contains("pack content"))
+    }
+
+    @Test("Tracked file does not trigger false-positive namespace on re-sync")
+    func trackedFileNotFalsePositive() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let cmdSource = try bed.makeCommandSource(name: "pr.md", content: "# Pack PR\npack content")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                bed.commandComponent(
+                    pack: "my-pack", id: "pr",
+                    source: cmdSource, destination: "pr.md"
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // First sync — installs at flat path
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        let flatFile = bed.project.appendingPathComponent(".claude/commands/pr.md")
+        #expect(FileManager.default.fileExists(atPath: flatFile.path))
+
+        // Second sync — file is tracked, should stay at flat path
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        #expect(FileManager.default.fileExists(atPath: flatFile.path))
+
+        // No namespaced version should exist
+        let namespacedFile = bed.project.appendingPathComponent(".claude/commands/my-pack/pr.md")
+        #expect(!FileManager.default.fileExists(atPath: namespacedFile.path))
+    }
+
+    @Test("Hook always namespaced even without pre-existing file")
+    func hookAlwaysNamespacedSinglePack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "lint.sh", content: "#!/bin/bash\necho lint")
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "my-pack", id: "lint",
+                    source: hookSource, destination: "lint.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: []
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Hook installed at namespaced path
+        let namespacedFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/lint.sh")
+        let flatFile = bed.project.appendingPathComponent(".claude/hooks/lint.sh")
+        #expect(FileManager.default.fileExists(atPath: namespacedFile.path))
+        #expect(!FileManager.default.fileExists(atPath: flatFile.path))
     }
 }
 
@@ -578,8 +756,8 @@ struct ComponentExclusionLifecycleTests {
         let registry = TechPackRegistry(packs: [pack])
         let configurator = bed.makeConfigurator(registry: registry)
 
-        let hookAPath = bed.project.appendingPathComponent(".claude/hooks/hookA.sh")
-        let hookBPath = bed.project.appendingPathComponent(".claude/hooks/hookB.sh")
+        let hookAPath = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookA.sh")
+        let hookBPath = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookB.sh")
 
         // === Step 1: Configure with both ===
         try configurator.configure(packs: [pack], confirmRemovals: false)
@@ -629,7 +807,7 @@ struct GlobalScopeLifecycleTests {
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Verify hook installed in ~/.claude/hooks/
-        let globalHook = bed.env.hooksDirectory.appendingPathComponent("global-hook.sh")
+        let globalHook = bed.env.hooksDirectory.appendingPathComponent("global-pack/global-hook.sh")
         #expect(FileManager.default.fileExists(atPath: globalHook.path))
 
         // Verify global state
@@ -801,8 +979,8 @@ struct GlobalScopeExclusionTests {
         let configurator = bed.makeGlobalConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        let hookAPath = bed.env.hooksDirectory.appendingPathComponent("globalA.sh")
-        let hookBPath = bed.env.hooksDirectory.appendingPathComponent("globalB.sh")
+        let hookAPath = bed.env.hooksDirectory.appendingPathComponent("global-pack/globalA.sh")
+        let hookBPath = bed.env.hooksDirectory.appendingPathComponent("global-pack/globalB.sh")
         #expect(FileManager.default.fileExists(atPath: hookAPath.path))
         #expect(FileManager.default.fileExists(atPath: hookBPath.path))
 
@@ -911,7 +1089,7 @@ struct HookMetadataLifecycleTests {
         let hookEntries = try #require(firstGroup["hooks"] as? [[String: Any]])
         let entry = try #require(hookEntries.first)
 
-        #expect(entry["command"] as? String == bed.projectHookCommand("lint.sh"))
+        #expect(entry["command"] as? String == bed.projectHookCommand("meta-pack/lint.sh"))
         #expect(entry["timeout"] as? Int == 30)
         #expect(entry["async"] as? Bool == true)
         #expect(entry["statusMessage"] as? String == "Running lint...")

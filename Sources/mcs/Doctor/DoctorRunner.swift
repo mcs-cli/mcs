@@ -31,6 +31,14 @@ struct DoctorRunner {
         let excludedComponentIDs: Set<String>
         let label: String
         let artifactsByPack: [String: PackArtifactRecord]
+
+        func makeCollisionContext(environment: Environment) -> (any CollisionFilesystemContext)? {
+            let trackedFiles = PackArtifactRecord.allTrackedFiles(from: artifactsByPack.values)
+            if let root = effectiveProjectRoot {
+                return ProjectCollisionContext(projectPath: root, trackedFiles: trackedFiles)
+            }
+            return GlobalCollisionContext(environment: environment, trackedFiles: trackedFiles)
+        }
     }
 
     let environment: Environment
@@ -149,7 +157,7 @@ struct DoctorRunner {
 
             let scopePacks = DestinationCollisionResolver.resolveCollisions(
                 packs: availablePacks.filter { scope.packIDs.contains($0.identifier) },
-                output: output
+                output: output, filesystemContext: scope.makeCollisionContext(environment: env)
             )
 
             for pack in scopePacks {
