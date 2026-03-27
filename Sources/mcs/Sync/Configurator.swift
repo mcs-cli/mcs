@@ -279,6 +279,8 @@ struct Configurator {
 
         var remaining = artifacts
         var removedServers: Set<MCPServerRef> = []
+        var removedBrewPackages: Set<String> = []
+        var removedPlugins: Set<String> = []
 
         // Remove MCS-owned brew packages and plugins (with reference counting)
         let excludeScope = refCountScope ?? scope.scopeIdentifier
@@ -288,24 +290,34 @@ struct Configurator {
             registry: registry
         )
         for package in artifacts.brewPackages {
-            if case .removed = removeBrewArtifact(
+            let result = removeBrewArtifact(
                 package, exec: exec, refCounter: refCounter,
                 excludingScope: excludeScope, excludingPack: packID
-            ) {
-                output.dimmed("  Removed brew package: \(package)")
+            )
+            switch result {
+            case .removed, .stillNeeded:
+                removedBrewPackages.insert(package)
+                if case .removed = result { output.dimmed("  Removed brew package: \(package)") }
+            case .failed:
+                output.warn("  Could not remove brew package '\(package)' — will retry on next sync")
             }
         }
-        remaining.brewPackages = []
+        remaining.brewPackages.removeAll { removedBrewPackages.contains($0) }
 
         for pluginName in artifacts.plugins {
-            if case .removed = removePluginArtifact(
+            let result = removePluginArtifact(
                 pluginName, exec: exec, refCounter: refCounter,
                 excludingScope: excludeScope, excludingPack: packID
-            ) {
-                output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)")
+            )
+            switch result {
+            case .removed, .stillNeeded:
+                removedPlugins.insert(pluginName)
+                if case .removed = result { output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)") }
+            case .failed:
+                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — will retry on next sync")
             }
         }
-        remaining.plugins = []
+        remaining.plugins.removeAll { removedPlugins.contains($0) }
 
         // Remove MCP servers
         for server in artifacts.mcpServers
