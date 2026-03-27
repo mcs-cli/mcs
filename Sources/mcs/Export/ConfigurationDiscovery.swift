@@ -93,7 +93,7 @@ struct ConfigurationDiscovery {
             agentsDir = environment.agentsDirectory
         case let .project(projectRoot):
             let claudeDir = projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory)
-            settingsPath = claudeDir.appendingPathComponent("settings.local.json")
+            settingsPath = claudeDir.appendingPathComponent(Constants.FileNames.settingsLocal)
             claudeFilePath = projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD)
             hooksDir = claudeDir.appendingPathComponent("hooks")
             skillsDir = claudeDir.appendingPathComponent("skills")

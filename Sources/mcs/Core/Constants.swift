@@ -31,6 +31,9 @@ enum Constants {
         /// The update check cache file (timestamp + results).
         static let updateCheckCache = "update-check.json"
 
+        /// The per-project settings file written by `mcs sync`.
+        static let settingsLocal = "settings.local.json"
+
         /// The user preferences file.
         static let mcsConfig = "config.yaml"
     }

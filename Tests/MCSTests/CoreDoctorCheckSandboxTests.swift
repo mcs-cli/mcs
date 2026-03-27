@@ -240,8 +240,7 @@ struct PluginCheckSandboxTests {
         """
         try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
 
-        var check = PluginCheck(pluginRef: PluginRef("pr-review-toolkit"))
-        check.environment = env
+        let check = PluginCheck(pluginRef: PluginRef("pr-review-toolkit"), environment: env)
         let result = check.check()
         guard case .pass = result else {
             Issue.record("Expected .pass, got \(result)")
@@ -264,8 +263,7 @@ struct PluginCheckSandboxTests {
         """
         try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
 
-        var check = PluginCheck(pluginRef: PluginRef("missing-plugin"))
-        check.environment = env
+        let check = PluginCheck(pluginRef: PluginRef("missing-plugin"), environment: env)
         let result = check.check()
         guard case .fail = result else {
             Issue.record("Expected .fail, got \(result)")
@@ -280,13 +278,182 @@ struct PluginCheckSandboxTests {
         let env = Environment(home: home)
         // Don't create settings.json
 
-        var check = PluginCheck(pluginRef: PluginRef("my-plugin"))
-        check.environment = env
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), environment: env)
         let result = check.check()
         guard case .fail = result else {
             Issue.record("Expected .fail, got \(result)")
             return
         }
+    }
+
+    // MARK: - Project-scoped tests
+
+    @Test("pass when plugin is enabled in project settings.local.json")
+    func passWhenEnabledInProjectSettings() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-project-pass")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        let projectSettings = """
+        {
+          "enabledPlugins": {
+            "my-plugin": true
+          }
+        }
+        """
+        try projectSettings.write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+        // No global settings.json
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "enabled (project)")
+    }
+
+    @Test("pass via global fallback when plugin not in project settings")
+    func passWhenEnabledGloballyButNotInProject() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-global-fallback")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        // Project settings without the target plugin
+        let projectSettings = """
+        {
+          "enabledPlugins": {
+            "other-plugin": true
+          }
+        }
+        """
+        try projectSettings.write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        // Global settings with the target plugin
+        let globalSettings = """
+        {
+          "enabledPlugins": {
+            "my-plugin": true
+          }
+        }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "enabled")
+    }
+
+    @Test("fail when plugin not enabled in either scope")
+    func failWhenNotEnabledInEitherScope() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-both-fail")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        let projectSettings = """
+        { "enabledPlugins": { "other-plugin": true } }
+        """
+        try projectSettings.write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        let globalSettings = """
+        { "enabledPlugins": { "another-plugin": true } }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+    }
+
+    @Test("pass via global fallback when project settings.local.json is invalid")
+    func passWhenProjectSettingsInvalidFallsBackToGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-invalid-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        // Invalid project settings
+        try "not valid json".write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+
+        // Valid global settings
+        let globalSettings = """
+        {
+          "enabledPlugins": {
+            "my-plugin": true
+          }
+        }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "enabled")
+    }
+
+    @Test("pass via global when projectRoot set but no settings.local.json exists")
+    func passWhenProjectSettingsAbsentFallsBackToGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "plugin-no-project-settings")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+
+        let globalSettings = """
+        {
+          "enabledPlugins": {
+            "my-plugin": true
+          }
+        }
+        """
+        try globalSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), projectRoot: projectRoot, environment: env)
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "enabled")
     }
 }
 
@@ -678,8 +845,7 @@ extension PluginCheckSandboxTests {
 
         try "not valid json".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
 
-        var check = PluginCheck(pluginRef: PluginRef("my-plugin"))
-        check.environment = env
+        let check = PluginCheck(pluginRef: PluginRef("my-plugin"), environment: env)
         let result = check.check()
         guard case let .fail(msg) = result else {
             Issue.record("Expected .fail, got \(result)")

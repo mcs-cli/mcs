@@ -163,6 +163,54 @@ struct DoctorRunnerIntegrationTests {
         try runner.run()
     }
 
+    @Test("PluginCheck passes when plugin is enabled in project settings.local.json")
+    func pluginCheckPassesWithProjectSettings() throws {
+        let (home, project) = try makeSandboxProject(label: "runner-plugin-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let pluginComponent = ComponentDefinition(
+            id: "test-pack.my-plugin",
+            displayName: "My Plugin",
+            description: "Test plugin",
+            type: .plugin,
+            packIdentifier: "test-pack",
+            dependencies: [],
+            isRequired: true,
+            installAction: .plugin(name: "my-plugin")
+        )
+        let pack = MockTechPack(
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            components: [pluginComponent]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // Write project state
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("test-pack")
+        try state.save()
+
+        // Write plugin enablement to project-scoped settings.local.json only
+        let claudeDir = project.appendingPathComponent(Constants.FileNames.claudeDirectory)
+        let projectSettings = """
+        {
+          "enabledPlugins": {
+            "my-plugin": true
+          }
+        }
+        """
+        try projectSettings.write(
+            to: claudeDir.appendingPathComponent("settings.local.json"),
+            atomically: true, encoding: .utf8
+        )
+        // No global settings.json — plugin is only project-scoped
+
+        var runner = makeRunner(home: home, projectRoot: project, registry: registry)
+        // Should complete without error — PluginCheck should find the plugin
+        // in project-scoped settings.local.json
+        try runner.run()
+    }
+
     @Test("MCPServerCheck passes via walk-up when project root is a subdirectory of git root")
     func mcpCheckWalksUpToGitRoot() throws {
         let home = try makeGlobalTmpDir(label: "runner-walkup")

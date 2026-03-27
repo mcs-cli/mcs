@@ -247,6 +247,30 @@ struct DerivedDoctorCheckTests {
         #expect(mcpCheck?.projectRoot == nil)
     }
 
+    // MARK: - PluginCheck project root
+
+    @Test("plugin action passes projectRoot to PluginCheck")
+    func pluginDerivationWithProjectRoot() {
+        let projectRoot = URL(fileURLWithPath: "/tmp/my-project")
+        let component = makeComponent(
+            type: .plugin,
+            installAction: .plugin(name: "my-plugin")
+        )
+        let pluginCheck = component.deriveDoctorCheck(projectRoot: projectRoot) as? PluginCheck
+        #expect(pluginCheck != nil)
+        #expect(pluginCheck?.projectRoot?.path == "/tmp/my-project")
+    }
+
+    @Test("plugin action without projectRoot has nil projectRoot")
+    func pluginDerivationWithoutProjectRoot() {
+        let component = makeComponent(
+            type: .plugin,
+            installAction: .plugin(name: "my-plugin")
+        )
+        let pluginCheck = component.deriveDoctorCheck() as? PluginCheck
+        #expect(pluginCheck?.projectRoot == nil)
+    }
+
     // MARK: - allDoctorChecks combines derived + supplementary
 
     @Test("allDoctorChecks returns derived + supplementary")

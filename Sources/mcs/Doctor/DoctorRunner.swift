@@ -447,7 +447,7 @@ struct DoctorRunner {
         if !artifacts.hookCommands.isEmpty || !artifacts.settingsKeys.isEmpty {
             let settingsPath: URL = if let root = scope.effectiveProjectRoot {
                 root.appendingPathComponent(Constants.FileNames.claudeDirectory)
-                    .appendingPathComponent("settings.local.json")
+                    .appendingPathComponent(Constants.FileNames.settingsLocal)
             } else {
                 env.claudeSettings
             }

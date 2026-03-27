@@ -91,7 +91,14 @@ struct MCPServerCheck: DoctorCheck {
 
 struct PluginCheck: DoctorCheck {
     let pluginRef: PluginRef
-    var environment: Environment = .init()
+    let projectRoot: URL?
+    let environment: Environment
+
+    init(pluginRef: PluginRef, projectRoot: URL? = nil, environment: Environment = Environment()) {
+        self.pluginRef = pluginRef
+        self.projectRoot = projectRoot
+        self.environment = environment
+    }
 
     var name: String {
         pluginRef.bareName
@@ -102,8 +109,30 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
+        var projectSettingsCorrupt = false
+
+        // Tier 1: Project-scoped settings.local.json
+        if let root = projectRoot {
+            let projectSettingsURL = root
+                .appendingPathComponent(Constants.FileNames.claudeDirectory)
+                .appendingPathComponent(Constants.FileNames.settingsLocal)
+            do {
+                let projectSettings = try Settings.load(from: projectSettingsURL)
+                if projectSettings.enabledPlugins?[pluginRef.bareName] == true {
+                    return .pass("enabled (project)")
+                }
+            } catch {
+                // Corrupt project settings — fall through to global, but note for diagnostics
+                projectSettingsCorrupt = true
+            }
+        }
+
+        // Tier 2: Global settings.json
         let settingsURL = environment.claudeSettings
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
+            if projectSettingsCorrupt {
+                return .fail("settings.local.json is corrupt and settings.json not found")
+            }
             return .fail("settings.json not found")
         }
         let settings: Settings
@@ -114,6 +143,9 @@ struct PluginCheck: DoctorCheck {
         }
         if settings.enabledPlugins?[pluginRef.bareName] == true {
             return .pass("enabled")
+        }
+        if projectSettingsCorrupt {
+            return .fail("not enabled (settings.local.json is corrupt)")
         }
         return .fail("not enabled")
     }

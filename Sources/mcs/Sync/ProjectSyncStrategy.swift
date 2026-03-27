@@ -163,7 +163,7 @@ struct ProjectSyncStrategy: SyncStrategy {
                 output.error("Could not write settings.local.json: \(error.localizedDescription)")
                 output.error("Hooks and plugins will not be active. Re-run '\(scope.syncHint)' after fixing the issue.")
                 throw MCSError.fileOperationFailed(
-                    path: "settings.local.json",
+                    path: Constants.FileNames.settingsLocal,
                     reason: error.localizedDescription
                 )
             }
