@@ -49,7 +49,7 @@ If you manage Node.js through nvm or similar, make sure it's available in your P
 
 **Fix**: Install Claude Code:
 ```bash
-brew install --cask claude-code
+brew install claude-code
 ```
 
 Verify:
@@ -86,21 +86,6 @@ MCP servers have three scopes:
 **Fix**: Remove and re-register with the correct scope:
 ```bash
 claude mcp remove <server-name>
-cd /path/to/project
-mcs sync
-```
-
-### Sosumi not responding
-
-**Symptom**: Apple documentation search via Sosumi returns errors.
-
-Sosumi uses HTTP transport (external service at `https://sosumi.ai/mcp`). Check your internet connection and verify the server is registered:
-```bash
-claude mcp list
-```
-
-If not registered, re-run sync:
-```bash
 cd /path/to/project
 mcs sync
 ```

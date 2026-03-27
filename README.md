@@ -48,19 +48,6 @@ mcs doctor
 
 That's it. Your MCP servers, plugins, hooks, skills, commands, agents, settings, and templates are all in place.
 
-<details>
-<summary><strong>📋 Prerequisites</strong></summary>
-
-- macOS 13+ (Apple Silicon or Intel)
-- Xcode Command Line Tools
-  ```bash
-  xcode-select --install
-  ```
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code/overview) (`claude`)
-- [Homebrew](https://brew.sh)
-
-</details>
-
 ---
 
 ## The Problem

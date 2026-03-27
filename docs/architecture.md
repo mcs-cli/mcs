@@ -9,8 +9,8 @@ Package.swift                    # swift-tools-version: 6.0, macOS 13+
 Sources/mcs/
     CLI.swift                    # @main entry, version, subcommand registration
     Core/                        # Shared infrastructure
-    Commands/                    # CLI subcommands (sync, doctor, cleanup, pack, export)
-    Install/                     # Installation logic, project configuration, convergence engine
+    Commands/                    # CLI subcommands (sync, doctor, cleanup, pack, export, check-updates, config)
+    Sync/                        # Convergence engine, project configuration, installation logic
     Export/                      # Export wizard (ConfigurationDiscovery, ManifestBuilder, PackWriter)
     TechPack/                    # Tech pack protocol, component model, dependency resolver
     Templates/                   # Template engine and section-based file composition
@@ -68,16 +68,6 @@ In the per-project model, `Configurator` (with `ProjectSyncStrategy`) composes `
 }
 ```
 
-### Manifest (`Core/Manifest.swift`)
-
-Tracks what mcs has installed globally using three data structures:
-
-1. **File hashes**: SHA-256 hashes of copied resources at install time
-2. **Installed component IDs**: set of component identifiers (e.g., `ios.xcodebuildmcp`)
-3. **Installed pack IDs**: set of pack identifiers (e.g., `ios`)
-
-The manifest covers global-scope installations. Per-project state is tracked separately by `ProjectState`.
-
 ### Project State (`Core/ProjectState.swift`)
 
 Per-project state stored as JSON at `<project>/.claude/.mcs-project`. Tracks:
@@ -105,7 +95,7 @@ Written by `mcs sync` after convergence.
 
 ### Backup (`Core/Backup.swift`)
 
-Every file write goes through the backup system. Before overwriting a file, a timestamped copy is created (e.g., `settings.json.backup.20260222_143000`). The `mcs cleanup` command discovers and deletes these backups.
+Before modifying files with user content (e.g., `CLAUDE.local.md`), a timestamped backup is created (e.g., `CLAUDE.local.md.backup.20260222_143000`). Tool-managed files are not backed up since they can be regenerated. The `mcs cleanup` command discovers and deletes these backups.
 
 ### Lockfile (`Core/Lockfile.swift`)
 
