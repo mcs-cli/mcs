@@ -1,10 +1,11 @@
 import Foundation
 
 /// Detects the project root by walking up from a starting directory.
-/// Looks for `.git/` or `CLAUDE.local.md` as project root indicators.
+/// Looks for `.git/`, `CLAUDE.local.md`, or `.claude/.mcs-project` as project root indicators.
 enum ProjectDetector {
     /// Walk up from `startingAt` looking for a project root marker.
-    /// Returns the first ancestor directory containing `.git/` or `CLAUDE.local.md`, or nil.
+    /// Returns the first ancestor directory containing `.git/`, `CLAUDE.local.md`,
+    /// or `.claude/.mcs-project`, or nil.
     static func findProjectRoot(from startingPath: URL) -> URL? {
         let fm = FileManager.default
         var current = startingPath.standardizedFileURL
@@ -14,6 +15,12 @@ enum ProjectDetector {
                 return current
             }
             if fm.fileExists(atPath: current.appendingPathComponent(Constants.FileNames.claudeLocalMD).path) {
+                return current
+            }
+            let mcsProjectPath = current
+                .appendingPathComponent(Constants.FileNames.claudeDirectory)
+                .appendingPathComponent(Constants.FileNames.mcsProject)
+            if fm.fileExists(atPath: mcsProjectPath.path) {
                 return current
             }
             current = current.deletingLastPathComponent()
