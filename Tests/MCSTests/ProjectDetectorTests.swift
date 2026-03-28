@@ -61,6 +61,25 @@ struct ProjectDetectorTests {
         _ = ProjectDetector.findProjectRoot(from: deep)
     }
 
+    @Test("Finds project root via .claude/.mcs-project")
+    func findsMCSProjectRoot() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Create .claude/.mcs-project (no .git or CLAUDE.local.md)
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        try "{}".write(
+            to: claudeDir.appendingPathComponent(".mcs-project"),
+            atomically: true, encoding: .utf8
+        )
+        let subDir = tmpDir.appendingPathComponent("subdir")
+        try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
+
+        let root = ProjectDetector.findProjectRoot(from: subDir)
+        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+    }
+
     @Test("Prefers .git over CLAUDE.local.md at same level")
     func prefersGitAtSameLevel() throws {
         let tmpDir = try makeTmpDir()
@@ -621,6 +640,24 @@ struct ProjectDoctorCheckTests {
             // expected
         } else {
             #expect(Bool(false), "Expected .warn result")
+        }
+    }
+
+    @Test("ProjectStateFileCheck passes when .mcs-project exists without CLAUDE.local.md")
+    func stateCheckPassesWithoutClaudeLocal() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Only .mcs-project, no CLAUDE.local.md (pack with no templates)
+        var state = try ProjectState(projectRoot: tmpDir)
+        state.recordPack("tech-to-pm-translator")
+        try state.save()
+
+        let check = ProjectStateFileCheck(projectRoot: tmpDir)
+        if case .pass = check.check() {
+            // expected — valid state, pack just has no templates
+        } else {
+            #expect(Bool(false), "Expected .pass result")
         }
     }
 
