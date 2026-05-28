@@ -141,6 +141,21 @@ struct PackUpdaterTests {
         return shaResult.stdout
     }
 
+    /// Replace techpack.yaml with the given content and push it as a new commit. Used to
+    /// drive the post-fetch validate/trust paths (manifest-invalid, trust-decline).
+    private func pushManifest(fixture: Fixture, manifest: String) throws {
+        let workDir = fixture.tmpDir.appendingPathComponent("work")
+        let shell = ShellRunner(environment: Environment(home: fixture.tmpDir))
+
+        try manifest.write(
+            to: workDir.appendingPathComponent("techpack.yaml"),
+            atomically: true, encoding: .utf8
+        )
+        try git(shell, ["-C", workDir.path, "add", "."], context: "git add")
+        try git(shell, ["-C", workDir.path, "commit", "-m", "update manifest"], context: "git commit")
+        try git(shell, ["-C", workDir.path, "push"], context: "git push")
+    }
+
     // MARK: - Tests
 
     @Test("returns alreadyUpToDate when disk SHA matches registry SHA")
@@ -260,7 +275,7 @@ struct PackUpdaterTests {
         #expect(FileManager.default.fileExists(atPath: fix.env.updateCheckCacheFile.path))
     }
 
-    @Test("returns skipped when fetch fails")
+    @Test("returns fetchFailed when fetch fails")
     func fetchFailure() throws {
         let fix = try makeFixture()
         defer { fix.cleanup() }
@@ -274,14 +289,15 @@ struct PackUpdaterTests {
             entry: entry, packPath: brokenPath, registry: fix.registry
         )
 
-        guard case .skipped = result else {
-            Issue.record("Expected .skipped, got \(result)")
+        guard case .fetchFailed = result else {
+            Issue.record("Expected .fetchFailed, got \(result)")
             return
         }
+        #expect(result.isHardFailure)
     }
 
-    @Test("skipped result leaves the update-check cache intact")
-    func skippedResultDoesNotInvalidateCache() throws {
+    @Test("fetchFailed result leaves the update-check cache intact")
+    func fetchFailedDoesNotInvalidateCache() throws {
         let fix = try makeFixture()
         defer { fix.cleanup() }
 
@@ -294,10 +310,101 @@ struct PackUpdaterTests {
             entry: entry, packPath: brokenPath, registry: fix.registry
         )
 
-        guard case .skipped = result else {
-            Issue.record("Expected .skipped, got \(result)")
+        guard case .fetchFailed = result else {
+            Issue.record("Expected .fetchFailed, got \(result)")
             return
         }
         #expect(FileManager.default.fileExists(atPath: fix.env.updateCheckCacheFile.path))
+    }
+
+    @Test("returns trustDeclined when the user declines new scripts (non-interactive)")
+    func trustDeclined() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        // Push a manifest that introduces a shell command (a trustable script). The trust
+        // prompt's askYesNo returns its `false` default in the non-interactive test
+        // environment, so the update is declined without any mocking.
+        try pushManifest(
+            fixture: fix,
+            manifest: """
+            schemaVersion: 1
+            identifier: test-pack
+            displayName: Test Pack
+            description: A test pack with a shell command
+            components:
+              - id: greet
+                description: Greet during install
+                type: skill
+                shell: "echo hello"
+            """
+        )
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case .trustDeclined = result else {
+            Issue.record("Expected .trustDeclined, got \(result)")
+            return
+        }
+        #expect(!result.isHardFailure)
+    }
+
+    @Test("returns manifestInvalid when the fetched revision has a broken manifest")
+    func manifestInvalid() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        // Push a techpack.yaml missing the required identifier/displayName fields.
+        try pushManifest(
+            fixture: fix,
+            manifest: """
+            schemaVersion: 1
+            description: Missing identifier and displayName
+            """
+        )
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case .manifestInvalid = result else {
+            Issue.record("Expected .manifestInvalid, got \(result)")
+            return
+        }
+        #expect(result.isHardFailure)
+    }
+
+    // MARK: - Helper property contract
+
+    @Test("isHardFailure and reason classify every case correctly")
+    func resultClassification() {
+        let entry = makeEntry(commitSHA: "abc1234")
+        let dummy = TestSetupError(message: "boom")
+
+        // Non-failures
+        #expect(!PackUpdater.UpdateResult.alreadyUpToDate.isHardFailure)
+        #expect(PackUpdater.UpdateResult.alreadyUpToDate.reason == nil)
+        #expect(!PackUpdater.UpdateResult.updated(entry).isHardFailure)
+        #expect(PackUpdater.UpdateResult.updated(entry).reason == nil)
+        #expect(!PackUpdater.UpdateResult.trustDeclined.isHardFailure)
+        #expect(PackUpdater.UpdateResult.trustDeclined.reason?.contains("trust not granted") == true)
+
+        // Hard failures carry a reason
+        #expect(PackUpdater.UpdateResult.fetchFailed(underlying: dummy).isHardFailure)
+        #expect(PackUpdater.UpdateResult.fetchFailed(underlying: dummy).reason?.contains("fetch failed") == true)
+        #expect(PackUpdater.UpdateResult.localCheckoutBroken(underlying: dummy).isHardFailure)
+        #expect(PackUpdater.UpdateResult.localCheckoutBroken(underlying: dummy).reason?.contains("local checkout broken") == true)
+        #expect(PackUpdater.UpdateResult.manifestInvalid(underlying: dummy).isHardFailure)
+        #expect(PackUpdater.UpdateResult.manifestInvalid(underlying: dummy).reason?.contains("manifest is invalid") == true)
+        #expect(PackUpdater.UpdateResult.internalError(underlying: dummy).isHardFailure)
+        #expect(PackUpdater.UpdateResult.internalError(underlying: dummy).reason?.contains("internal error") == true)
     }
 }

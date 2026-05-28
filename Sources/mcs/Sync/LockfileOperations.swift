@@ -100,14 +100,18 @@ struct LockfileOperations {
         )
 
         var updatedData = registryData
+        var attemptedCount = 0
+        var failedPacks: [String] = []
         for entry in registryData.packs {
             if entry.isLocalPack {
                 output.dimmed("  \(entry.identifier): local pack (skipped)")
                 continue
             }
 
+            attemptedCount += 1
             guard let packPath = entry.resolvedPath(packsDirectory: environment.packsDirectory) else {
                 output.warn("  \(entry.identifier): invalid path — skipping")
+                failedPacks.append(entry.identifier)
                 continue
             }
 
@@ -118,12 +122,24 @@ struct LockfileOperations {
             case let .updated(updatedEntry):
                 registryFile.register(updatedEntry, in: &updatedData)
                 output.success("  \(entry.identifier): updated (\(updatedEntry.shortSHA))")
-            case let .skipped(reason):
-                output.warn("  \(entry.identifier): \(reason)")
+            case .trustDeclined:
+                output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
+            case .fetchFailed, .localCheckoutBroken, .manifestInvalid, .internalError:
+                output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
+                failedPacks.append(entry.identifier)
             }
         }
 
         try registryFile.save(updatedData)
+
+        if PackUpdater.shouldExitNonZero(
+            failedCount: failedPacks.count,
+            attemptedCount: attemptedCount,
+            isInteractive: output.hasInteractiveStdin
+        ) {
+            output.error("Failed to update: \(failedPacks.joined(separator: ", "))")
+            throw ExitCode.failure
+        }
     }
 
     /// Write the lockfile after a successful sync.
