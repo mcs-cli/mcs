@@ -22,7 +22,6 @@ mcs sync --dry-run               # Preview what would change
 mcs sync --customize             # Per-pack component selection
 mcs sync --global                # Sync global scope (MCP servers, brew, plugins to ~/.claude/)
 mcs sync --lock                  # Checkout locked versions from mcs.lock.yaml
-mcs sync --update                # [DEPRECATED — use 'mcs update'] Fetch latest and force-write mcs.lock.yaml
 mcs update                       # Fetch latest pack versions and re-apply across every configured scope
 mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope
@@ -119,7 +118,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `SectionValidator.swift` — validation of CLAUDE.local.md section markers
 
 ### Commands (`Sources/mcs/Commands/`)
-- `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global`, `--lock`, `--update` flags. `guardClaudeHomeCwd()` at the top of `perform()` rejects/redirects runs from `~/.claude` or `$HOME` to prevent silent corruption of the global scope
+- `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global`, `--lock` flags. `guardClaudeHomeCwd()` at the top of `perform()` rejects/redirects runs from `~/.claude` or `$HOME` to prevent silent corruption of the global scope
 - `DoctorCommand.swift` — health checks with optional --fix and --pack filter
 - `CleanupCommand.swift` — backup file management with --force flag
 - `PackCommand.swift` — `mcs pack add/remove/list/update/validate` subcommands; uses `PackSourceResolver` for 3-tier input detection (URL schemes → filesystem paths → GitHub shorthand)
@@ -203,7 +202,7 @@ swiftlint --fix
 - **Backup for mixed-ownership files**: timestamped backup before modifying files with user content (CLAUDE.local.md); tool-managed files are not backed up since they can be regenerated
 - **Component-derived doctor checks**: `ComponentDefinition` is the single source of truth — `deriveDoctorCheck()` auto-generates verification from `installAction`, supplementary checks handle extras
 - **Project awareness**: doctor detects project root (walk-up for `.git/`), resolves packs from `.claude/.mcs-project` before falling back to section marker inference, then to global manifest
-- **Lockfile support (opt-in)**: `mcs.lock.yaml` pins pack commits for reproducible builds. Generation is opt-in — enable with `mcs config set generate-lockfile true` to write on every sync, or pass `--update` to fetch latest and write once. `--lock` checks out pinned commits from an existing lockfile. Tri-state semantics on `generate-lockfile`: `true` writes, `false` is silent (explicit opt-out), `nil` (never configured) surfaces a one-time drift warning if a stale lockfile exists — the upgrade nudge
+- **Lockfile support (opt-in)**: `mcs.lock.yaml` pins pack commits for reproducible builds. Generation is opt-in — enable with `mcs config set generate-lockfile true` to write on every sync. `--lock` checks out pinned commits from an existing lockfile. Tri-state semantics on `generate-lockfile`: `true` writes, `false` is silent (explicit opt-out), `nil` (never configured) surfaces a one-time drift warning if a stale lockfile exists — the upgrade nudge
 - **Local packs**: `mcs pack add /path` registers a pack read in-place — no git clone, no `mcs pack update`, no directory deletion on remove. Uses `isLocal: Bool?` on `PackEntry` (backward-compatible) and `commitSHA: "local"` sentinel. Trust verification is skipped since scripts change during development
 - **GitHub shorthand**: `mcs pack add user/repo` expands to `https://github.com/user/repo.git`. Filesystem paths are checked before shorthand regex to prevent ambiguity with relative paths like `org/pack`
 - **Cross-project reference counting**: `ProjectIndex` (`~/.mcs/projects.yaml`) tracks which projects use which packs; `ResourceRefCounter` checks all scopes before removing shared brew packages or plugins. Conservative by default — if state is unreadable, assume resource is still needed. MCP servers are project-independent (scoped via `-s local`) and skip ref counting

@@ -80,68 +80,6 @@ struct LockfileOperations {
         }
     }
 
-    /// Fetch latest commits for all registered git packs. Local packs are skipped.
-    /// Re-validates trust when scripts change (mirrors `mcs pack update` behavior).
-    func updatePacks() throws {
-        let registryFile = PackRegistryFile(path: environment.packsRegistry)
-        let registryData = try registryFile.load()
-
-        if registryData.packs.isEmpty {
-            output.info("No packs registered. Nothing to update.")
-            return
-        }
-
-        output.info("Fetching latest pack commits...")
-        let updater = PackUpdater(
-            fetcher: PackFetcher(shell: shell, output: output, packsDirectory: environment.packsDirectory),
-            trustManager: PackTrustManager(output: output),
-            environment: environment,
-            output: output
-        )
-
-        var updatedData = registryData
-        var attemptedCount = 0
-        var failedPacks: [String] = []
-        for entry in registryData.packs {
-            if entry.isLocalPack {
-                output.dimmed("  \(entry.identifier): local pack (skipped)")
-                continue
-            }
-
-            attemptedCount += 1
-            guard let packPath = entry.resolvedPath(packsDirectory: environment.packsDirectory) else {
-                output.warn("  \(entry.identifier): invalid path — skipping")
-                failedPacks.append(entry.identifier)
-                continue
-            }
-
-            let result = updater.updateGitPack(entry: entry, packPath: packPath, registry: registryFile)
-            switch result {
-            case .alreadyUpToDate:
-                output.dimmed("  \(entry.identifier): already up to date")
-            case let .updated(updatedEntry):
-                registryFile.register(updatedEntry, in: &updatedData)
-                output.success("  \(entry.identifier): updated (\(updatedEntry.shortSHA))")
-            case .trustDeclined:
-                output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
-            case .fetchFailed, .manifestInvalid, .internalError:
-                output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
-                failedPacks.append(entry.identifier)
-            }
-        }
-
-        try registryFile.save(updatedData)
-
-        if PackUpdater.shouldExitNonZero(
-            failedCount: failedPacks.count,
-            attemptedCount: attemptedCount,
-            isInteractive: output.hasInteractiveStdin
-        ) {
-            output.error("Failed to update: \(failedPacks.joined(separator: ", "))")
-            throw ExitCode.failure
-        }
-    }
-
     /// Write the lockfile after a successful sync.
     func writeLockfile(at projectPath: URL) throws {
         let registryFile = PackRegistryFile(path: environment.packsRegistry)

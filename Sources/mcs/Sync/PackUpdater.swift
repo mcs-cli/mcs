@@ -1,7 +1,7 @@
 import Foundation
 
 /// Handles the fetch → validate → trust cycle for updating a single git pack.
-/// Used by both `UpdatePack` (interactive) and `LockfileOperations` (`--update`).
+/// Used by both `UpdatePack` (interactive) and `UpdateCommand` (multi-scope refresh).
 struct PackUpdater {
     let fetcher: PackFetcher
     let trustManager: PackTrustManager
@@ -135,9 +135,9 @@ struct PackUpdater {
 
 extension PackUpdater {
     /// Exit-code policy shared by every multi-pack update caller (`mcs pack update`,
-    /// `mcs sync --update`, `mcs update`): a hard failure exits non-zero when running
-    /// non-interactively (CI), or when every attempted pack failed. A lone trust-decline is
-    /// not a failure. Centralized so the three callers can't drift out of contract.
+    /// `mcs update`): a hard failure exits non-zero when running non-interactively (CI), or
+    /// when every attempted pack failed. A lone trust-decline is not a failure. Centralized so
+    /// the callers can't drift out of contract.
     static func shouldExitNonZero(failedCount: Int, attemptedCount: Int, isInteractive: Bool) -> Bool {
         failedCount > 0 && (!isInteractive || failedCount == attemptedCount)
     }

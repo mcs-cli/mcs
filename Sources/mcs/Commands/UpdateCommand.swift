@@ -4,7 +4,7 @@ import Foundation
 /// Refresh-only orchestration: fetch latest pack contents (with trust verification),
 /// then re-apply the existing configured set in both the global scope and the current
 /// project's scope. Does not add or remove packs (use `mcs sync`). Lockfile writes are
-/// gated by `generate-lockfile`, unlike `mcs sync --update` which force-writes.
+/// gated by `generate-lockfile`.
 struct UpdateCommand: LockedCommand {
     static let configuration = CommandConfiguration(
         commandName: "update",
