@@ -400,11 +400,30 @@ struct PackUpdaterTests {
         // Hard failures carry a reason
         #expect(PackUpdater.UpdateResult.fetchFailed(underlying: dummy).isHardFailure)
         #expect(PackUpdater.UpdateResult.fetchFailed(underlying: dummy).reason?.contains("fetch failed") == true)
-        #expect(PackUpdater.UpdateResult.localCheckoutBroken(underlying: dummy).isHardFailure)
-        #expect(PackUpdater.UpdateResult.localCheckoutBroken(underlying: dummy).reason?.contains("local checkout broken") == true)
         #expect(PackUpdater.UpdateResult.manifestInvalid(underlying: dummy).isHardFailure)
         #expect(PackUpdater.UpdateResult.manifestInvalid(underlying: dummy).reason?.contains("manifest is invalid") == true)
         #expect(PackUpdater.UpdateResult.internalError(underlying: dummy).isHardFailure)
-        #expect(PackUpdater.UpdateResult.internalError(underlying: dummy).reason?.contains("internal error") == true)
+        #expect(PackUpdater.UpdateResult.internalError(underlying: dummy).reason?.contains("verify pack scripts") == true)
+    }
+
+    // MARK: - Exit-code policy
+
+    @Test("shouldExitNonZero truth table", arguments: [
+        // No failures → never exit non-zero, regardless of interactivity.
+        (failed: 0, attempted: 0, interactive: true, expected: false),
+        (failed: 0, attempted: 3, interactive: false, expected: false),
+        // Partial failure: interactive tolerates it (human sees the warnings), CI does not.
+        (failed: 1, attempted: 3, interactive: true, expected: false),
+        (failed: 1, attempted: 3, interactive: false, expected: true),
+        // Every attempted pack failed → exit non-zero even interactively.
+        (failed: 3, attempted: 3, interactive: true, expected: true),
+        (failed: 3, attempted: 3, interactive: false, expected: true),
+    ])
+    func exitPolicy(failed: Int, attempted: Int, interactive: Bool, expected: Bool) {
+        #expect(
+            PackUpdater.shouldExitNonZero(
+                failedCount: failed, attemptedCount: attempted, isInteractive: interactive
+            ) == expected
+        )
     }
 }

@@ -283,7 +283,7 @@ struct UpdateCommand: LockedCommand {
             case .trustDeclined:
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)
-            case .fetchFailed, .localCheckoutBroken, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError:
                 output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
                 skipped.insert(entry.identifier)
                 failed.insert(entry.identifier)

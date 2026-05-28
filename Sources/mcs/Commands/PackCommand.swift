@@ -684,7 +684,7 @@ struct UpdatePack: LockedCommand {
                 ctx.output.success("\(entry.displayName): updated (\(updatedEntry.shortSHA))")
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
-            case .fetchFailed, .localCheckoutBroken, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError:
                 ctx.output.warn("\(entry.identifier): \(result.reason ?? "update failed")")
                 failedPacks.append(entry.identifier)
             }

@@ -124,7 +124,7 @@ struct LockfileOperations {
                 output.success("  \(entry.identifier): updated (\(updatedEntry.shortSHA))")
             case .trustDeclined:
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
-            case .fetchFailed, .localCheckoutBroken, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError:
                 output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
                 failedPacks.append(entry.identifier)
             }

@@ -58,6 +58,10 @@ struct SyncCommand: LockedCommand {
                     + "combine with 'mcs config set generate-lockfile true' if you want a lockfile."
             )
             let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
+            // On a non-interactive hard failure this throws before the sync phase below, so
+            // healthy packs are fetched (and their SHAs saved) but not re-applied this run —
+            // unlike `mcs update`, which re-applies first and signals failure last. Accepted
+            // for this deprecated path; `mcs update` is the supported fetch-and-apply command.
             try lockOps.updatePacks()
         }
 

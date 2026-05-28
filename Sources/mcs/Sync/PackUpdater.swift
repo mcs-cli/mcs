@@ -16,11 +16,10 @@ struct PackUpdater {
     enum UpdateResult {
         case alreadyUpToDate
         case updated(PackRegistryFile.PackEntry)
-        case fetchFailed(underlying: Error) // git fetch/pull failed (network/transport/ref)
-        case localCheckoutBroken(underlying: Error) // could not read the local checkout's HEAD
+        case fetchFailed(underlying: Error) // git fetch/pull or HEAD read failed (network/transport/ref/broken checkout)
         case manifestInvalid(underlying: Error) // fetched revision's techpack.yaml is unusable
         case trustDeclined // user declined the trust prompt — expected, zero exit
-        case internalError(underlying: Error) // script analysis / trust prompt crashed (bug)
+        case internalError(underlying: Error) // script analysis / trust prompt crashed
     }
 
     /// Fetch, validate, and re-trust a single git pack entry.
@@ -39,11 +38,14 @@ struct PackUpdater {
 
         guard let result = fetchResult else {
             // Disk may be ahead of registry if trust was denied on a previous update.
+            // A failure to read HEAD here is the same class of git-layer error as a failed
+            // fetch (and `fetcher.update` itself reads HEAD before fetching, so a broken
+            // checkout already surfaces as `.fetchFailed`) — keep them one case.
             let diskSHA: String
             do {
                 diskSHA = try fetcher.currentCommit(at: packPath)
             } catch {
-                return .localCheckoutBroken(underlying: error)
+                return .fetchFailed(underlying: error)
             }
             if diskSHA != entry.commitSHA {
                 return validateAndTrust(
@@ -147,7 +149,7 @@ extension PackUpdater.UpdateResult {
     /// an expected choice, re-prompted on the next update.
     var isHardFailure: Bool {
         switch self {
-        case .fetchFailed, .localCheckoutBroken, .manifestInvalid, .internalError:
+        case .fetchFailed, .manifestInvalid, .internalError:
             true
         case .alreadyUpToDate, .updated, .trustDeclined:
             false
@@ -162,14 +164,12 @@ extension PackUpdater.UpdateResult {
             nil
         case let .fetchFailed(error):
             "fetch failed — \(error.localizedDescription)"
-        case let .localCheckoutBroken(error):
-            "local checkout broken — \(error.localizedDescription)"
         case let .manifestInvalid(error):
             "updated but manifest is invalid — \(error.localizedDescription)"
         case .trustDeclined:
             "update skipped (trust not granted)"
         case let .internalError(error):
-            "internal error (please report) — \(error.localizedDescription)"
+            "could not verify pack scripts — \(error.localizedDescription)"
         }
     }
 }
