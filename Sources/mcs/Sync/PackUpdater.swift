@@ -9,10 +9,17 @@ struct PackUpdater {
     let output: CLIOutput
 
     /// Result of attempting to update a single git pack.
+    ///
+    /// Cases split by *which operation failed*, not by parsing git stderr — a transport
+    /// outage and a trust-decline must be distinguishable so callers can choose an exit code
+    /// (a systemic failure should be non-zero; a user trust-decline is a zero-exit outcome).
     enum UpdateResult {
         case alreadyUpToDate
         case updated(PackRegistryFile.PackEntry)
-        case skipped(String)
+        case fetchFailed(underlying: Error) // git fetch/pull or HEAD read failed (network/transport/ref/broken checkout)
+        case manifestInvalid(underlying: Error) // fetched revision's techpack.yaml is unusable
+        case trustDeclined // user declined the trust prompt — expected, zero exit
+        case internalError(underlying: Error) // script analysis / trust prompt crashed
     }
 
     /// Fetch, validate, and re-trust a single git pack entry.
@@ -26,16 +33,19 @@ struct PackUpdater {
         do {
             fetchResult = try fetcher.update(packPath: packPath, ref: entry.ref)
         } catch {
-            return .skipped("fetch failed — \(error.localizedDescription)")
+            return .fetchFailed(underlying: error)
         }
 
         guard let result = fetchResult else {
             // Disk may be ahead of registry if trust was denied on a previous update.
+            // A failure to read HEAD here is the same class of git-layer error as a failed
+            // fetch (and `fetcher.update` itself reads HEAD before fetching, so a broken
+            // checkout already surfaces as `.fetchFailed`) — keep them one case.
             let diskSHA: String
             do {
                 diskSHA = try fetcher.currentCommit(at: packPath)
             } catch {
-                return .skipped("could not read current commit at \(packPath.path) — \(error.localizedDescription)")
+                return .fetchFailed(underlying: error)
             }
             if diskSHA != entry.commitSHA {
                 return validateAndTrust(
@@ -62,7 +72,7 @@ struct PackUpdater {
         do {
             manifest = try loader.validate(at: packPath)
         } catch {
-            return .skipped("updated but manifest is invalid — \(error.localizedDescription)")
+            return .manifestInvalid(underlying: error)
         }
 
         var scriptHashes = entry.trustedScriptHashes
@@ -74,7 +84,7 @@ struct PackUpdater {
                 manifest: manifest
             )
         } catch {
-            return .skipped("could not analyze scripts — \(error.localizedDescription)")
+            return .internalError(underlying: error)
         }
 
         if !newItems.isEmpty {
@@ -87,10 +97,10 @@ struct PackUpdater {
                     items: newItems
                 )
             } catch {
-                return .skipped("trust verification failed — \(error.localizedDescription)")
+                return .internalError(underlying: error)
             }
             guard decision.approved else {
-                return .skipped("update skipped (trust not granted)")
+                return .trustDeclined
             }
             for (path, hash) in decision.scriptHashes {
                 scriptHashes[path] = hash
@@ -120,5 +130,46 @@ struct PackUpdater {
         }
 
         return .updated(updatedEntry)
+    }
+}
+
+extension PackUpdater {
+    /// Exit-code policy shared by every multi-pack update caller (`mcs pack update`,
+    /// `mcs sync --update`, `mcs update`): a hard failure exits non-zero when running
+    /// non-interactively (CI), or when every attempted pack failed. A lone trust-decline is
+    /// not a failure. Centralized so the three callers can't drift out of contract.
+    static func shouldExitNonZero(failedCount: Int, attemptedCount: Int, isInteractive: Bool) -> Bool {
+        failedCount > 0 && (!isInteractive || failedCount == attemptedCount)
+    }
+}
+
+extension PackUpdater.UpdateResult {
+    /// Outcomes that should contribute to a non-zero exit in non-interactive use. A user
+    /// trust-decline (`.trustDeclined`) is intentionally *not* a hard failure — declining is
+    /// an expected choice, re-prompted on the next update.
+    var isHardFailure: Bool {
+        switch self {
+        case .fetchFailed, .manifestInvalid, .internalError:
+            true
+        case .alreadyUpToDate, .updated, .trustDeclined:
+            false
+        }
+    }
+
+    /// Human-readable line for non-success outcomes; `nil` when there is nothing to print
+    /// (the success cases render their own pack-specific messages at the call site).
+    var reason: String? {
+        switch self {
+        case .alreadyUpToDate, .updated:
+            nil
+        case let .fetchFailed(error):
+            "fetch failed — \(error.localizedDescription)"
+        case let .manifestInvalid(error):
+            "updated but manifest is invalid — \(error.localizedDescription)"
+        case .trustDeclined:
+            "update skipped (trust not granted)"
+        case let .internalError(error):
+            "could not verify pack scripts — \(error.localizedDescription)"
+        }
     }
 }

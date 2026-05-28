@@ -65,7 +65,7 @@ struct UpdateCommand: LockedCommand {
         let registryFile = PackRegistryFile(path: env.packsRegistry)
         let registryData = try registryFile.load()
 
-        let (updatedRegistryData, anyUpdated, skippedPackIDs) = try runUpdatePhase(
+        let updatePhase = try runUpdatePhase(
             packIDsToUpdate: configuredAcrossScopes,
             registryFile: registryFile,
             registryData: registryData,
@@ -74,8 +74,8 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
-        if !dryRun, anyUpdated {
-            try registryFile.save(updatedRegistryData)
+        if !dryRun, updatePhase.anyUpdated {
+            try registryFile.save(updatePhase.data)
         }
 
         let techPackRegistry = TechPackRegistry.loadWithExternalPacks(
@@ -85,7 +85,7 @@ struct UpdateCommand: LockedCommand {
 
         try runReapplyPhase(
             runs: runs,
-            skippedPackIDs: skippedPackIDs,
+            skippedPackIDs: updatePhase.skipped,
             registry: techPackRegistry,
             env: env,
             shell: shell,
@@ -96,6 +96,17 @@ struct UpdateCommand: LockedCommand {
 
         if !dryRun {
             UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
+        }
+
+        // Reapply already ran for the packs that succeeded; signal failure last so a partial
+        // outage still re-applies the healthy packs.
+        if PackUpdater.shouldExitNonZero(
+            failedCount: updatePhase.failed.count,
+            attemptedCount: updatePhase.attempted,
+            isInteractive: output.hasInteractiveStdin
+        ) {
+            output.error("Failed to update: \(updatePhase.failed.sorted().joined(separator: ", "))")
+            throw ExitCode.failure
         }
     }
 
@@ -215,13 +226,21 @@ struct UpdateCommand: LockedCommand {
         env: Environment,
         shell: ShellRunner,
         output: CLIOutput
-    ) throws -> (data: PackRegistryFile.RegistryData, anyUpdated: Bool, skipped: Set<String>) {
+    ) throws -> UpdatePhaseOutcome {
         var updatedData = registryData
         var anyUpdated = false
+        // `skipped` is excluded from reapply (every non-updated pack lands here so we never
+        // reapply a stale/broken checkout). `failed` is the hard-failure subset of `skipped`,
+        // used only for the exit-code decision in `perform()`. `attempted` counts the non-local
+        // packs we tried, so "every attempted pack failed" is an accurate trigger.
         var skipped: Set<String> = []
+        var failed: Set<String> = []
+        var attempted = 0
 
         let entries = registryData.packs.filter { packIDsToUpdate.contains($0.identifier) }
-        guard !entries.isEmpty else { return (updatedData, anyUpdated, skipped) }
+        guard !entries.isEmpty else {
+            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+        }
 
         output.header("Updating packs")
 
@@ -229,7 +248,7 @@ struct UpdateCommand: LockedCommand {
             for entry in entries {
                 output.dimmed("  \(entry.displayName): would check for updates")
             }
-            return (updatedData, anyUpdated, skipped)
+            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
         }
 
         let updater = PackUpdater(
@@ -245,9 +264,11 @@ struct UpdateCommand: LockedCommand {
                 continue
             }
 
+            attempted += 1
             guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
                 output.warn("  \(entry.identifier): invalid path — skipping")
                 skipped.insert(entry.identifier)
+                failed.insert(entry.identifier)
                 continue
             }
 
@@ -259,13 +280,27 @@ struct UpdateCommand: LockedCommand {
                 registryFile.register(updatedEntry, in: &updatedData)
                 anyUpdated = true
                 output.success("  \(entry.displayName): \(entry.shortSHA) → \(updatedEntry.shortSHA)")
-            case let .skipped(reason):
-                output.warn("  \(entry.identifier): \(reason) (will re-prompt on next 'mcs update')")
+            case .trustDeclined:
+                output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)
+            case .fetchFailed, .manifestInvalid, .internalError:
+                output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
+                skipped.insert(entry.identifier)
+                failed.insert(entry.identifier)
             }
         }
 
-        return (updatedData, anyUpdated, skipped)
+        return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+    }
+
+    /// Result of the fetch/trust update pass, before reapply. `skipped` packs are excluded
+    /// from reapply; `failed` is the hard-failure subset used for the process exit code.
+    private struct UpdatePhaseOutcome {
+        let data: PackRegistryFile.RegistryData
+        let anyUpdated: Bool
+        let skipped: Set<String>
+        let failed: Set<String>
+        let attempted: Int
     }
 
     private func runReapplyPhase(

@@ -652,6 +652,8 @@ struct UpdatePack: LockedCommand {
 
         var updatedData = registryData
         var updatedCount = 0
+        var attemptedCount = 0
+        var failedPacks: [String] = []
 
         for entry in packsToUpdate {
             if entry.isLocalPack {
@@ -663,10 +665,12 @@ struct UpdatePack: LockedCommand {
                 continue
             }
 
+            attemptedCount += 1
             ctx.output.info("Checking \(entry.displayName)...")
 
             guard let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
                 ctx.output.error("Pack '\(entry.identifier)' has an invalid path — skipping")
+                failedPacks.append(entry.identifier)
                 continue
             }
 
@@ -678,8 +682,11 @@ struct UpdatePack: LockedCommand {
                 ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
                 ctx.output.success("\(entry.displayName): updated (\(updatedEntry.shortSHA))")
-            case let .skipped(reason):
-                ctx.output.warn("\(entry.identifier): \(reason)")
+            case .trustDeclined:
+                ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
+            case .fetchFailed, .manifestInvalid, .internalError:
+                ctx.output.warn("\(entry.identifier): \(result.reason ?? "update failed")")
+                failedPacks.append(entry.identifier)
             }
         }
 
@@ -693,6 +700,14 @@ struct UpdatePack: LockedCommand {
             }
             ctx.output.plain("")
             ctx.output.info("Run 'mcs update' to apply updates across all configured scopes.")
+        }
+
+        if PackUpdater.shouldExitNonZero(
+            failedCount: failedPacks.count,
+            attemptedCount: attemptedCount,
+            isInteractive: ctx.output.hasInteractiveStdin
+        ) {
+            throw ExitCode.failure
         }
     }
 }

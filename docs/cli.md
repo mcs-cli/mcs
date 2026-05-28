@@ -64,6 +64,8 @@ mcs update --dry-run             # Preview without making changes
 
 **Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default) or `mcs sync --customize` (always re-asks every prompt, no gate).
 
+**Exit status:** a hard failure (failed fetch, unreadable checkout, invalid fetched manifest) exits non-zero when running non-interactively (CI), or when *every* attempted pack failed — so a transient outage in CI is a detectable failure, not a silent zero exit. In an interactive terminal a partial failure exits zero (the per-pack warnings are visible); the packs that updated cleanly are still re-applied first. A declined trust prompt is **not** a failure and always exits zero (it re-prompts next run).
+
 ## `mcs pack`
 
 Manage registered tech packs.
@@ -113,6 +115,8 @@ mcs pack update [name]           # Update pack(s) to latest version (registry on
 Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically).
 
 This is a low-level fetch — useful for pack authors testing upstream changes without applying them, or in CI workflows that handle the apply step separately. For most users, [`mcs update`](#mcs-update) is the right command: it does the same fetch *and* re-applies across every configured scope.
+
+Exits non-zero on a hard failure when running non-interactively (CI) or when every attempted pack failed, matching [`mcs update`](#mcs-update). A declined trust prompt is not a failure.
 
 ### `mcs pack validate [source]`
 
