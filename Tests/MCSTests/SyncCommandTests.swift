@@ -12,7 +12,6 @@ struct SyncCommandTests {
         #expect(cmd.all == false)
         #expect(cmd.dryRun == false)
         #expect(cmd.lock == false)
-        #expect(cmd.update == false)
         #expect(cmd.customize == false)
         #expect(cmd.global == false)
     }
@@ -47,12 +46,6 @@ struct SyncCommandTests {
         #expect(cmd.lock == true)
     }
 
-    @Test("Parses --update flag")
-    func parsesUpdate() throws {
-        let cmd = try SyncCommand.parse(["--update"])
-        #expect(cmd.update == true)
-    }
-
     @Test("skipLock is true when --dry-run is set")
     func skipLockWhenDryRun() throws {
         let cmd = try SyncCommand.parse(["--dry-run"])
@@ -78,7 +71,6 @@ struct SyncCommandTests {
         #expect(cmd.pack == ["ios"])
         #expect(cmd.dryRun == true)
         #expect(cmd.lock == true)
-        #expect(cmd.update == false)
         #expect(cmd.all == false)
     }
 
@@ -123,39 +115,29 @@ struct SyncCommandTests {
         var config = MCSConfig()
         for flag in [nil, true, false] as [Bool?] {
             config.generateLockfile = flag
-            #expect(SyncCommand.lockfileAction(dryRun: true, update: false, config: config) == .skip)
-            #expect(SyncCommand.lockfileAction(dryRun: true, update: true, config: config) == .skip)
+            #expect(SyncCommand.lockfileAction(dryRun: true, config: config) == .skip)
         }
     }
 
-    @Test("Dispatch: --update forces write regardless of config")
-    func dispatchUpdateForcesWrite() {
-        var config = MCSConfig()
-        for flag in [nil, true, false] as [Bool?] {
-            config.generateLockfile = flag
-            #expect(SyncCommand.lockfileAction(dryRun: false, update: true, config: config) == .write)
-        }
-    }
-
-    @Test("Dispatch: generate-lockfile=true writes without --update")
+    @Test("Dispatch: generate-lockfile=true writes")
     func dispatchConfigTrueWrites() {
         var config = MCSConfig()
         config.generateLockfile = true
-        #expect(SyncCommand.lockfileAction(dryRun: false, update: false, config: config) == .write)
+        #expect(SyncCommand.lockfileAction(dryRun: false, config: config) == .write)
     }
 
     @Test("Dispatch: generate-lockfile=nil (unset) reports drift — upgrade path")
     func dispatchConfigNilReportsDrift() {
         let config = MCSConfig()
         #expect(config.generateLockfile == nil)
-        #expect(SyncCommand.lockfileAction(dryRun: false, update: false, config: config) == .reportDrift)
+        #expect(SyncCommand.lockfileAction(dryRun: false, config: config) == .reportDrift)
     }
 
     @Test("Dispatch: generate-lockfile=false stays silent — explicit opt-out")
     func dispatchConfigFalseSkips() {
         var config = MCSConfig()
         config.generateLockfile = false
-        #expect(SyncCommand.lockfileAction(dryRun: false, update: false, config: config) == .skip)
+        #expect(SyncCommand.lockfileAction(dryRun: false, config: config) == .skip)
     }
 }
 

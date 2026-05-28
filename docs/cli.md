@@ -14,7 +14,6 @@ mcs sync --dry-run               # Preview what would change
 mcs sync --customize             # Per-pack component selection
 mcs sync --global                # Install to global scope (~/.claude/)
 mcs sync --lock                  # Checkout locked versions from mcs.lock.yaml
-mcs sync --update                # Fetch latest and write/update mcs.lock.yaml (opt-in)
 ```
 
 | Flag | Description |
@@ -26,7 +25,6 @@ mcs sync --update                # Fetch latest and write/update mcs.lock.yaml (
 | `--customize` | Per-pack component selection (deselect individual components). |
 | `--global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
 | `--lock` | Check out the commits pinned in `mcs.lock.yaml`. |
-| `--update` | **Deprecated** — use `mcs update` instead. Fetches latest pack versions and force-writes `mcs.lock.yaml` regardless of the `generate-lockfile` config. |
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
 
@@ -58,7 +56,7 @@ mcs update --dry-run             # Preview without making changes
 
 - **Refresh-only** — does not add or remove packs. Use `mcs sync` to change the configured set.
 - **Multi-scope by default** — when configured packs exist in both global and project scopes, both are refreshed in one command (this was the original pain point that motivated the verb).
-- **Lockfile is gated by config** — `mcs update` writes `mcs.lock.yaml` only when `generate-lockfile: true`. Drift is reported when the key is unset and a lockfile is present (the upgrade nudge). This is intentionally different from the deprecated `mcs sync --update`, which force-writes the lockfile regardless of config.
+- **Lockfile is gated by config** — `mcs update` writes `mcs.lock.yaml` only when `generate-lockfile: true`. Drift is reported when the key is unset and a lockfile is present (the upgrade nudge).
 
 **Trust prompts:** when a pack's scripts have changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run.
 

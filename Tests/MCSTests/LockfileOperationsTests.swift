@@ -497,48 +497,6 @@ struct LockfileOperationsTests {
         }
     }
 
-    // MARK: - updatePacks: Empty registry
-
-    @Test("updatePacks returns early when no packs registered")
-    func updatePacksEmptyRegistry() throws {
-        let home = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        try writeRegistry([], home: home)
-
-        let ops = makeOperations(home: home)
-        // Should not throw — early return for empty registry
-        try ops.updatePacks()
-    }
-
-    @Test("updatePacks exits non-zero when a pack fails in a non-interactive process")
-    func updatePacksThrowsOnFailureNonInteractive() throws {
-        let home = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        // A git pack whose checkout doesn't exist on disk — the real fetch fails, producing
-        // a hard failure. The test process has no TTY, so updatePacks must surface a non-zero
-        // exit rather than silently warning.
-        let ghost = PackRegistryFile.PackEntry(
-            identifier: "ghost",
-            displayName: "Ghost Pack",
-            author: nil,
-            sourceURL: "file:///fake/ghost.git",
-            ref: nil,
-            commitSHA: "abcdef0123",
-            localPath: "ghost",
-            addedAt: "2026-03-21T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: nil
-        )
-        try writeRegistry([ghost], home: home)
-
-        let ops = makeOperations(home: home)
-        #expect(throws: ExitCode.self) {
-            try ops.updatePacks()
-        }
-    }
-
     // MARK: - checkoutLockedCommits: Git operations (mock-based)
 
     /// Set up a locked pack with a real pack directory and lockfile, returning

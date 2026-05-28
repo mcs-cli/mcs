@@ -22,9 +22,6 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .long, help: "Checkout locked pack versions from mcs.lock.yaml before syncing")
     var lock = false
 
-    @Flag(name: .long, help: "Fetch latest pack versions and update mcs.lock.yaml")
-    var update = false
-
     @Flag(name: .long, help: "Customize which components to include per pack")
     var customize = false
 
@@ -50,20 +47,6 @@ struct SyncCommand: LockedCommand {
 
         // First-run: prompt for update notification preference
         let config = promptForUpdateCheckIfNeeded(env: env, output: output)
-
-        // Handle --update: fetch latest for all packs before loading
-        if update {
-            output.warn(
-                "'mcs sync --update' is deprecated. Use 'mcs update' to fetch and re-apply across all configured scopes; "
-                    + "combine with 'mcs config set generate-lockfile true' if you want a lockfile."
-            )
-            let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
-            // On a non-interactive hard failure this throws before the sync phase below, so
-            // healthy packs are fetched (and their SHAs saved) but not re-applied this run —
-            // unlike `mcs update`, which re-applies first and signals failure last. Accepted
-            // for this deprecated path; `mcs update` is the supported fetch-and-apply command.
-            try lockOps.updatePacks()
-        }
 
         let registry = TechPackRegistry.loadWithExternalPacks(
             environment: env,
@@ -183,7 +166,7 @@ struct SyncCommand: LockedCommand {
             try configurator.interactiveConfigure(dryRun: dryRun, customize: customize)
         }
 
-        switch Self.lockfileAction(dryRun: dryRun, update: update, config: config) {
+        switch Self.lockfileAction(dryRun: dryRun, config: config) {
         case .write:
             try lockOps.writeLockfile(at: projectPath)
         case .reportDrift:
@@ -203,9 +186,9 @@ struct SyncCommand: LockedCommand {
         case skip
     }
 
-    static func lockfileAction(dryRun: Bool, update: Bool, config: MCSConfig) -> LockfileAction {
+    static func lockfileAction(dryRun: Bool, config: MCSConfig) -> LockfileAction {
         guard !dryRun else { return .skip }
-        if update || config.isLockfileGenerationEnabled { return .write }
+        if config.isLockfileGenerationEnabled { return .write }
         if config.isLockfileGenerationUnset { return .reportDrift }
         return .skip
     }
