@@ -357,3 +357,106 @@ struct DoctorRunnerIntegrationTests {
         try runner.run()
     }
 }
+
+// MARK: - Summary Warning-Count Tests
+
+/// Regression coverage for the doctor summary warning tally. The count must
+/// include warnings emitted *outside* the check loop (collision renames,
+/// unregistered packs), which previously printed but were never counted.
+///
+/// Assertions are deltas: ambient checks (e.g. ProjectIndexCheck) may add
+/// warnings of their own, so each test compares two otherwise-identical runs
+/// that differ only by the single side-channel warning under test.
+struct DoctorSummaryWarningCountTests {
+    /// The injected counter is shared across CLIOutput copies, so a warning
+    /// emitted through any copy (e.g. the one handed to the collision resolver)
+    /// is tallied. This is the mechanism the doctor summary relies on.
+    @Test("WarningCounter is shared across CLIOutput value copies")
+    func warningCounterSharedAcrossCopies() {
+        let counter = WarningCounter()
+        let output = CLIOutput(colorsEnabled: false, warningCounter: counter)
+        let copy = output // value-type copy, same counter instance
+
+        #expect(counter.count == 0)
+        output.warn("first")
+        copy.warn("second")
+        #expect(counter.count == 2)
+    }
+
+    @Test("Skill colliding with a pre-existing unmanaged file is counted in the summary")
+    func collisionWarningCounted() throws {
+        let (home, project) = try makeSandboxProject(label: "warncount-collision")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // A pack whose skill targets destination "my-skill".
+        let skillSource = home.appendingPathComponent("pack-my-skill")
+        try FileManager.default.createDirectory(at: skillSource, withIntermediateDirectories: true)
+        try "managed".write(
+            to: skillSource.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+        let component = ComponentDefinition(
+            id: "test-pack.my-skill",
+            displayName: "my-skill",
+            description: "Skill",
+            type: .skill,
+            packIdentifier: "test-pack",
+            dependencies: [],
+            isRequired: true,
+            installAction: .copyPackFile(source: skillSource, destination: "my-skill", fileType: .skill)
+        )
+        let pack = MockTechPack(
+            identifier: "test-pack", displayName: "Test Pack", components: [component]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // Configure the pack (no artifacts → nothing tracked at the destination).
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("test-pack")
+        try state.save()
+
+        // Baseline: no pre-existing file at the destination → no collision.
+        var baselineRunner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let baseline = try baselineRunner.run()
+
+        // Now plant a pre-existing UNMANAGED skill at the same destination.
+        let existingSkill = project.appendingPathComponent(".claude/skills/my-skill")
+        try FileManager.default.createDirectory(at: existingSkill, withIntermediateDirectories: true)
+        try "user content".write(
+            to: existingSkill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+
+        var collisionRunner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let withCollision = try collisionRunner.run()
+
+        // The only difference between the two runs is the collision warning.
+        #expect(withCollision.warnings == baseline.warnings + 1)
+    }
+
+    @Test("Unregistered --pack filter warning is counted in the summary")
+    func unregisteredPackWarningCounted() throws {
+        let (home, project) = try makeSandboxProject(label: "warncount-unregistered")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack")
+        let registry = TechPackRegistry(packs: [pack])
+
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("test-pack")
+        try state.save()
+
+        // Baseline: filter to the registered pack only.
+        var baselineRunner = makeRunner(
+            home: home, projectRoot: project, registry: registry, packFilter: "test-pack"
+        )
+        let baseline = try baselineRunner.run()
+
+        // Add an unregistered pack id to the filter — same checks, plus one
+        // "not registered" advisory warning.
+        var ghostRunner = makeRunner(
+            home: home, projectRoot: project, registry: registry, packFilter: "test-pack,ghost-pack"
+        )
+        let withGhost = try ghostRunner.run()
+
+        #expect(withGhost.warnings == baseline.warnings + 1)
+    }
+}
