@@ -1,4 +1,26 @@
 import Foundation
+import os
+
+/// Shared, mutable tally of warnings emitted through a `CLIOutput`.
+///
+/// A reference type so that value-type `CLIOutput` copies (e.g. the one handed
+/// to `DestinationCollisionResolver`) all increment the same counter. Lets a
+/// caller like `DoctorRunner` faithfully count every warning shown — including
+/// advisories emitted outside the doctor check loop.
+///
+/// `Sendable` so `CLIOutput` stays `Sendable` (it's captured in isolated
+/// closures, e.g. via `ScriptRunner`); the lock supplies that guarantee.
+final class WarningCounter: Sendable {
+    private let lock = OSAllocatedUnfairLock(initialState: 0)
+
+    var count: Int {
+        lock.withLock { $0 }
+    }
+
+    func increment() {
+        lock.withLock { $0 += 1 }
+    }
+}
 
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
@@ -10,8 +32,11 @@ struct CLIOutput {
     /// manipulation, ANSI ornamentation) can render. Gate pickers on this.
     let isInteractiveTerminal: Bool
     let style: ANSIStyle
+    /// Optional tally that `warn(_:)` increments. `nil` for most callers; set by
+    /// callers (e.g. `DoctorRunner`) that need to count emitted warnings.
+    let warningCounter: WarningCounter?
 
-    init(colorsEnabled: Bool? = nil) {
+    init(colorsEnabled: Bool? = nil, warningCounter: WarningCounter? = nil) {
         if let explicit = colorsEnabled {
             self.colorsEnabled = explicit
         } else {
@@ -20,6 +45,7 @@ struct CLIOutput {
         hasInteractiveStdin = isatty(STDIN_FILENO) != 0
         isInteractiveTerminal = hasInteractiveStdin && isatty(STDOUT_FILENO) != 0
         style = ANSIStyle(enabled: self.colorsEnabled)
+        self.warningCounter = warningCounter
     }
 
     // MARK: - ANSI Codes (delegate to `style`)
@@ -131,6 +157,7 @@ struct CLIOutput {
     }
 
     func warn(_ message: String) {
+        warningCounter?.increment()
         write("\(yellow)[WARN]\(reset) \(message)\n")
     }
 

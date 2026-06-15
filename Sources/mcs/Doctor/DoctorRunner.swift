@@ -1,5 +1,12 @@
 import Foundation
 
+/// Outcome tallies from a doctor run, captured at summary time.
+struct DoctorSummary {
+    let passed: Int
+    let warnings: Int
+    let issues: Int
+}
+
 /// Orchestrates all doctor checks grouped by section, with optional fix mode.
 ///
 /// **Scope of `--fix`**: Cleanup, migration, and trivial repairs only.
@@ -15,10 +22,13 @@ struct DoctorRunner {
     let globalOnly: Bool
     let registry: TechPackRegistry
 
-    private let output = CLIOutput()
+    /// Counts every warning emitted through `output`, including advisories shown
+    /// outside the check loop (collision renames, unregistered packs, unreadable
+    /// state) so the summary tally is faithful to what the user saw.
+    private let warningCounter = WarningCounter()
+    private let output: CLIOutput
     private var passCount = 0
     private var failCount = 0
-    private var warnCount = 0
     private var fixedCount = 0
     /// Failed checks collected during diagnosis, to be fixed after confirmation.
     private var pendingFixes: [any DoctorCheck] = []
@@ -60,9 +70,11 @@ struct DoctorRunner {
         self.registry = registry
         self.environment = environment
         self.projectRootOverride = projectRootOverride
+        output = CLIOutput(warningCounter: warningCounter)
     }
 
-    mutating func run() throws {
+    @discardableResult
+    mutating func run() throws -> DoctorSummary {
         output.header("Managed Claude Stack — Doctor")
 
         let env = environment
@@ -230,13 +242,19 @@ struct DoctorRunner {
             runChecks(checks)
         }
 
-        // Summary (before fixes, so the user sees the full picture first)
+        // Summary (before fixes, so the user sees the full picture first).
+        // Capture once: fix-phase warnings (below) must not alter the reported total.
+        let summary = DoctorSummary(
+            passed: passCount,
+            warnings: warningCounter.count,
+            issues: failCount
+        )
         output.header("Summary")
         output.doctorSummary(
-            passed: passCount,
+            passed: summary.passed,
             fixed: 0,
-            warnings: warnCount,
-            issues: failCount
+            warnings: summary.warnings,
+            issues: summary.issues
         )
 
         // Phase 2: Confirm and execute pending fixes (after summary)
@@ -247,6 +265,8 @@ struct DoctorRunner {
                 output.success("Applied \(fixedCount) fix\(fixedCount == 1 ? "" : "es").")
             }
         }
+
+        return summary
     }
 
     // MARK: - Scope resolution
@@ -605,7 +625,7 @@ struct DoctorRunner {
     }
 
     private mutating func docWarn(_ name: String, _ msg: String) {
-        warnCount += 1
+        // warningCounter increments inside output.warn — single source of truth.
         output.warn("⚠ \(name): \(msg)")
     }
 
