@@ -33,7 +33,9 @@ enum TemplateComposer {
                 values: values,
                 emitWarnings: emitWarnings
             )
-            if index > 0 { parts.append("") }
+            if index > 0 {
+                parts.append("")
+            }
             parts.append(beginMarker(identifier: contribution.sectionIdentifier))
             parts.append(processedContent)
             parts.append(endMarker(identifier: contribution.sectionIdentifier))
@@ -180,17 +182,21 @@ enum TemplateComposer {
     /// Pure compose-or-update decision: produces final content from contributions
     /// without performing any file I/O.
     ///
-    /// - If `existingContent` is nil or has no section markers, produces a fresh compose.
-    /// - If `existingContent` has markers, updates each section in place preserving user content.
+    /// - If `existingContent` is nil or empty/whitespace-only, produces a fresh compose.
+    /// - Otherwise (it has markers and/or hand-written content), updates each section in
+    ///   place, preserving all content outside the managed markers. Marker-less content is
+    ///   treated as user content and kept, with managed sections appended below it.
     static func composeOrUpdate(
         existingContent: String?,
         contributions: [TemplateContribution],
         values: [String: String],
         emitWarnings: Bool = true
     ) -> ComposeResult {
-        let hasMarkers = existingContent.map { !parseSections(from: $0).isEmpty } ?? false
-
-        guard let existingContent, hasMarkers else {
+        // Fresh-compose only for a nil or whitespace-only file. Any non-whitespace
+        // content — whether mcs-managed (has markers) or hand-written (marker-less) —
+        // routes to updateExisting so it is preserved rather than overwritten.
+        guard let existingContent,
+              !existingContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return freshCompose(contributions: contributions, values: values, emitWarnings: emitWarnings)
         }
 
@@ -216,7 +222,9 @@ enum TemplateComposer {
         return ComposeResult(content: composed, warnings: [])
     }
 
-    /// Update an existing file that has section markers, preserving user content.
+    /// Update an existing non-empty file, preserving user content. Handles both
+    /// marker'd files (sections replaced in place) and marker-less files (the whole
+    /// file is user content and managed sections are appended below it).
     private static func updateExisting(
         existingContent: String,
         contributions: [TemplateContribution],

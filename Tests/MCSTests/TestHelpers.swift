@@ -389,6 +389,11 @@ func makeSandboxProject(label: String = "project") throws -> (home: URL, project
     return (home, project)
 }
 
+/// Count non-overlapping occurrences of `needle` within `haystack`.
+func occurrences(of needle: String, in haystack: String) -> Int {
+    haystack.components(separatedBy: needle).count - 1
+}
+
 /// Create a `Configurator` configured for global-scope sync.
 func makeGlobalSyncConfigurator(
     home: URL,

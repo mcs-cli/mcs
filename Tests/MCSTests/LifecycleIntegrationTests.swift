@@ -1226,6 +1226,90 @@ struct SectionRestorationTests {
     }
 }
 
+// MARK: - Scenario 9b: Marker-less CLAUDE File Preservation
+
+struct MarkerlessPreservationTests {
+    @Test("Sync into a pre-existing marker-less CLAUDE file preserves user content")
+    func preExistingMarkerlessContentPreserved() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Pre-seed a hand-written CLAUDE.local.md with NO mcs markers.
+        let userRules = "# My personal project rules\nAlways be concise and cite sources."
+        try userRules.write(to: bed.claudeLocalPath, atomically: true, encoding: .utf8)
+
+        let pack = MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            templates: [TemplateContribution(
+                sectionIdentifier: "my-pack",
+                templateContent: "## My Pack\nPack-provided guidance.",
+                placeholders: []
+            )]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let content = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        // User's hand-written rules survive rather than being overwritten.
+        #expect(content.contains("Always be concise and cite sources."))
+        // The pack section is added with markers.
+        #expect(content.contains("<!-- mcs:begin my-pack -->"))
+        #expect(content.contains("Pack-provided guidance."))
+
+        // Re-sync is idempotent: prose appears exactly once, single managed section.
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        let reSynced = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(occurrences(of: "Always be concise and cite sources.", in: reSynced) == 1)
+        #expect(TemplateComposer.parseSections(from: reSynced).count == 1)
+    }
+
+    @Test("Single-pack swap preserves user content after all markers are stripped")
+    func singlePackSwapPreservesUserContent() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            templates: [TemplateContribution(
+                sectionIdentifier: "pack-a",
+                templateContent: "## Pack A\nPack A content.",
+                placeholders: []
+            )]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            templates: [TemplateContribution(
+                sectionIdentifier: "pack-b",
+                templateContent: "## Pack B\nPack B content.",
+                placeholders: []
+            )]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Step 1: Configure pack A, then append user prose outside its markers ===
+        try configurator.configure(packs: [packA], confirmRemovals: false)
+        let seeded = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+            + "\n\nMy own notes outside markers.\n"
+        try seeded.write(to: bed.claudeLocalPath, atomically: true, encoding: .utf8)
+
+        // === Step 2: Swap to pack B only ===
+        // Deselecting the sole marked pack strips every marker, leaving a marker-less
+        // file that still holds the user's notes.
+        try configurator.configure(packs: [packB], confirmRemovals: false)
+
+        let afterClaude = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
+        #expect(afterClaude.contains("My own notes outside markers."))
+        #expect(afterClaude.contains("<!-- mcs:begin pack-b -->"))
+        #expect(!afterClaude.contains("<!-- mcs:begin pack-a -->"))
+    }
+}
+
 // MARK: - Scenario 7: Hook Handler Metadata
 
 struct HookMetadataLifecycleTests {

@@ -386,8 +386,8 @@ struct ComposeOrUpdateTests {
         #expect(result.warnings.isEmpty)
     }
 
-    @Test("v1 content without markers produces fresh compose")
-    func v1MigrationCompose() {
+    @Test("Marker-less existing content is preserved and managed sections appended")
+    func markerlessContentPreserved() {
         let result = TemplateComposer.composeOrUpdate(
             existingContent: "Old v1 content without any markers",
             contributions: [packContribution("ios", "New iOS")],
@@ -398,7 +398,49 @@ struct ComposeOrUpdateTests {
         #expect(sections.count == 1)
         #expect(sections[0].identifier == "ios")
         #expect(sections[0].content == "New iOS")
-        #expect(!result.content.contains("Old v1 content"))
+        // Hand-written content must survive rather than being overwritten.
+        #expect(result.content.contains("Old v1 content without any markers"))
+        // The preserved prose lands outside the managed markers (as user content).
+        #expect(TemplateComposer.extractUserContent(from: result.content)
+            .contains("Old v1 content without any markers"))
+        #expect(result.warnings.isEmpty)
+    }
+
+    @Test("Composing into marker-less content is idempotent on re-run")
+    func markerlessContentIdempotent() {
+        let first = TemplateComposer.composeOrUpdate(
+            existingContent: "My hand-written rules",
+            contributions: [packContribution("ios", "New iOS")],
+            values: [:]
+        )
+
+        let second = TemplateComposer.composeOrUpdate(
+            existingContent: first.content,
+            contributions: [packContribution("ios", "New iOS")],
+            values: [:]
+        )
+
+        // Second pass sees the markers written by the first and updates in place —
+        // no duplicated section, and the prose appears exactly once.
+        #expect(TemplateComposer.parseSections(from: second.content).count == 1)
+        #expect(occurrences(of: "My hand-written rules", in: second.content) == 1)
+        #expect(second.warnings.isEmpty)
+    }
+
+    @Test("Empty existing content produces a clean fresh compose")
+    func emptyExistingContentFreshCompose() {
+        let result = TemplateComposer.composeOrUpdate(
+            existingContent: "   \n\n  ",
+            contributions: [packContribution("ios", "iOS rules")],
+            values: [:]
+        )
+
+        let sections = TemplateComposer.parseSections(from: result.content)
+        #expect(sections.count == 1)
+        #expect(sections[0].content == "iOS rules")
+        // Whitespace-only input carries no user content, so nothing extra is kept.
+        #expect(TemplateComposer.extractUserContent(from: result.content)
+            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         #expect(result.warnings.isEmpty)
     }
 
