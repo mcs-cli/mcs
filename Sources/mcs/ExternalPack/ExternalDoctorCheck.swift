@@ -287,32 +287,38 @@ struct ExternalShellScriptCheck: DoctorCheck {
 
 // MARK: - Hook Event Exists Check
 
-/// Checks that a hook event is registered in settings.json.
+/// Checks that a hook event is registered in the Claude settings.
 /// Pack-contributed replacement for the engine-level HookEventCheck.
-struct ExternalHookEventExistsCheck: DoctorCheck {
+///
+/// Resolves project `settings.local.json` before global `settings.json` — see
+/// `SettingsReadingCheck`.
+struct ExternalHookEventExistsCheck: SettingsReadingCheck {
     let name: String
     let section: String
     let event: String
     let isOptional: Bool
+    var projectRoot: URL?
     var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let settingsURL = environment.claudeSettings
-        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-            return .fail("settings.json not found")
+        let probe: SettingsProbe<Bool> = probeSettings { url in
+            try Settings.load(from: url).hooks?[event] != nil ? true : nil
         }
-        let settings: Settings
-        do {
-            settings = try Settings.load(from: settingsURL)
-        } catch {
-            return .fail("settings.json is invalid: \(error.localizedDescription)")
+
+        if let match = probe.match {
+            return probe.readErrors.isEmpty
+                ? .pass("registered in \(match.fileName)")
+                : .warn("registered in \(match.fileName)\(probe.errorSuffix)")
         }
-        guard let hooks = settings.hooks, hooks[event] != nil else {
-            return isOptional
-                ? .skip("\(event) not registered (optional)")
-                : .fail("\(event) not registered in settings.json")
+        guard probe.anyFileExisted else {
+            return .fail("no settings file found (searched \(searchedFileNames))")
         }
-        return .pass("registered in settings.json")
+        if !probe.readErrors.isEmpty {
+            return .fail("\(event) not registered\(probe.errorSuffix)")
+        }
+        return isOptional
+            ? .skip("\(event) not registered (optional)")
+            : .fail("\(event) not registered in \(searchedFileNames)")
     }
 
     func fix() -> FixResult {
@@ -322,34 +328,42 @@ struct ExternalHookEventExistsCheck: DoctorCheck {
 
 // MARK: - Settings Key Equals Check
 
-/// Checks that a specific key in settings.json has an expected value.
+/// Checks that a specific settings key has an expected value.
 /// Uses dot-notation keyPath to navigate the raw JSON, ensuring forward compatibility
 /// with any key — not just those modeled by the Settings struct.
-struct ExternalSettingsKeyEqualsCheck: DoctorCheck {
+///
+/// Resolves project `settings.local.json` before global `settings.json` — see
+/// `SettingsReadingCheck`. This matches Claude Code's own precedence, so the check reports
+/// the value actually in effect.
+struct ExternalSettingsKeyEqualsCheck: SettingsReadingCheck {
     let name: String
     let section: String
     let keyPath: String
     let expectedValue: String
+    var projectRoot: URL?
     var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let settingsURL = environment.claudeSettings
-        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-            return .fail("settings.json not found")
-        }
-        guard let data = try? Data(contentsOf: settingsURL),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            return .fail("settings.json is invalid")
+        let probe: SettingsProbe<String> = probeSettings { url in
+            let data = try Data(contentsOf: url)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw MCSError.invalidConfiguration("not a JSON object")
+            }
+            return resolveKeyPath(keyPath, in: json)
         }
 
-        guard let actual = resolveKeyPath(keyPath, in: json) else {
-            return .warn("\(keyPath) not set")
+        guard probe.anyFileExisted else {
+            return .fail("no settings file found (searched \(searchedFileNames))")
         }
-        if actual == expectedValue {
-            return .pass("\(keyPath) = \(expectedValue)")
+        guard let match = probe.match else {
+            return .warn("\(keyPath) not set\(probe.errorSuffix)")
         }
-        return .warn("\(keyPath) is '\(actual)', expected '\(expectedValue)'")
+        if match.value == expectedValue {
+            return .pass("\(keyPath) = \(expectedValue) (\(match.fileName))\(probe.errorSuffix)")
+        }
+        return .warn(
+            "\(keyPath) is '\(match.value)' in \(match.fileName), expected '\(expectedValue)'\(probe.errorSuffix)"
+        )
     }
 
     func fix() -> FixResult {
@@ -501,11 +515,15 @@ enum ExternalDoctorCheckFactory {
                     reason: "hookEventExists requires non-empty 'event'"
                 )
             }
+            // `scope` is deliberately not forwarded: it selects a base directory for an
+            // author-supplied `path`, and this check has none. The settings file is implied by
+            // the check type, so `projectRoot` alone drives resolution.
             return ExternalHookEventExistsCheck(
                 name: definition.name,
                 section: section,
                 event: event,
                 isOptional: definition.isOptional ?? false,
+                projectRoot: projectRoot,
                 environment: environment
             )
 
@@ -518,11 +536,13 @@ enum ExternalDoctorCheckFactory {
                     reason: "settingsKeyEquals requires non-empty 'keyPath' and 'expectedValue'"
                 )
             }
+            // See the note on `.hookEventExists` above — `scope` does not apply here either.
             return ExternalSettingsKeyEqualsCheck(
                 name: definition.name,
                 section: section,
                 keyPath: keyPath,
                 expectedValue: expectedValue,
+                projectRoot: projectRoot,
                 environment: environment
             )
         }
@@ -561,6 +581,86 @@ extension ScopedPathCheck {
 
     func fix() -> FixResult {
         .notFixable("Run 'mcs sync' to install")
+    }
+}
+
+// MARK: - Settings Reading Protocol
+
+/// Shared settings-file resolution for doctor checks that read Claude settings.
+///
+/// Unlike `ScopedPathCheck`, these checks have no author-supplied path — the file is implied
+/// by the check type — so resolution is driven entirely by `projectRoot`, never by the
+/// manifest's `scope` field (hence the name: these checks read settings, they are not scoped).
+/// Candidates are tried most-specific-first: project `settings.local.json`, then global
+/// `settings.json`. That order matches Claude Code's own precedence, so a check reports on the
+/// settings actually in effect.
+protocol SettingsReadingCheck: DoctorCheck {
+    var projectRoot: URL? { get }
+    var environment: Environment { get }
+}
+
+/// Outcome of walking the candidate settings files.
+struct SettingsProbe<Value> {
+    /// First candidate that produced a value, with the name of the file that answered.
+    let match: (value: Value, fileName: String)?
+    /// Files that exist on disk but could not be read or parsed.
+    let readErrors: [String]
+    /// Whether any candidate file was present on disk.
+    let anyFileExisted: Bool
+
+    /// Read failures rendered for appending to a check message, empty when there were none.
+    /// Single definition so every result string reports unreadable files the same way.
+    var errorSuffix: String {
+        readErrors.isEmpty ? "" : " — \(readErrors.joined(separator: "; "))"
+    }
+}
+
+extension SettingsReadingCheck {
+    /// Candidate settings files, most specific first.
+    var settingsCandidates: [URL] {
+        var urls: [URL] = []
+        if let projectRoot {
+            urls.append(
+                projectRoot
+                    .appendingPathComponent(Constants.FileNames.claudeDirectory)
+                    .appendingPathComponent(Constants.FileNames.settingsLocal)
+            )
+        }
+        urls.append(environment.claudeSettings)
+        return urls
+    }
+
+    /// Human-readable list of the files this check consults, for diagnostics.
+    var searchedFileNames: String {
+        settingsCandidates.map(\.lastPathComponent).joined(separator: ", ")
+    }
+
+    /// Walk the candidates in order and return the first non-nil `read` result.
+    ///
+    /// Absent files are skipped rather than treated as errors — `Settings.load(from:)` returns an
+    /// empty `Settings` for a missing file, so existence must be checked here to distinguish
+    /// "no such file" from "file present but key absent". Read and parse failures are collected
+    /// rather than discarded, so a corrupt file is always surfaced to the user.
+    func probeSettings<Value>(_ read: (URL) throws -> Value?) -> SettingsProbe<Value> {
+        var readErrors: [String] = []
+        var anyFileExisted = false
+
+        for url in settingsCandidates {
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            anyFileExisted = true
+            do {
+                if let value = try read(url) {
+                    return SettingsProbe(
+                        match: (value: value, fileName: url.lastPathComponent),
+                        readErrors: readErrors,
+                        anyFileExisted: true
+                    )
+                }
+            } catch {
+                readErrors.append("\(url.lastPathComponent) is unreadable: \(error.localizedDescription)")
+            }
+        }
+        return SettingsProbe(match: nil, readErrors: readErrors, anyFileExisted: anyFileExisted)
     }
 }
 

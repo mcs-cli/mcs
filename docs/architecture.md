@@ -276,6 +276,8 @@ Individual checks resolve component presence through three tiers:
 
 MCP server checks follow the same pattern: project-scoped entries (`projects[path].mcpServers` in `~/.claude.json`) are checked before global entries (`mcpServers`).
 
+Settings-reading checks do too. `PluginCheck` and the pack-declared `hookEventExists` / `settingsKeyEquals` checks read `<project>/.claude/settings.local.json` before `~/.claude/settings.json`, which mirrors Claude Code's own precedence — so they report on the configuration actually in effect rather than on one file in isolation. Doctor output names the file that answered, and a settings file that exists but cannot be parsed is always surfaced rather than skipped silently.
+
 ### Pack Resolution
 
 When determining which packs to check, doctor uses a priority chain:

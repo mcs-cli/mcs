@@ -421,7 +421,6 @@ Doctor checks verify pack health. They can be defined at two levels:
 | `section` | `String` | No | Grouping label in output |
 | `fixCommand` | `String` | No | Shell command for `mcs doctor --fix` |
 | `fixScript` | `String` | No | Path to fix script (for complex fixes) |
-| `scope` | `String` | No | `global` or `project` |
 | `isOptional` | `Boolean` | No | If `true`, failure is a warning, not an error |
 
 ### Check Types
@@ -436,6 +435,36 @@ Doctor checks verify pack health. They can be defined at two levels:
 | `shellScript` | `command` | Run a command. Exit codes: `0`=pass, `1`=fail, `2`=warn, `3`=skip |
 | `hookEventExists` | `event` | Is a hook event registered in settings? |
 | `settingsKeyEquals` | `keyPath`, `expectedValue` | Does a settings JSON key equal a specific value? |
+
+### `scope` — path-based checks only
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `scope` | `String` | No | `global` (default) or `project` |
+
+`scope` answers *"what is `path` relative to?"*, so it applies only to the four checks that take
+a `path`: `fileExists`, `directoryExists`, `fileContains`, `fileNotContains`.
+
+- `global` — the path is used as written, with `~` expanded.
+- `project` — the path is resolved against the project root and confined to it. A path that
+  escapes the project fails the check. Outside a project, the check is skipped.
+
+The other check types ignore `scope`; `mcs pack validate` warns if you set it on them.
+
+### Settings resolution
+
+`hookEventExists` and `settingsKeyEquals` don't take a `path` — the settings file is implied. They
+resolve it automatically, most specific first:
+
+1. `<project>/.claude/settings.local.json` — where `mcs sync` writes project-scoped hooks and
+   settings keys
+2. `~/.claude/settings.json` — the global file
+
+Globally-configured packs have no project root and read only the global file. The order mirrors
+Claude Code's own precedence (project settings override global), so these checks report on the
+configuration actually in effect. Doctor output names the file that answered — `registered in
+settings.local.json` vs `registered in settings.json` — and a settings file that exists but can't
+be parsed is always reported rather than skipped silently.
 
 ### Auto-Derived Checks
 

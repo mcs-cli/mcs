@@ -919,7 +919,7 @@ struct ExternalDoctorCheckDefinition: Codable {
     let isOptional: Bool?
 }
 
-enum ExternalDoctorCheckType: String, Codable {
+enum ExternalDoctorCheckType: String, Codable, CaseIterable {
     case commandExists
     case fileExists
     case directoryExists
@@ -928,6 +928,26 @@ enum ExternalDoctorCheckType: String, Codable {
     case shellScript
     case hookEventExists
     case settingsKeyEquals
+
+    /// Whether `scope` affects this check.
+    ///
+    /// `scope` selects the base directory for an author-supplied `path`, so it only means
+    /// something for the path-based checks. The others either take no path (`hookEventExists`,
+    /// `settingsKeyEquals` — the settings file is implied and resolved from the project root) or
+    /// run a command (`commandExists`, `shellScript`). `mcs pack validate` warns when a pack
+    /// declares `scope` on a type that ignores it.
+    ///
+    /// `ExternalDoctorCheckFactory.makeCheck` is the ground truth — only the checks it builds as
+    /// `ScopedPathCheck` consume `scope`. `ExternalDoctorCheckTests.honorsScopeMatchesFactory`
+    /// asserts this property agrees with the factory for every case, so the two cannot drift.
+    var honorsScope: Bool {
+        switch self {
+        case .fileExists, .directoryExists, .fileContains, .fileNotContains:
+            true
+        case .commandExists, .shellScript, .hookEventExists, .settingsKeyEquals:
+            false
+        }
+    }
 }
 
 enum ExternalDoctorCheckScope: String, Codable {

@@ -263,8 +263,9 @@ If `mcs doctor` doesn't identify the problem:
 1. Check that your PATH includes the necessary binaries (`brew`, `node`, `claude`)
 2. Verify `~/.claude.json` is valid JSON: `python3 -m json.tool ~/.claude.json`
 3. Verify `~/.claude/settings.json` is valid JSON: `python3 -m json.tool ~/.claude/settings.json`
-4. Check `.claude/.mcs-project` in your project for state corruption
-5. Open an issue at the project repository with the output of `mcs doctor`
+4. Verify your project's `.claude/settings.local.json` is valid JSON — doctor reports it as unreadable when it can't be parsed, and checks then fall back to the global file
+5. Check `.claude/.mcs-project` in your project for state corruption
+6. Open an issue at the project repository with the output of `mcs doctor`
 
 ---
 
