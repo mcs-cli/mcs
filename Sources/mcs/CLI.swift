@@ -3,7 +3,7 @@ import ArgumentParser
 /// Single source of truth for the CLI version.
 /// Used in markers, sidecar files, and `--version` output.
 enum MCSVersion {
-    static let current = "2026.7.13"
+    static let current = "2026.7.28"
 }
 
 @main
