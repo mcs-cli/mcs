@@ -2,4 +2,4 @@
 --indent 4
 --ifdef noindent
 --exclude .build,.swiftpm
---disable wrapMultilineStatementBraces
+--disable wrapMultilineStatementBraces,wrapIfStatementBodies
