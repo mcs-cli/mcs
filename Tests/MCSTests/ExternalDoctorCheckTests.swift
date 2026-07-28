@@ -572,6 +572,109 @@ struct ExternalDoctorCheckTests {
         #expect(check.section == "Settings")
     }
 
+    // MARK: - Settings check scope resolution (issue #354)
+
+    /// Builds a settings-reading check definition, optionally declaring a `scope`.
+    private func settingsCheckDefinition(
+        type: ExternalDoctorCheckType,
+        scope: ExternalDoctorCheckScope?
+    ) -> ExternalDoctorCheckDefinition {
+        ExternalDoctorCheckDefinition(
+            type: type,
+            name: "Settings check",
+            section: "Settings",
+            command: nil,
+            args: nil,
+            path: nil,
+            pattern: nil,
+            scope: scope,
+            fixCommand: nil,
+            fixScript: nil,
+            event: type == .hookEventExists ? "SessionStart" : nil,
+            keyPath: type == .settingsKeyEquals ? "permissions.defaultMode" : nil,
+            expectedValue: type == .settingsKeyEquals ? "plan" : nil,
+            isOptional: false
+        )
+    }
+
+    @Test("Factory threads projectRoot into settings-reading checks")
+    func factoryThreadsProjectRootIntoSettingsChecks() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let projectRoot = tmpDir.appendingPathComponent("project")
+
+        let hookCheck = ExternalDoctorCheckFactory.makeCheck(
+            from: settingsCheckDefinition(type: .hookEventExists, scope: nil),
+            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+        )
+        let keyCheck = ExternalDoctorCheckFactory.makeCheck(
+            from: settingsCheckDefinition(type: .settingsKeyEquals, scope: nil),
+            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+        )
+
+        #expect((hookCheck as? ExternalHookEventExistsCheck)?.projectRoot == projectRoot)
+        #expect((keyCheck as? ExternalSettingsKeyEqualsCheck)?.projectRoot == projectRoot)
+    }
+
+    @Test("honorsScope agrees with the factory for every check type")
+    func honorsScopeMatchesFactory() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // The factory decides which checks consume `scope` by building them as `ScopedPathCheck`.
+        // `honorsScope` mirrors that decision for `mcs pack validate`; this keeps the two in step
+        // when a ninth check type is added.
+        for type in ExternalDoctorCheckType.allCases {
+            let definition = ExternalDoctorCheckDefinition(
+                type: type,
+                name: "Check",
+                section: nil,
+                command: "true",
+                args: nil,
+                path: "some/path",
+                pattern: "pattern",
+                scope: .project,
+                fixCommand: nil,
+                fixScript: nil,
+                event: "SessionStart",
+                keyPath: "permissions.defaultMode",
+                expectedValue: "plan",
+                isOptional: nil
+            )
+            let check = ExternalDoctorCheckFactory.makeCheck(
+                from: definition, packPath: tmpDir, projectRoot: tmpDir,
+                scriptRunner: makeScriptRunner()
+            )
+            #expect(
+                (check is any ScopedPathCheck) == type.honorsScope,
+                "\(type.rawValue): honorsScope is \(type.honorsScope) but factory built \(Swift.type(of: check))"
+            )
+        }
+    }
+
+    @Test("Declared scope does not alter settings-check resolution")
+    func factoryIgnoresScopeForSettingsChecks() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let projectRoot = tmpDir.appendingPathComponent("project")
+
+        // `scope` selects a base directory for an author-supplied `path`; these checks have none,
+        // so it must not change which settings files are consulted.
+        for scope in [ExternalDoctorCheckScope.global, .project] {
+            let hookCheck = ExternalDoctorCheckFactory.makeCheck(
+                from: settingsCheckDefinition(type: .hookEventExists, scope: scope),
+                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+            )
+            let keyCheck = ExternalDoctorCheckFactory.makeCheck(
+                from: settingsCheckDefinition(type: .settingsKeyEquals, scope: scope),
+                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+            )
+
+            #expect((hookCheck as? ExternalHookEventExistsCheck)?.projectRoot == projectRoot)
+            #expect((keyCheck as? ExternalSettingsKeyEqualsCheck)?.projectRoot == projectRoot)
+        }
+    }
+
     @Test("Factory returns misconfigured for hookEventExists without event")
     func factoryHookEventExistsMisconfigured() throws {
         let tmpDir = try makeTmpDir()

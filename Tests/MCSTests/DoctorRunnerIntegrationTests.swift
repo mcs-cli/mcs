@@ -211,6 +211,99 @@ struct DoctorRunnerIntegrationTests {
         try runner.run()
     }
 
+    // MARK: - External settings checks resolve project scope (issue #354)
+
+    /// Builds an external pack whose only check is a declarative `hookEventExists`.
+    ///
+    /// The adapter must be constructed with a sandboxed shell: `convertDoctorCheck` passes
+    /// `shell.environment` to the factory, not the runner's environment, so a default shell would
+    /// make the check read the real `~/.claude/settings.json`.
+    private func externalHookCheckPack(home: URL, packPath: URL) -> ExternalPackAdapter {
+        let manifest = ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "external-pack",
+            displayName: "External Pack",
+            description: "Pack with a declarative hook event check",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: nil,
+            prompts: nil,
+            configureProject: nil,
+            supplementaryDoctorChecks: [
+                ExternalDoctorCheckDefinition(
+                    type: .hookEventExists,
+                    name: "SessionStart hook",
+                    section: "Hooks",
+                    command: nil, args: nil, path: nil, pattern: nil,
+                    scope: nil, fixCommand: nil, fixScript: nil,
+                    event: "SessionStart",
+                    keyPath: nil, expectedValue: nil, isOptional: false
+                ),
+            ],
+            ignore: nil
+        )
+        return ExternalPackAdapter(
+            manifest: manifest,
+            packPath: packPath,
+            shell: ShellRunner(environment: Environment(home: home)),
+            output: CLIOutput(colorsEnabled: false)
+        )
+    }
+
+    @Test("declarative hookEventExists resolves the project settings.local.json")
+    func externalHookCheckFindsProjectScopedEvent() throws {
+        let (home, project) = try makeSandboxProject(label: "runner-ext-hook-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let registry = TechPackRegistry(packs: [externalHookCheckPack(home: home, packPath: home)])
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("external-pack")
+        try state.save()
+
+        // Project-scoped sync writes hook entries here — and nowhere else.
+        let projectSettings = """
+        {
+          "hooks": {
+            "SessionStart": [
+              { "hooks": [{ "type": "command", "command": "mcs check-updates --hook" }] }
+            ]
+          }
+        }
+        """
+        try projectSettings.write(
+            to: project.appendingPathComponent(Constants.FileNames.claudeDirectory)
+                .appendingPathComponent(Constants.FileNames.settingsLocal),
+            atomically: true, encoding: .utf8
+        )
+        // No global settings.json — before this fix the check read only that file and failed.
+
+        var runner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let summary = try runner.run()
+        #expect(summary.issues == 0)
+    }
+
+    @Test("declarative hookEventExists still fails when the event is registered nowhere")
+    func externalHookCheckFailsWhenEventMissing() throws {
+        let (home, project) = try makeSandboxProject(label: "runner-ext-hook-missing")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let registry = TechPackRegistry(packs: [externalHookCheckPack(home: home, packPath: home)])
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("external-pack")
+        try state.save()
+
+        try "{}".write(
+            to: project.appendingPathComponent(Constants.FileNames.claudeDirectory)
+                .appendingPathComponent(Constants.FileNames.settingsLocal),
+            atomically: true, encoding: .utf8
+        )
+
+        var runner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let summary = try runner.run()
+        #expect(summary.issues > 0)
+    }
+
     @Test("runner resolves colliding hook destinations via collision resolver")
     func collidingHookDestinationsResolvedByDoctor() throws {
         let (home, project) = try makeSandboxProject(label: "runner-collision")

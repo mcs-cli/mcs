@@ -1128,3 +1128,334 @@ struct ExternalSettingsKeyEqualsCheckSandboxTests {
         }
     }
 }
+
+// MARK: - Scoped Settings Resolution Helpers
+
+/// Creates `<home>/my-project/.claude/` and writes `settings.local.json` into it.
+private func makeProjectSettings(in home: URL, contents: String) throws -> URL {
+    let projectRoot = home.appendingPathComponent("my-project")
+    let claudeDir = projectRoot.appendingPathComponent(".claude")
+    try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+    try contents.write(
+        to: claudeDir.appendingPathComponent("settings.local.json"),
+        atomically: true, encoding: .utf8
+    )
+    return projectRoot
+}
+
+private func hookSettings(event: String) -> String {
+    """
+    {
+      "hooks": {
+        "\(event)": [
+          { "hooks": [{ "type": "command", "command": "bash .claude/hooks/run.sh" }] }
+        ]
+      }
+    }
+    """
+}
+
+// MARK: - ExternalHookEventExistsCheck Project Scope (issue #354)
+
+extension ExternalHookEventExistsCheckSandboxTests {
+    @Test("pass from project settings.local.json when global settings.json lacks the event")
+    func passFromProjectSettings() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: hookSettings(event: "PostToolUse"))
+        try hookSettings(event: "PreToolUse").write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "registered in settings.local.json")
+    }
+
+    @Test("pass via global fallback when project settings.local.json lacks the event")
+    func passViaGlobalFallback() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-fallback")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: hookSettings(event: "PreToolUse"))
+        try hookSettings(event: "PostToolUse").write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "registered in settings.json")
+    }
+
+    @Test("pass from project settings when no global settings.json exists")
+    func passFromProjectWithoutGlobalFile() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-noglobal")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: hookSettings(event: "SessionStart"))
+
+        var check = ExternalHookEventExistsCheck(
+            name: "SessionStart hook", section: "Hooks",
+            event: "SessionStart", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg == "registered in settings.local.json")
+    }
+
+    @Test("fail when event is absent from both scopes")
+    func failWhenAbsentFromBothScopes() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-neither")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: hookSettings(event: "PreToolUse"))
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json"))
+        #expect(msg.contains("settings.json"))
+    }
+
+    @Test("ignores project settings when no projectRoot is given")
+    func ignoresProjectSettingsWithoutProjectRoot() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-noroot")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        _ = try makeProjectSettings(in: home, contents: hookSettings(event: "PostToolUse"))
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        // A globally-configured pack has no project root — the project file must not be consulted.
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+    }
+
+    @Test("warn naming the unreadable project file when the event is found globally")
+    func warnWhenProjectSettingsCorruptButFoundGlobally() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-corrupt-fallback")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: "{ not json")
+        try hookSettings(event: "PostToolUse").write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        #expect(msg.contains("registered in settings.json"))
+        #expect(msg.contains("settings.local.json is unreadable"))
+    }
+
+    @Test("fail surfaces the corrupt project file when the event is absent everywhere")
+    func failSurfacesCorruptProjectSettings() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-corrupt-fail")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: "{ not json")
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json is unreadable"))
+    }
+
+    @Test("skip when an optional event is absent from both scopes")
+    func skipWhenOptionalAbsentFromBothScopes() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-optional-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: "{}")
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "SessionStart hook", section: "Hooks",
+            event: "SessionStart", isOptional: true, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case .skip = result else {
+            Issue.record("Expected .skip, got \(result)")
+            return
+        }
+    }
+
+    @Test("fail names both candidates when neither settings file exists")
+    func failWhenNoSettingsFileAnywhere() throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-nofiles")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        try FileManager.default.createDirectory(at: projectRoot, withIntermediateDirectories: true)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PostToolUse hook", section: "Hooks",
+            event: "PostToolUse", isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .fail(msg) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(msg.contains("no settings file found"))
+        #expect(msg.contains("settings.local.json, settings.json"))
+    }
+}
+
+// MARK: - ExternalSettingsKeyEqualsCheck Project Scope (issue #354)
+
+extension ExternalSettingsKeyEqualsCheckSandboxTests {
+    @Test("project value takes precedence over a differing global value")
+    func projectValueOverridesGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-override")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(
+            in: home, contents: #"{ "permissions": { "defaultMode": "deny" } }"#
+        )
+        try #"{ "permissions": { "defaultMode": "allowEdits" } }"#
+            .write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits",
+            projectRoot: projectRoot
+        )
+        check.environment = env
+        // Claude Code applies the project value, so the check must report on that one.
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        #expect(msg.contains("'deny' in settings.local.json"))
+    }
+
+    @Test("pass from project settings.local.json")
+    func passFromProjectSettings() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-project")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(
+            in: home, contents: #"{ "permissions": { "defaultMode": "allowEdits" } }"#
+        )
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits",
+            projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json"))
+    }
+
+    @Test("pass via global fallback when the key is absent from project settings")
+    func passViaGlobalFallback() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-fallback")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: #"{ "env": { "FOO": "bar" } }"#)
+        try #"{ "permissions": { "defaultMode": "allowEdits" } }"#
+            .write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits",
+            projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .pass(msg) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(msg.contains("(settings.json)"))
+    }
+
+    @Test("warn surfaces a corrupt project settings file instead of discarding it")
+    func warnSurfacesCorruptProjectSettings() throws {
+        let home = try makeGlobalTmpDir(label: "settings-key-corrupt")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = try makeProjectSettings(in: home, contents: "{ not json")
+        try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalSettingsKeyEqualsCheck(
+            name: "Default mode", section: "Settings",
+            keyPath: "permissions.defaultMode", expectedValue: "allowEdits",
+            projectRoot: projectRoot
+        )
+        check.environment = env
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json is unreadable"))
+    }
+}

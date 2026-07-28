@@ -24,6 +24,7 @@ enum PackHeuristics {
         findings += unreferenced
         findings += checkMCPDependencyGaps(components: components)
         findings += checkPythonModulePaths(components: components, packPath: packPath)
+        findings += checkDoctorCheckScopeUsage(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
         // (not for the IO-failure warnings that share the same severity).
@@ -330,5 +331,35 @@ enum PackHeuristics {
         }
 
         return findings
+    }
+
+    /// Warns when a doctor check declares `scope` on a type that ignores it.
+    ///
+    /// A silently-ignored field reads as configuration but has no effect, which is how
+    /// `hookEventExists` and `settingsKeyEquals` came to look scope-aware while always reading
+    /// the global settings file.
+    private static func checkDoctorCheckScopeUsage(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
+            + components.flatMap { $0.doctorChecks ?? [] }
+
+        return allChecks
+            .filter { $0.scope != nil && !$0.type.honorsScope }
+            .map { check in
+                let detail = switch check.type {
+                case .hookEventExists, .settingsKeyEquals:
+                    "settings are resolved from the project root automatically"
+                        + " (project settings.local.json, then global settings.json)"
+                default:
+                    "`scope` only applies to checks with a `path`"
+                }
+                return Finding(
+                    severity: .warning,
+                    message: "Doctor check '\(check.name)' declares `scope` but type"
+                        + " `\(check.type.rawValue)` ignores it — \(detail)"
+                )
+            }
     }
 }

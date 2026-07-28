@@ -6,6 +6,7 @@ struct PackHeuristicsTests {
     private func minimalManifest(
         identifier: String = "test-pack",
         components: [ExternalComponentDefinition]? = nil,
+        supplementaryDoctorChecks: [ExternalDoctorCheckDefinition]? = nil,
         ignore: [String]? = nil
     ) -> ExternalPackManifest {
         ExternalPackManifest(
@@ -19,7 +20,7 @@ struct PackHeuristicsTests {
             templates: nil,
             prompts: nil,
             configureProject: nil,
-            supplementaryDoctorChecks: nil,
+            supplementaryDoctorChecks: supplementaryDoctorChecks,
             ignore: ignore
         )
     }
@@ -908,5 +909,98 @@ struct PackHeuristicsTests {
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
         #expect(!findings.contains { $0.message.contains("screenshot.png") && $0.message.contains(PackHeuristics.unreferencedMarker) })
+    }
+
+    // MARK: - Doctor Check Scope Usage (issue #354)
+
+    private func doctorCheck(
+        type: ExternalDoctorCheckType,
+        name: String,
+        scope: ExternalDoctorCheckScope?
+    ) -> ExternalDoctorCheckDefinition {
+        ExternalDoctorCheckDefinition(
+            type: type,
+            name: name,
+            section: nil,
+            command: nil,
+            args: nil,
+            path: type == .fileExists ? ".claude/hooks/run.sh" : nil,
+            pattern: nil,
+            scope: scope,
+            fixCommand: nil,
+            fixScript: nil,
+            event: type == .hookEventExists ? "SessionStart" : nil,
+            keyPath: type == .settingsKeyEquals ? "permissions.defaultMode" : nil,
+            expectedValue: type == .settingsKeyEquals ? "plan" : nil,
+            isOptional: nil
+        )
+    }
+
+    /// A pack with one inert component, so the empty-pack heuristic stays quiet.
+    private func manifestWithDoctorChecks(
+        supplementary: [ExternalDoctorCheckDefinition]? = nil,
+        componentChecks: [ExternalDoctorCheckDefinition]? = nil
+    ) -> ExternalPackManifest {
+        minimalManifest(
+            components: [
+                ExternalComponentDefinition(
+                    id: "test-pack.brew",
+                    displayName: "Brew",
+                    description: "package",
+                    type: .brewPackage,
+                    installAction: .brewInstall(package: "git"),
+                    doctorChecks: componentChecks
+                ),
+            ],
+            supplementaryDoctorChecks: supplementary
+        )
+    }
+
+    @Test("Warns when scope is declared on a check type that ignores it")
+    func warnsOnIgnoredScope() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics-scope")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithDoctorChecks(supplementary: [
+            doctorCheck(type: .hookEventExists, name: "SessionStart hook", scope: .project),
+            doctorCheck(type: .settingsKeyEquals, name: "Plan mode", scope: .global),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("'SessionStart hook' declares `scope`")
+        })
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("'Plan mode' declares `scope`")
+        })
+    }
+
+    @Test("Does not warn about scope on path-based checks or when scope is omitted")
+    func noWarningForValidScopeUsage() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics-scope-ok")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithDoctorChecks(supplementary: [
+            doctorCheck(type: .fileExists, name: "Hook file", scope: .project),
+            doctorCheck(type: .hookEventExists, name: "SessionStart hook", scope: nil),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains { $0.message.contains("declares `scope`") })
+    }
+
+    @Test("Warns for scope on a component-level doctor check")
+    func warnsOnIgnoredScopeInComponentCheck() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics-scope-component")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithDoctorChecks(componentChecks: [
+            doctorCheck(type: .settingsKeyEquals, name: "Plan mode", scope: .project),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("'Plan mode' declares `scope`")
+        })
     }
 }

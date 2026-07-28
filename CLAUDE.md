@@ -108,7 +108,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PromptExecutor.swift` — executes pack prompts (interactive value resolution during sync)
 - `ScriptRunner.swift` — sandboxed script execution for pack scripts
 - `ExternalDoctorCheck.swift` — factory for converting YAML doctor check definitions to `DoctorCheck` instances
-- `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths)
+- `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths, `scope` declared on doctor check types that ignore it)
 
 ### Doctor (`Sources/mcs/Doctor/`)
 - `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution
