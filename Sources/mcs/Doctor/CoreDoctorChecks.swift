@@ -370,10 +370,14 @@ struct ProjectIndexCheck: DoctorCheck {
 struct ExpectedHook {
     let command: String
 
-    /// Declared registration when the command traces back to a component with a
-    /// `HookRegistration`. nil when there is nothing to compare against — hooks a pack ships
-    /// through `settingsFile:` rather than a `hook:` component, or state files written before
-    /// registration verification existed. A nil registration means presence-only verification.
+    /// Declared registration when the command still traces back to a component, which is the
+    /// normal case — sync only records a hook command for a component that had a
+    /// `HookRegistration`, so every freshly written record has one.
+    ///
+    /// nil means the recorded command no longer maps to any component in the pack: the component
+    /// was removed or its destination renamed since the last sync. There is nothing to compare
+    /// against, so the command falls back to presence-only verification rather than being
+    /// reported as drift.
     let registration: HookRegistration?
 }
 
@@ -458,8 +462,10 @@ struct HookSettingsCheck: DoctorCheck {
         if !drift.isEmpty {
             return .warn("\(drift.joined(separator: "; ")) — run 'mcs sync'")
         }
-        let verified = expectations.contains { $0.registration != nil }
-        return .pass(verified ? "all hook commands registered as declared" : "all hook commands present")
+        // Claim "as declared" only when every expectation actually had a declaration — a mixed set
+        // would otherwise assert verification the presence-only entries never got.
+        let allDeclared = !expectations.isEmpty && expectations.allSatisfy { $0.registration != nil }
+        return .pass(allDeclared ? "all hook commands registered as declared" : "all hook commands present")
     }
 
     func fix() -> FixResult {

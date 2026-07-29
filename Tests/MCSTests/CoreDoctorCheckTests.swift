@@ -294,6 +294,42 @@ struct HookSettingsCheckTests {
         }
     }
 
+    @Test("a mixed set does not claim every command was verified against a declaration")
+    func mixedSetDoesNotOverclaim() throws {
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ],
+            "PostToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/orphan.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // The second command no longer maps to a component, so it can only be checked for presence.
+        let check = HookSettingsCheck(
+            expectations: [
+                ExpectedHook(
+                    command: "bash .claude/hooks/gate.sh",
+                    registration: HookRegistration(event: .preToolUse, matcher: "Agent")
+                ),
+                ExpectedHook(command: "bash .claude/hooks/orphan.sh", registration: nil),
+            ],
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case let .pass(msg) = result {
+            #expect(!msg.contains("as declared"))
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
     @Test("failure message reports drift from other expectations too")
     func failMessageIncludesDrift() throws {
         let url = try makeGateSettings(matcher: "\"matcher\": \"Task\"")

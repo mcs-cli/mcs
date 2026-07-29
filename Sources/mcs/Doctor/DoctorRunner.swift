@@ -545,8 +545,11 @@ struct DoctorRunner {
     ) -> [ExpectedHook] {
         var registrationsByCommand: [String: HookRegistration] = [:]
         for component in pack.components {
-            if let command = component.hookCommand(prefix: scope.hookCommandPrefix) {
-                registrationsByCommand[command] = component.hookRegistration
+            // Bind the registration explicitly rather than relying on `hookCommand(prefix:)`
+            // already having required one — same shape the sync-side join uses.
+            if let registration = component.hookRegistration,
+               let command = component.hookCommand(prefix: scope.hookCommandPrefix) {
+                registrationsByCommand[command] = registration
             }
         }
         return artifacts.hookCommands.map {
