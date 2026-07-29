@@ -331,6 +331,55 @@ struct SinglePackLifecycleTests {
             #expect(!removedContent.contains("<!-- mcs:begin test-pack -->"))
         }
     }
+
+    @Test("Hand-edited hook matcher is reported as drift and healed by re-sync")
+    func hookMatcherDriftLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "gate.sh")
+        let pack = MockTechPack(
+            identifier: "gate-pack",
+            displayName: "Gate Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "gate-pack", id: "gate-hook",
+                    source: hookSource, destination: "gate.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse, matcher: "Agent|Task")
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+
+        // === Step 1: Sync installs the hook with the declared matcher ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        let installed = try Settings.load(from: bed.settingsLocalPath)
+        #expect(installed.hooks?["PreToolUse"]?.first?.matcher == "Agent|Task")
+
+        var runner = bed.makeDoctorRunner(registry: registry)
+        let clean = try runner.run()
+        #expect(clean.warnings == 0)
+
+        // === Step 2: Hand-edit the matcher to one that matches nothing ===
+        var drifted = installed
+        drifted.hooks?["PreToolUse"]?[0].matcher = "Task"
+        try drifted.save(to: bed.settingsLocalPath)
+
+        // === Step 3: Doctor reports the drift the old presence-only check missed ===
+        var driftRunner = bed.makeDoctorRunner(registry: registry)
+        let driftSummary = try driftRunner.run()
+        #expect(driftSummary.warnings > clean.warnings)
+        #expect(driftSummary.issues == clean.issues)
+
+        // === Step 4: Re-sync heals it, which is what justifies warn over fail ===
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        let healed = try Settings.load(from: bed.settingsLocalPath)
+        #expect(healed.hooks?["PreToolUse"]?.first?.matcher == "Agent|Task")
+
+        var healedRunner = bed.makeDoctorRunner(registry: registry)
+        #expect(try healedRunner.run().warnings == clean.warnings)
+    }
 }
 
 // MARK: - Scenario 2: Multi-Pack Convergence

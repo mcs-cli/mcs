@@ -118,6 +118,24 @@ struct ComponentDefinition: Identifiable {
     #endif
 }
 
+extension ComponentDefinition {
+    /// The settings `command` string this component registers, or nil when it registers no hook.
+    ///
+    /// Single source of truth for the sync↔doctor join: sync writes this string into
+    /// `settings.local.json` and records it in `PackArtifactRecord.hookCommands`, and doctor
+    /// rebuilds it to match a recorded command back to the component that declared it. Both sides
+    /// must build it identically — a divergence makes every hook look missing.
+    ///
+    /// - Parameter prefix: Scope-dependent prefix, `Constants.HookCommand.projectPrefix` or
+    ///   `.globalPrefix`.
+    func hookCommand(prefix: String) -> String? {
+        guard type == .hookFile, hookRegistration != nil,
+              case let .copyPackFile(_, destination, .hook) = installAction
+        else { return nil }
+        return prefix + destination
+    }
+}
+
 /// How to install a component
 enum ComponentInstallAction {
     case mcpServer(MCPServerConfig)

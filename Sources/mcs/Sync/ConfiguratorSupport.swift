@@ -195,10 +195,8 @@ enum ConfiguratorSupport {
             for component in pack.components {
                 guard !excluded.contains(component.id) else { continue }
 
-                if component.type == .hookFile,
-                   let reg = component.hookRegistration,
-                   case let .copyPackFile(_, destination, .hook) = component.installAction {
-                    let command = "\(hookCommandPrefix)\(destination)"
+                if let reg = component.hookRegistration,
+                   let command = component.hookCommand(prefix: hookCommandPrefix) {
                     if settings.addHookEntry(
                         event: reg.event,
                         command: command,

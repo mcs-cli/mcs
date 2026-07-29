@@ -114,6 +114,21 @@ enum Constants {
         static let validRawValues: Set<String> = Set(allCases.map(\.rawValue))
     }
 
+    // MARK: - Hook Commands
+
+    /// Prefixes for the `command` string a hook component registers in settings.
+    ///
+    /// Sync writes these and doctor reads them back to match a settings entry against the
+    /// component that declared it, so both sides must build the string identically — see
+    /// `ComponentDefinition.hookCommand(prefix:)`.
+    enum HookCommand {
+        /// Project scope — hooks live in `<project>/.claude/hooks/`.
+        static let projectPrefix = "bash .claude/hooks/"
+
+        /// Global scope — hooks live in `~/.claude/hooks/`.
+        static let globalPrefix = "bash ~/.claude/hooks/"
+    }
+
     // MARK: - MCP Scopes
 
     enum MCPScope {

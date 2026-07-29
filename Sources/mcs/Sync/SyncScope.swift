@@ -75,7 +75,7 @@ extension SyncScope {
             isGlobalScope: false,
             syncHint: "mcs sync",
             labelSuffix: "",
-            hookCommandPrefix: "bash .claude/hooks/",
+            hookCommandPrefix: Constants.HookCommand.projectPrefix,
             fileDisplayPrefix: ".claude/"
         )
     }
@@ -95,7 +95,7 @@ extension SyncScope {
             isGlobalScope: true,
             syncHint: "mcs sync --global",
             labelSuffix: " (global)",
-            hookCommandPrefix: "bash ~/.claude/hooks/",
+            hookCommandPrefix: Constants.HookCommand.globalPrefix,
             fileDisplayPrefix: "~/.claude/"
         )
     }

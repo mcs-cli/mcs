@@ -93,10 +93,8 @@ struct ProjectSyncStrategy: SyncStrategy {
                 )
                 artifacts.files.append(contentsOf: result.paths)
                 artifacts.fileHashes.merge(result.hashes) { _, new in new }
-                if component.type == .hookFile,
-                   component.hookRegistration != nil,
-                   fileType == .hook {
-                    artifacts.hookCommands.append("\(scope.hookCommandPrefix)\(destination)")
+                if let hookCommand = component.hookCommand(prefix: scope.hookCommandPrefix) {
+                    artifacts.hookCommands.append(hookCommand)
                 }
                 if !result.paths.isEmpty {
                     output.success("  \(component.displayName) installed")
