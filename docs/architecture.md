@@ -286,7 +286,7 @@ The check joins the commands recorded in `PackArtifactRecord.hookCommands` back 
 
 - **Command absent** — `✗ fail`. The hook is not registered at all.
 - **Registered under a different event, or with a different matcher** — `⚠ warn`. `Settings.addHookEntry` rewrites a differing matcher on the next sync, so `mcs sync` is a remedy that actually works, and a user who narrowed a matcher deliberately is not blocked by a red doctor.
-- **No declaration to compare against** — presence-only, as before. This covers hooks a pack ships through a merged settings file rather than a `hook:` component.
+- **No declaration to compare against** — presence-only, as before. This means the recorded command no longer maps to any component in the pack: it was removed, or its destination renamed, since the last sync.
 
 Extra registrations under events the pack never declared are not policed, and an empty matcher string is treated as an absent one. `timeout`, `async`, and `statusMessage` stay unverified — a wrong value there is cosmetic, whereas `event` and `matcher` are the two whose wrong value silently disables the hook.
 
