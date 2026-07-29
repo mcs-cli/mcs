@@ -102,6 +102,222 @@ struct HookSettingsCheckTests {
             Issue.record("Expected .pass, got \(result)")
         }
     }
+
+    // MARK: - Registration verification
+
+    /// Settings holding `gate.sh` under `PreToolUse` with the given matcher.
+    private func makeGateSettings(matcher: String) throws -> URL {
+        try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { \(matcher), "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ]
+          }
+        }
+        """)
+    }
+
+    private func gateCheck(matcher: String?, settingsPath: URL) -> HookSettingsCheck {
+        HookSettingsCheck(
+            expectations: [ExpectedHook(
+                command: "bash .claude/hooks/gate.sh",
+                registration: HookRegistration(event: .preToolUse, matcher: matcher)
+            )],
+            settingsPath: settingsPath,
+            packName: "test-pack"
+        )
+    }
+
+    @Test("pass when declared event and matcher both match")
+    func passWhenRegistrationMatches() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"Agent|Task\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: "Agent|Task", settingsPath: url).check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("warn when matcher differs, naming both actual and declared")
+    func warnWhenMatcherDiffers() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"Task\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: "Agent|Task", settingsPath: url).check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("'Task'"))
+            #expect(msg.contains("'Agent|Task'"))
+            #expect(msg.contains("mcs sync"))
+        } else {
+            Issue.record("Expected .warn, got \(result)")
+        }
+    }
+
+    @Test("warn when registered under a different event than declared")
+    func warnWhenEventDiffers() throws {
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PostToolUse": [
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: "Agent", settingsPath: url).check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("PostToolUse"))
+            #expect(msg.contains("PreToolUse"))
+        } else {
+            Issue.record("Expected .warn, got \(result)")
+        }
+    }
+
+    @Test("warn when no matcher was declared but settings has one")
+    func warnWhenUndeclaredMatcherPresent() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"Agent\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: nil, settingsPath: url).check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("no matcher"))
+        } else {
+            Issue.record("Expected .warn, got \(result)")
+        }
+    }
+
+    @Test("pass when no matcher was declared and settings has none")
+    func passWhenNoMatcherEitherSide() throws {
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: nil, settingsPath: url).check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("empty matcher in settings is equivalent to no matcher declared")
+    func passWhenEmptyMatcherNormalizes() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: nil, settingsPath: url).check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("pass when one of several groups under the declared event matches")
+    func passWhenAnyGroupMatches() throws {
+        // addHookEntry appends rather than replaces when the command is not the group's first
+        // entry, so a correct registration can coexist with a stale one.
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Task", "hooks": [
+                { "type": "command", "command": "bash .claude/hooks/other.sh" },
+                { "type": "command", "command": "bash .claude/hooks/gate.sh" }
+              ] },
+              { "matcher": "Agent|Task", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: "Agent|Task", settingsPath: url).check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("extra registration under an undeclared event is not policed")
+    func passWhenExtraEventPresent() throws {
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ],
+            "PostToolUse": [
+              { "matcher": "Bash", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let result = gateCheck(matcher: "Agent", settingsPath: url).check()
+        if case .pass = result {
+            // expected
+        } else {
+            Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("a nil registration verifies presence only, whatever the matcher")
+    func passWhenNoRegistrationDeclared() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"anything\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = HookSettingsCheck(
+            expectations: [ExpectedHook(command: "bash .claude/hooks/gate.sh", registration: nil)],
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        if case .pass = check.check() {
+            // expected
+        } else {
+            Issue.record("Expected .pass for presence-only expectation")
+        }
+    }
+
+    @Test("failure message reports drift from other expectations too")
+    func failMessageIncludesDrift() throws {
+        let url = try makeGateSettings(matcher: "\"matcher\": \"Task\"")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = HookSettingsCheck(
+            expectations: [
+                ExpectedHook(
+                    command: "bash .claude/hooks/gate.sh",
+                    registration: HookRegistration(event: .preToolUse, matcher: "Agent|Task")
+                ),
+                ExpectedHook(command: "bash .claude/hooks/absent.sh", registration: nil),
+            ],
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case let .fail(msg) = result {
+            #expect(msg.contains("absent.sh"))
+            #expect(msg.contains("'Agent|Task'"))
+        } else {
+            Issue.record("Expected .fail, got \(result)")
+        }
+    }
 }
 
 // MARK: - SettingsKeysCheck

@@ -366,11 +366,50 @@ struct ProjectIndexCheck: DoctorCheck {
     }
 }
 
-/// Verifies that pack-contributed hook commands are still present in the settings file.
+/// A hook command a pack contributed, paired with what the pack declared for it.
+struct ExpectedHook {
+    let command: String
+
+    /// Declared registration when the command traces back to a component with a
+    /// `HookRegistration`. nil when there is nothing to compare against — hooks a pack ships
+    /// through `settingsFile:` rather than a `hook:` component, or state files written before
+    /// registration verification existed. A nil registration means presence-only verification.
+    let registration: HookRegistration?
+}
+
+/// Verifies that pack-contributed hook commands are still present in the settings file, and that
+/// they are registered the way the declaring component said they should be.
+///
+/// A hook whose matcher does not match any tool Claude Code emits installs cleanly, registers, and
+/// fires for nothing — the symptom is an empty log, which reads as "no problems" rather than
+/// "never ran". Comparing the installed `event` and `matcher` against the component's
+/// `HookRegistration` turns that silence into a reported finding.
+///
+/// Absence is a failure; a registration that differs from what was declared is a warning, because
+/// `Settings.addHookEntry` rewrites a differing matcher on the next sync — so "run 'mcs sync'" is
+/// a remedy that actually works, and a user who narrowed a matcher deliberately is not blocked.
+///
+/// This proves the declared matcher reached settings, **not** that it matches any tool name Claude
+/// Code actually emits. Only a real session transcript proves that.
 struct HookSettingsCheck: DoctorCheck {
-    let commands: [String]
+    let expectations: [ExpectedHook]
     let settingsPath: URL
     let packName: String
+
+    init(expectations: [ExpectedHook], settingsPath: URL, packName: String) {
+        self.expectations = expectations
+        self.settingsPath = settingsPath
+        self.packName = packName
+    }
+
+    /// Presence-only verification, for callers with no declaration to compare against.
+    init(commands: [String], settingsPath: URL, packName: String) {
+        self.init(
+            expectations: commands.map { ExpectedHook(command: $0, registration: nil) },
+            settingsPath: settingsPath,
+            packName: packName
+        )
+    }
 
     var name: String {
         "Hook entries (\(packName))"
@@ -390,21 +429,79 @@ struct HookSettingsCheck: DoctorCheck {
         } catch {
             return .fail("cannot read settings: \(error.localizedDescription)")
         }
-        let allCommands = (settings.hooks ?? [:]).values
-            .flatMap(\.self)
-            .compactMap(\.hooks)
-            .flatMap(\.self)
-            .compactMap(\.command)
-        let commandSet = Set(allCommands)
-        let missing = commands.filter { !commandSet.contains($0) }
-        if missing.isEmpty {
-            return .pass("all hook commands present")
+
+        // One traversal of the hook tree, then a lookup per expectation.
+        let placementsByCommand = settings.hookPlacementsByCommand()
+        var missing: [String] = []
+        var drift: [String] = []
+        for expectation in expectations {
+            let placements = placementsByCommand[expectation.command] ?? []
+            guard !placements.isEmpty else {
+                missing.append(expectation.command)
+                continue
+            }
+            if let registration = expectation.registration,
+               let finding = driftFinding(
+                   command: expectation.command,
+                   registration: registration,
+                   placements: placements
+               ) {
+                drift.append(finding)
+            }
         }
-        return .fail("missing hook commands: \(missing.joined(separator: ", "))")
+
+        if !missing.isEmpty {
+            // Append drift so a failure never swallows findings from other expectations.
+            let details = ["missing hook commands: \(missing.joined(separator: ", "))"] + drift
+            return .fail(details.joined(separator: "; "))
+        }
+        if !drift.isEmpty {
+            return .warn("\(drift.joined(separator: "; ")) — run 'mcs sync'")
+        }
+        let verified = expectations.contains { $0.registration != nil }
+        return .pass(verified ? "all hook commands registered as declared" : "all hook commands present")
     }
 
     func fix() -> FixResult {
-        .notFixable("Run 'mcs sync' to restore hook entries")
+        .notFixable("Run 'mcs sync' to restore or update hook entries")
+    }
+
+    // MARK: - Helpers
+
+    /// Describes how `placements` differ from what was declared, or nil when they satisfy it.
+    ///
+    /// Extra registrations are not policed — a command may appear under events the pack never
+    /// declared, which is the user's business. Only the declared registration must be present.
+    private func driftFinding(
+        command: String,
+        registration: HookRegistration,
+        placements: [Settings.HookPlacement]
+    ) -> String? {
+        let expectedEvent = registration.event.rawValue
+        let underEvent = placements.filter { $0.event == expectedEvent }
+        guard !underEvent.isEmpty else {
+            let actual = Set(placements.map(\.event)).sorted().joined(separator: ", ")
+            return "'\(command)' is registered under \(actual), pack declares \(expectedEvent)"
+        }
+        // Any group under the declared event carrying the declared matcher satisfies this: a
+        // command can legitimately sit in more than one group, since `addHookEntry` matches on the
+        // group's *first* entry and appends rather than replaces when it finds no match.
+        let expected = normalized(registration.matcher)
+        guard !underEvent.contains(where: { normalized($0.matcher) == expected }) else { return nil }
+        let actual = underEvent.map { describe($0.matcher) }.joined(separator: ", ")
+        return "'\(command)' has matcher \(actual) under \(expectedEvent),"
+            + " pack declares \(describe(registration.matcher))"
+    }
+
+    /// Treats an empty matcher as an absent one, so a written `""` is not reported as drift.
+    private func normalized(_ matcher: String?) -> String? {
+        guard let matcher, !matcher.isEmpty else { return nil }
+        return matcher
+    }
+
+    private func describe(_ matcher: String?) -> String {
+        guard let matcher = normalized(matcher) else { return "no matcher" }
+        return "'\(matcher)'"
     }
 }
 

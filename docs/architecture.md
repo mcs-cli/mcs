@@ -278,6 +278,20 @@ MCP server checks follow the same pattern: project-scoped entries (`projects[pat
 
 Settings-reading checks do too. `PluginCheck` and the pack-declared `hookEventExists` / `settingsKeyEquals` checks read `<project>/.claude/settings.local.json` before `~/.claude/settings.json`, which mirrors Claude Code's own precedence — so they report on the configuration actually in effect rather than on one file in isolation. Doctor output names the file that answered, and a settings file that exists but cannot be parsed is always surfaced rather than skipped silently.
 
+### Hook Registration Verification
+
+A hook whose matcher names a tool Claude Code never emits installs cleanly, registers in settings, and fires for nothing. The symptom is an *empty* log, which reads as "no problems found" rather than "never ran" — so `HookSettingsCheck` verifies not just that each pack-contributed hook command is present, but that it is registered the way the declaring component said it should be.
+
+The check joins the commands recorded in `PackArtifactRecord.hookCommands` back to the components that declared them, keyed on the command string that `ComponentDefinition.hookCommand(prefix:)` builds for both sides. Where a component supplied a `HookRegistration`, its `event` and `matcher` are compared against what is installed:
+
+- **Command absent** — `✗ fail`. The hook is not registered at all.
+- **Registered under a different event, or with a different matcher** — `⚠ warn`. `Settings.addHookEntry` rewrites a differing matcher on the next sync, so `mcs sync` is a remedy that actually works, and a user who narrowed a matcher deliberately is not blocked by a red doctor.
+- **No declaration to compare against** — presence-only, as before. This covers hooks a pack ships through a merged settings file rather than a `hook:` component.
+
+Extra registrations under events the pack never declared are not policed, and an empty matcher string is treated as an absent one. `timeout`, `async`, and `statusMessage` stay unverified — a wrong value there is cosmetic, whereas `event` and `matcher` are the two whose wrong value silently disables the hook.
+
+**This proves the declared matcher reached settings, not that it matches any tool Claude Code actually emits.** Only a real session transcript proves that. Tool names are harness implementation details that can change between Claude Code releases, so any matcher naming a specific tool is worth re-checking after an upgrade.
+
 ### Pack Resolution
 
 When determining which packs to check, doctor uses a priority chain:

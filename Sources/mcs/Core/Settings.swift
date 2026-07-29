@@ -151,6 +151,32 @@ struct Settings: Codable {
         removeHookEntry(event: event.rawValue, command: command)
     }
 
+    /// Where a hook command sits in the tree: the event it is registered under, and the matcher
+    /// of the group holding it. `matcher` lives on the group, not the entry.
+    struct HookPlacement {
+        let event: String
+        let matcher: String?
+    }
+
+    /// Indexes every registered hook command by the placements it appears in, in a single pass.
+    ///
+    /// A command can legitimately appear more than once — `addHookEntry` keys on a group's first
+    /// entry and appends rather than replaces when it finds no match — so placements are collected
+    /// rather than collapsed.
+    func hookPlacementsByCommand() -> [String: [HookPlacement]] {
+        var index: [String: [HookPlacement]] = [:]
+        for (event, groups) in hooks ?? [:] {
+            for group in groups {
+                for entry in group.hooks ?? [] {
+                    guard let command = entry.command else { continue }
+                    index[command, default: []]
+                        .append(HookPlacement(event: event, matcher: group.matcher))
+                }
+            }
+        }
+        return index
+    }
+
     // MARK: - Deep Merge
 
     /// Merge `other` into `self`, preserving existing user values.
