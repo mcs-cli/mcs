@@ -233,7 +233,7 @@ extension ExternalPackManifest {
 
     private func validateIgnoreEntries() throws {
         guard let ignore, !ignore.isEmpty else { return }
-        let referenced = PackHeuristics.referencedPaths(from: self)
+        let referenced = referencedPaths
         for entry in ignore {
             if let rejection = Self.classifyIgnoreEntry(entry, referenced: referenced) {
                 throw ManifestError.ignoreEntryLoadBearing(entry: entry, reason: rejection.reason)
@@ -318,7 +318,7 @@ extension ExternalPackManifest {
         rejected: (_ entry: String, _ rejection: IgnoreEntryRejection) -> Void
     ) -> ExternalPackManifest {
         guard let ignore, !ignore.isEmpty else { return self }
-        let referenced = PackHeuristics.referencedPaths(from: self)
+        let referenced = referencedPaths
         var kept: [String] = []
         for entry in ignore {
             if let rejection = Self.classifyIgnoreEntry(entry, referenced: referenced) {
@@ -476,7 +476,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
 ///
 /// Shorthand keys: `brew`, `mcp`, `plugin`, `shell`, `hook`, `command`,
 /// `skill`, `settingsFile`, `gitignore`. See `ShorthandKeys` for details.
-struct ExternalComponentDefinition: Codable {
+struct ExternalComponentDefinition: Codable, Equatable {
     var id: String
     let displayName: String
     let description: String
@@ -748,7 +748,7 @@ enum ExternalInstallActionType: String, Codable {
 }
 
 /// Declarative install action types that can be expressed in YAML.
-enum ExternalInstallAction: Codable {
+enum ExternalInstallAction: Codable, Equatable {
     case mcpServer(ExternalMCPServerConfig)
     case plugin(name: String)
     case brewInstall(package: String)
@@ -844,7 +844,7 @@ enum ExternalInstallAction: Codable {
 // MARK: - MCP Server Config
 
 /// Configuration for an MCP server declared in an external pack manifest.
-struct ExternalMCPServerConfig: Codable {
+struct ExternalMCPServerConfig: Codable, Equatable {
     let name: String
     let command: String?
     let args: [String]?
@@ -882,7 +882,7 @@ enum ExternalScope: String, Codable {
 // MARK: - Copy Pack File Config
 
 /// Configuration for copying a file from the pack into the Claude directory.
-struct ExternalCopyPackFileConfig: Codable {
+struct ExternalCopyPackFileConfig: Codable, Equatable {
     let source: String
     let destination: String
     let fileType: ExternalCopyFileType?
@@ -896,10 +896,86 @@ enum ExternalCopyFileType: String, Codable {
     case generic
 }
 
+// MARK: - Referenced Pack Files
+
+/// Normalize a pack-relative path so equivalent expressions collapse to the same key.
+/// Trims whitespace and strips a leading `./` so `hooks/foo.sh`, `./hooks/foo.sh`, and
+/// ` hooks/foo.sh` are one path.
+///
+/// Private so the only way to obtain a pack-relative path is through the `referencedSource` of
+/// the declaration that owns it — `ignore:` validation, unreferenced-file linting, and
+/// `PackDiff`'s content hashing all key on these strings, and a consumer that normalized
+/// differently would silently drop a file from one side of a comparison.
+private func normalizedPackPath(_ path: String) -> String {
+    var normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    if normalized.hasPrefix("./") { normalized = String(normalized.dropFirst(2)) }
+    return normalized
+}
+
+extension ExternalComponentDefinition {
+    /// The pack-relative file this component installs, normalized, or `nil` when the
+    /// component's install action copies nothing (brew, MCP, plugin, shell, gitignore).
+    var referencedSource: String? {
+        switch installAction {
+        case let .copyPackFile(config):
+            normalizedPackPath(config.source)
+        case let .settingsFile(source):
+            normalizedPackPath(source)
+        case .brewInstall, .gitignoreEntries, .mcpServer, .plugin, .settingsMerge, .shellCommand:
+            nil
+        }
+    }
+
+    /// Whether `source` copies the pack root wholesale (`.`), which would sweep in
+    /// `techpack.yaml`, `LICENSE`, and `README`.
+    var copiesPackRoot: Bool {
+        guard case let .copyPackFile(config) = installAction else { return false }
+        let normalized = normalizedPackPath(config.source)
+        return normalized.isEmpty || normalized == "."
+    }
+}
+
+extension ExternalTemplateDefinition {
+    /// The pack-relative content file backing this template section, normalized.
+    var referencedSource: String {
+        normalizedPackPath(contentFile)
+    }
+}
+
+extension ExternalConfigureProject {
+    /// The pack-relative configure script, normalized.
+    var referencedSource: String {
+        normalizedPackPath(script)
+    }
+}
+
+extension ExternalPackManifest {
+    /// Every pack-relative path this manifest declares, normalized.
+    ///
+    /// Lives on the manifest because it is a property of what the pack declares, not a quality
+    /// heuristic: `validate()` rejects `ignore:` entries that would mask one of these,
+    /// `PackHeuristics` reports the files that are *not* here, and `PackSnapshot` hashes them.
+    var referencedPaths: Set<String> {
+        var paths = Set<String>()
+        for component in components ?? [] {
+            if let source = component.referencedSource {
+                paths.insert(source)
+            }
+        }
+        for template in templates ?? [] {
+            paths.insert(template.referencedSource)
+        }
+        if let configureProject {
+            paths.insert(configureProject.referencedSource)
+        }
+        return paths
+    }
+}
+
 // MARK: - Templates
 
 /// A template contribution declared in an external pack manifest.
-struct ExternalTemplateDefinition: Codable {
+struct ExternalTemplateDefinition: Codable, Equatable {
     var sectionIdentifier: String
     let placeholders: [String]?
     let contentFile: String
@@ -909,14 +985,14 @@ struct ExternalTemplateDefinition: Codable {
 // MARK: - Configure Project
 
 /// Script-based project configuration hook.
-struct ExternalConfigureProject: Codable {
+struct ExternalConfigureProject: Codable, Equatable {
     let script: String
 }
 
 // MARK: - Doctor Checks
 
 /// A declarative doctor check definition for external packs.
-struct ExternalDoctorCheckDefinition: Codable {
+struct ExternalDoctorCheckDefinition: Codable, Equatable {
     let type: ExternalDoctorCheckType
     let name: String
     let section: String?

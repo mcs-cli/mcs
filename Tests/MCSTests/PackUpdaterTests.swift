@@ -119,19 +119,12 @@ struct PackUpdaterTests {
         )
     }
 
-    /// Push a new commit to the remote and return its SHA.
+    /// Push a commit touching only an unreferenced file, and return its SHA.
     private func pushNewCommit(fixture: Fixture) throws -> String {
+        try pushFiles(fixture: fixture, files: ["README.md": "updated-\(UUID().uuidString)"])
+
         let workDir = fixture.tmpDir.appendingPathComponent("work")
         let shell = ShellRunner(environment: Environment(home: fixture.tmpDir))
-
-        try "updated-\(UUID().uuidString)".write(
-            to: workDir.appendingPathComponent("README.md"),
-            atomically: true, encoding: .utf8
-        )
-        try git(shell, ["-C", workDir.path, "add", "."], context: "git add")
-        try git(shell, ["-C", workDir.path, "commit", "-m", "update"], context: "git commit")
-        try git(shell, ["-C", workDir.path, "push"], context: "git push")
-
         let shaResult = shell.run(
             shell.environment.gitPath, arguments: ["-C", workDir.path, "rev-parse", "HEAD"]
         )
@@ -144,16 +137,47 @@ struct PackUpdaterTests {
     /// Replace techpack.yaml with the given content and push it as a new commit. Used to
     /// drive the post-fetch validate/trust paths (manifest-invalid, trust-decline).
     private func pushManifest(fixture: Fixture, manifest: String) throws {
+        try pushFiles(fixture: fixture, files: ["techpack.yaml": manifest])
+    }
+
+    /// Write a set of pack-relative files and push them as one commit.
+    private func pushFiles(fixture: Fixture, files: [String: String]) throws {
         let workDir = fixture.tmpDir.appendingPathComponent("work")
         let shell = ShellRunner(environment: Environment(home: fixture.tmpDir))
 
-        try manifest.write(
-            to: workDir.appendingPathComponent("techpack.yaml"),
-            atomically: true, encoding: .utf8
-        )
+        for (path, contents) in files {
+            let fileURL = workDir.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try contents.write(to: fileURL, atomically: true, encoding: .utf8)
+        }
         try git(shell, ["-C", workDir.path, "add", "."], context: "git add")
-        try git(shell, ["-C", workDir.path, "commit", "-m", "update manifest"], context: "git commit")
+        try git(shell, ["-C", workDir.path, "commit", "-m", "push files"], context: "git commit")
         try git(shell, ["-C", workDir.path, "push"], context: "git push")
+    }
+
+    /// A manifest declaring one skill component backed by `skills/docs.md`.
+    ///
+    /// Skill files are deliberately not trustable content (unlike hooks and commands), so this
+    /// exercises the referenced-file diff without tripping the trust prompt, which cannot be
+    /// answered from a non-interactive test.
+    private func skillManifest(description: String = "A docs skill") -> String {
+        """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: docs
+            description: \(description)
+            type: skill
+            installAction:
+              type: copyPackFile
+              source: skills/docs.md
+              destination: docs.md
+              fileType: skill
+        """
     }
 
     // MARK: - Tests
@@ -190,7 +214,7 @@ struct PackUpdaterTests {
             entry: entry, packPath: packPath, registry: fix.registry
         )
 
-        guard case let .updated(updatedEntry) = result else {
+        guard case let .updated(updatedEntry, _) = result else {
             Issue.record("Expected .updated, got \(result)")
             return
         }
@@ -222,7 +246,7 @@ struct PackUpdaterTests {
             entry: staleEntry, packPath: packPath, registry: fix.registry
         )
 
-        guard case let .updated(updatedEntry) = result else {
+        guard case let .updated(updatedEntry, _) = result else {
             Issue.record("Expected .updated (stale recovery), got \(result)")
             return
         }
@@ -382,6 +406,275 @@ struct PackUpdaterTests {
         #expect(result.isHardFailure)
     }
 
+    // MARK: - Change summary
+
+    @Test("diff reports a component added by the update")
+    func diffReportsAddedComponent() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": skillManifest(),
+            "skills/docs.md": "# Docs\n",
+        ])
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.entries == [
+            PackDiff.Entry(kind: .component, name: "test-pack.docs", change: .added),
+        ])
+    }
+
+    @Test("diff reports a component removed by the update")
+    func diffReportsRemovedComponent() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        // Establish a baseline revision that declares the component...
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": skillManifest(),
+            "skills/docs.md": "# Docs\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        // ...then drop it.
+        try pushManifest(
+            fixture: fix,
+            manifest: """
+            schemaVersion: 1
+            identifier: test-pack
+            displayName: Test Pack
+            description: A test pack
+            """
+        )
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.entries == [
+            PackDiff.Entry(kind: .component, name: "test-pack.docs", change: .removed),
+        ])
+    }
+
+    @Test("diff attributes a content-only edit to the component's file")
+    func diffReportsChangedFileContent() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": skillManifest(),
+            "skills/docs.md": "# Docs\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        // Manifest untouched — only the referenced file's body changes.
+        try pushFiles(fixture: fix, files: ["skills/docs.md": "# Docs\n\nNow with content.\n"])
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.entries == [
+            PackDiff.Entry(
+                kind: .component, name: "test-pack.docs",
+                change: .modified(path: "skills/docs.md")
+            ),
+        ])
+    }
+
+    // The configure-script kind is covered at the pure layer in `PackDiffTests`, not here: a
+    // configure script is trustable content, so any pack declaring one sends `updateGitPack`
+    // through `promptForTrust`, which a non-interactive test can only decline — the `.updated`
+    // case a diff assertion needs is unreachable. `diffReportsChangedFileContent` above
+    // exercises the identical content-hash path through a skill file, which is not trustable.
+
+    @Test("diff reports an edit inside a directory-sourced component")
+    func diffReportsChangedDirectoryContent() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        // `source:` names a directory, which is how skills are commonly shipped. Hashing it as a
+        // file throws, which previously made every edit inside it invisible to the diff.
+        let manifest = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: docs
+            description: A docs skill
+            type: skill
+            installAction:
+              type: copyPackFile
+              source: skills/docs
+              destination: docs
+              fileType: skill
+        """
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": manifest,
+            "skills/docs/SKILL.md": "# Docs\n",
+            "skills/docs/reference.md": "Reference\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        // Manifest untouched; one file *inside* the directory changes.
+        try pushFiles(fixture: fix, files: ["skills/docs/reference.md": "Reference, revised\n"])
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.entries == [
+            PackDiff.Entry(
+                kind: .component, name: "test-pack.docs",
+                change: .modified(path: "skills/docs")
+            ),
+        ])
+    }
+
+    @Test("diff is empty when a directory-sourced component is untouched")
+    func diffEmptyWhenDirectoryContentUnchanged() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        let manifest = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: docs
+            description: A docs skill
+            type: skill
+            installAction:
+              type: copyPackFile
+              source: skills/docs
+              destination: docs
+              fileType: skill
+        """
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": manifest,
+            "skills/docs/SKILL.md": "# Docs\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        _ = try pushNewCommit(fixture: fix) // README only — outside the directory
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.isEmpty == true)
+    }
+
+    @Test("diff is empty when the update touches only unreferenced files")
+    func diffEmptyForUnreferencedFileChange() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        // pushNewCommit only rewrites README.md.
+        _ = try pushNewCommit(fixture: fix)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.isEmpty == true)
+    }
+
+    @Test("update still succeeds with no diff when the previous manifest is unreadable")
+    func diffUnavailableWhenPreviousManifestBroken() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        // Corrupt the *installed* checkout, so the pre-update snapshot cannot be taken.
+        // The fetched revision is fine, so the update itself must still go through.
+        try "not: [valid".write(
+            to: packPath.appendingPathComponent("techpack.yaml"),
+            atomically: true, encoding: .utf8
+        )
+        let newSHA = try pushNewCommit(fixture: fix)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(updatedEntry, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(updatedEntry.commitSHA == newSHA)
+        #expect(diff == nil)
+    }
+
     // MARK: - Helper property contract
 
     @Test("isHardFailure and reason classify every case correctly")
@@ -392,8 +685,8 @@ struct PackUpdaterTests {
         // Non-failures
         #expect(!PackUpdater.UpdateResult.alreadyUpToDate.isHardFailure)
         #expect(PackUpdater.UpdateResult.alreadyUpToDate.reason == nil)
-        #expect(!PackUpdater.UpdateResult.updated(entry).isHardFailure)
-        #expect(PackUpdater.UpdateResult.updated(entry).reason == nil)
+        #expect(!PackUpdater.UpdateResult.updated(entry, diff: nil).isHardFailure)
+        #expect(PackUpdater.UpdateResult.updated(entry, diff: nil).reason == nil)
         #expect(!PackUpdater.UpdateResult.trustDeclined.isHardFailure)
         #expect(PackUpdater.UpdateResult.trustDeclined.reason?.contains("trust not granted") == true)
 

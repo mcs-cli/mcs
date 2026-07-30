@@ -14,19 +14,24 @@ struct GitignoreManager {
 
     /// Resolve the global gitignore file path.
     /// Checks `git config core.excludesFile`, falls back to `~/.config/git/ignore`.
+    ///
+    /// Every path here is anchored to `shell.environment.homeDirectory`, never to the process's
+    /// own home. In production the two are the same (`Environment()` derives from
+    /// `NSHomeDirectory()`), but they differ under an injected `Environment(home:)` — and this
+    /// type both reads *and writes* the file, so resolving the process home let a sandboxed
+    /// caller mutate the real user's global gitignore. `HOME` is passed to `git config` for the
+    /// same reason: `--global` resolves `$HOME/.gitconfig`, which would otherwise escape too.
     func resolveGlobalGitignorePath() -> URL {
+        let home = shell.environment.homeDirectory
         let result = shell.run(
             shell.environment.gitPath,
-            arguments: ["config", "--global", "core.excludesFile"]
+            arguments: ["config", "--global", "core.excludesFile"],
+            additionalEnvironment: ["HOME": home.path]
         )
         if result.succeeded, !result.stdout.isEmpty {
-            let path = result.stdout.replacingOccurrences(
-                of: "~",
-                with: FileManager.default.homeDirectoryForCurrentUser.path
-            )
+            let path = result.stdout.replacingOccurrences(of: "~", with: home.path)
             return URL(fileURLWithPath: path)
         }
-        let home = FileManager.default.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent(".config")
             .appendingPathComponent("git")

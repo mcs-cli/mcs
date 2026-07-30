@@ -15,7 +15,10 @@ struct PackUpdater {
     /// (a systemic failure should be non-zero; a user trust-decline is a zero-exit outcome).
     enum UpdateResult {
         case alreadyUpToDate
-        case updated(PackRegistryFile.PackEntry)
+        /// `diff` is `nil` when the pre-update snapshot could not be taken (e.g. the *previous*
+        /// manifest no longer decodes) — distinct from an empty `PackDiff`, which means the
+        /// update genuinely changed nothing the pack declares.
+        case updated(PackRegistryFile.PackEntry, diff: PackDiff?)
         case fetchFailed(underlying: Error) // git fetch/pull or HEAD read failed (network/transport/ref/broken checkout)
         case manifestInvalid(underlying: Error) // fetched revision's techpack.yaml is unusable
         case trustDeclined // user declined the trust prompt — expected, zero exit
@@ -29,6 +32,12 @@ struct PackUpdater {
         packPath: URL,
         registry: PackRegistryFile
     ) -> UpdateResult {
+        // Must happen before `fetcher.update` resets the working tree — see `PackSnapshot`.
+        // Unconditional, because whether an update will happen is not known until after the
+        // fetch, by which point the old tree is gone. Cost is one YAML decode plus a hash per
+        // referenced file, discarded on the `.alreadyUpToDate` path.
+        let beforeSnapshot = snapshot(packPath: packPath, registry: registry)
+
         let fetchResult: PackFetcher.FetchResult?
         do {
             fetchResult = try fetcher.update(packPath: packPath, ref: entry.ref)
@@ -49,15 +58,36 @@ struct PackUpdater {
             }
             if diskSHA != entry.commitSHA {
                 return validateAndTrust(
-                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA
+                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA,
+                    beforeSnapshot: beforeSnapshot
                 )
             }
             return .alreadyUpToDate
         }
 
         return validateAndTrust(
-            entry: entry, packPath: packPath, registry: registry, commitSHA: result.commitSHA
+            entry: entry, packPath: packPath, registry: registry, commitSHA: result.commitSHA,
+            beforeSnapshot: beforeSnapshot
         )
+    }
+
+    /// Snapshot the pack as it stands on disk, swallowing failure rather than propagating it.
+    ///
+    /// A pack whose *previous* manifest no longer decodes must still be updatable — refusing to
+    /// update it would strand the user on the broken revision, with no way forward short of
+    /// removing and re-adding the pack. Losing the diff is the correct price.
+    ///
+    /// Silent by design: this runs before the fetch, so the outcome may well be
+    /// `.alreadyUpToDate` or `.fetchFailed`, where a note about a missing change summary is
+    /// noise about output that was never going to be printed. `.updated` is the only case that
+    /// wanted a diff, so that is where the absence is worth mentioning.
+    private func snapshot(packPath: URL, registry: PackRegistryFile) -> PackSnapshot? {
+        let loader = ExternalPackLoader(environment: environment, registry: registry)
+        do {
+            return try PackSnapshot.capture(packPath: packPath, loader: loader)
+        } catch {
+            return nil
+        }
     }
 
     /// Validate the manifest, detect new scripts, prompt for trust, and build an updated entry.
@@ -65,7 +95,8 @@ struct PackUpdater {
         entry: PackRegistryFile.PackEntry,
         packPath: URL,
         registry: PackRegistryFile,
-        commitSHA: String
+        commitSHA: String,
+        beforeSnapshot: PackSnapshot?
     ) -> UpdateResult {
         let loader = ExternalPackLoader(environment: environment, registry: registry)
         let manifest: ExternalPackManifest
@@ -129,7 +160,17 @@ struct PackUpdater {
             )
         }
 
-        return .updated(updatedEntry)
+        // The after-snapshot goes through `snapshot` rather than reusing the `manifest` loaded
+        // above because a snapshot is manifest *plus* file hashes, and both sides must be
+        // produced by the same code path for their hash maps to be comparable.
+        // Reporting a missing summary is the caller's job: it has to happen *after* the
+        // "updated" line, which cannot be printed until this result is returned.
+        var diff: PackDiff?
+        if let beforeSnapshot, let after = snapshot(packPath: packPath, registry: registry) {
+            diff = PackDiff.between(old: beforeSnapshot, new: after)
+        }
+
+        return .updated(updatedEntry, diff: diff)
     }
 }
 

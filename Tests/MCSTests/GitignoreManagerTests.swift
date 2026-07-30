@@ -51,6 +51,26 @@ struct GitignoreManagerTests {
         let removed = try manager.removeEntry(".claude")
         #expect(removed == false)
     }
+
+    // MARK: - Sandbox containment
+
+    /// `GitignoreManager` both reads and writes the global gitignore, so resolving the process's
+    /// own home instead of the injected `Environment`'s let any sandboxed caller — including the
+    /// whole test suite — mutate the real user's `~/.config/git/ignore`. It also made
+    /// `GitignoreCheck` report whatever the developer's machine happened to have, which is how a
+    /// doctor test passed locally and on one CI runner while failing on another.
+    @Test("Global gitignore path stays inside the injected environment's home")
+    func resolvedPathIsContainedInEnvironmentHome() throws {
+        let home = try makeGlobalTmpDir(label: "gitignore-containment")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let manager = GitignoreManager(shell: ShellRunner(environment: Environment(home: home)))
+        let resolved = manager.resolveGlobalGitignorePath().resolvingSymlinksInPath().path
+        let sandbox = home.resolvingSymlinksInPath().path
+
+        #expect(resolved.hasPrefix(sandbox))
+        #expect(!resolved.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path))
+    }
 }
 
 /// Test helper that bypasses git config resolution and operates on a fixed file path.

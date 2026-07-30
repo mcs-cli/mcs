@@ -678,10 +678,11 @@ struct UpdatePack: LockedCommand {
             switch result {
             case .alreadyUpToDate:
                 ctx.output.success("\(entry.displayName): already up to date")
-            case let .updated(updatedEntry):
+            case let .updated(updatedEntry, diff):
                 ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
                 ctx.output.success("\(entry.displayName): updated (\(updatedEntry.shortSHA))")
+                ctx.output.packChangeSummary(diff)
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
             case .fetchFailed, .manifestInvalid, .internalError:

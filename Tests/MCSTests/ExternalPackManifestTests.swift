@@ -3458,4 +3458,34 @@ struct ExternalPackManifestTests {
         let manifest = ignoreManifest(ignore: ["techpack.yaml", "  "])
         #expect(manifest.silentlySanitizedIgnoreEntries().ignore == nil)
     }
+
+    // MARK: - Surface drift tripwire
+
+    /// Fails when a stored property is added to or removed from `ExternalPackManifest`.
+    ///
+    /// Two places hand-enumerate the manifest's author-visible surfaces, and neither is checked
+    /// by the compiler when a new one appears — a new surface would silently never be diffed and
+    /// never be treated as load-bearing:
+    ///
+    /// - `PackDiff.Kind` + the `diffKeyed` calls in `PackDiff.between` — what `mcs pack update`
+    ///   reports as changed.
+    /// - `ExternalPackManifest.referencedPaths` — which files `ignore:` validation refuses to
+    ///   mask, `PackHeuristics` treats as referenced, and `PackSnapshot` hashes.
+    /// - `ExternalPackLoader.findMissingReferencedFiles` — a third, narrower traversal.
+    ///
+    /// If this test fails, update those alongside the property, then update the list here.
+    @Test("Manifest surfaces are unchanged — update PackDiff.Kind and referencedPaths if this fails")
+    func manifestSurfacesUnchanged() {
+        let labels = Mirror(reflecting: ignoreManifest(ignore: nil))
+            .children.compactMap(\.label)
+
+        #expect(Set(labels) == [
+            // Metadata — not diffed, references no files.
+            "schemaVersion", "identifier", "displayName", "description", "author", "minMCSVersion",
+            "ignore",
+            // Author-visible surfaces — each needs a `PackDiff.Kind` case, and any that names a
+            // file needs a `referencedSource` folded into `referencedPaths`.
+            "components", "templates", "prompts", "configureProject", "supplementaryDoctorChecks",
+        ])
+    }
 }
