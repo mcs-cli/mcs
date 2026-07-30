@@ -116,6 +116,75 @@ struct SettingsMergeTests {
         #expect(commands.contains("echo new"))
     }
 
+    @Test("An identical duplicate is dropped without being reported")
+    func identicalDuplicateNotReported() {
+        let group = Settings.HookGroup(
+            matcher: "Edit",
+            hooks: [Settings.HookEntry(type: "command", command: "echo hi")]
+        )
+        var base = Settings(hooks: ["PreToolUse": [group]])
+
+        let dropped = base.merge(with: Settings(hooks: ["PreToolUse": [group]]))
+
+        // The ordinary case — a pack repeating a hook it already declared as a component. Nothing
+        // is lost, so warning about it would be noise.
+        #expect(dropped.isEmpty)
+        #expect(base.hooks?["PreToolUse"]?.count == 1)
+    }
+
+    @Test("A dropped group with a differing matcher is reported")
+    func droppedGroupWithDifferingMatcherIsReported() {
+        var base = Settings(hooks: [
+            "PreToolUse": [
+                Settings.HookGroup(
+                    matcher: "Agent|Task",
+                    hooks: [Settings.HookEntry(type: "command", command: "bash gate.sh")]
+                ),
+            ],
+        ])
+        let other = Settings(hooks: [
+            "PreToolUse": [
+                Settings.HookGroup(
+                    matcher: "Task",
+                    hooks: [Settings.HookEntry(type: "command", command: "bash gate.sh")]
+                ),
+            ],
+        ])
+
+        let dropped = base.merge(with: other)
+
+        // Dedup by command keeps the installed group, so the incoming matcher never takes effect.
+        // Silently discarding it is how a hook ends up registered under a matcher nobody asked for.
+        #expect(dropped.count == 1)
+        #expect(dropped.first?.event == "PreToolUse")
+        #expect(dropped.first?.command == "bash gate.sh")
+        #expect(dropped.first?.incomingMatcher == "Task")
+        #expect(dropped.first?.installedMatcher == "Agent|Task")
+        #expect(base.hooks?["PreToolUse"]?.first?.matcher == "Agent|Task")
+    }
+
+    @Test("An empty matcher and an absent matcher are not reported as a conflict")
+    func emptyAndAbsentMatcherAreEquivalent() {
+        var base = Settings(hooks: [
+            "PreToolUse": [
+                Settings.HookGroup(
+                    matcher: nil,
+                    hooks: [Settings.HookEntry(type: "command", command: "bash run.sh")]
+                ),
+            ],
+        ])
+        let other = Settings(hooks: [
+            "PreToolUse": [
+                Settings.HookGroup(
+                    matcher: "",
+                    hooks: [Settings.HookEntry(type: "command", command: "bash run.sh")]
+                ),
+            ],
+        ])
+
+        #expect(base.merge(with: other).isEmpty)
+    }
+
     @Test("Hooks merge across different events")
     func hooksMergeDifferentEvents() {
         var base = Settings(hooks: [

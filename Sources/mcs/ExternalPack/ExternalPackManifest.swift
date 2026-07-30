@@ -269,6 +269,20 @@ extension ExternalPackManifest {
             guard Constants.HookEvent.validRawValues.contains(event) else {
                 throw ManifestError.invalidDoctorCheck(name: check.name, reason: "hookEventExists has unknown event '\(event)'")
             }
+            // An empty matcher is ambiguous: it reads as an assertion but compares equal to a
+            // group with no matcher at all. Omit the key to skip the assertion.
+            if let matcher = check.matcher, matcher.isEmpty {
+                throw ManifestError.invalidDoctorCheck(
+                    name: check.name,
+                    reason: "hookEventExists 'matcher' must be non-empty — omit it to skip the assertion"
+                )
+            }
+            if let command = check.command, command.isEmpty {
+                throw ManifestError.invalidDoctorCheck(
+                    name: check.name,
+                    reason: "hookEventExists 'command' must be non-empty — omit it to skip the assertion"
+                )
+            }
         case .settingsKeyEquals:
             guard let keyPath = check.keyPath, !keyPath.isEmpty else {
                 throw ManifestError.invalidDoctorCheck(name: check.name, reason: "settingsKeyEquals requires non-empty 'keyPath'")
@@ -906,6 +920,8 @@ struct ExternalDoctorCheckDefinition: Codable {
     let type: ExternalDoctorCheckType
     let name: String
     let section: String?
+    /// Meaning depends on `type`: the binary for `commandExists`, the script path for
+    /// `shellScript`, a hook-command substring for `hookEventExists`.
     let command: String?
     let args: [String]?
     let path: String?
@@ -914,9 +930,48 @@ struct ExternalDoctorCheckDefinition: Codable {
     let fixCommand: String?
     let fixScript: String?
     let event: String?
+    /// `hookEventExists` only — the exact matcher a hook group under `event` must carry.
+    let matcher: String?
     let keyPath: String?
     let expectedValue: String?
     let isOptional: Bool?
+
+    /// Written out rather than synthesized so optional fields carry `nil` defaults. Swift gives a
+    /// `let` optional no default in the memberwise init, so every added field would otherwise have
+    /// to be threaded through all 12 construction sites.
+    init(
+        type: ExternalDoctorCheckType,
+        name: String,
+        section: String? = nil,
+        command: String? = nil,
+        args: [String]? = nil,
+        path: String? = nil,
+        pattern: String? = nil,
+        scope: ExternalDoctorCheckScope? = nil,
+        fixCommand: String? = nil,
+        fixScript: String? = nil,
+        event: String? = nil,
+        matcher: String? = nil,
+        keyPath: String? = nil,
+        expectedValue: String? = nil,
+        isOptional: Bool? = nil
+    ) {
+        self.type = type
+        self.name = name
+        self.section = section
+        self.command = command
+        self.args = args
+        self.path = path
+        self.pattern = pattern
+        self.scope = scope
+        self.fixCommand = fixCommand
+        self.fixScript = fixScript
+        self.event = event
+        self.matcher = matcher
+        self.keyPath = keyPath
+        self.expectedValue = expectedValue
+        self.isOptional = isOptional
+    }
 }
 
 enum ExternalDoctorCheckType: String, Codable, CaseIterable {

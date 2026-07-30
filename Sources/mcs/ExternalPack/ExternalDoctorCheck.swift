@@ -287,28 +287,63 @@ struct ExternalShellScriptCheck: DoctorCheck {
 
 // MARK: - Hook Event Exists Check
 
-/// Checks that a hook event is registered in the Claude settings.
+/// Checks that a hook event is registered in the Claude settings, optionally asserting the
+/// matcher and command of the group that registers it.
 /// Pack-contributed replacement for the engine-level HookEventCheck.
 ///
 /// Resolves project `settings.local.json` before global `settings.json` — see
 /// `SettingsReadingCheck`.
+///
+/// `matcher` and `command` exist for hooks a pack ships through a settings file. Those never
+/// reach `PackArtifactRecord.hookCommands` — only `hook:` components do — so `HookSettingsCheck`,
+/// which derives its expectations from `ComponentDefinition.hookRegistration`, cannot see them.
+/// For a `hook:` component, prefer the derived check and leave these fields off: restating the
+/// matcher gives a second copy that can drift from the component's.
+///
+/// This proves the declared matcher reached settings, not that it matches a tool Claude Code
+/// actually emits. Only a real session transcript proves that.
 struct ExternalHookEventExistsCheck: SettingsReadingCheck {
+    /// Whether the registration found under `event` satisfied the declared assertions.
+    private enum Registration {
+        case satisfied
+        /// The event is registered, but not the way the check declared. Carries the detail.
+        case mismatch(String)
+    }
+
     let name: String
     let section: String
     let event: String
+    /// Exact matcher a `HookGroup` under `event` must carry. Compared as a raw string — the regex
+    /// is deliberately not interpreted, since Claude Code is what evaluates it at runtime.
+    var matcher: String?
+    /// Substring a hook command must contain. When `matcher` is also given, both must be satisfied
+    /// by the *same* group — that is what proves the registration belongs to this pack.
+    var commandSubstring: String?
     let isOptional: Bool
     var projectRoot: URL?
     var environment: Environment = .init()
 
     func check() -> CheckResult {
-        let probe: SettingsProbe<Bool> = probeSettings { url in
-            try Settings.load(from: url).hooks?[event] != nil ? true : nil
+        // Any file that registers the event answers the probe, mismatch or not; otherwise a
+        // wrongly-registered project hook would fall through to a correct global one and pass.
+        let probe: SettingsProbe<Registration> = probeSettings { url in
+            guard let groups = try Settings.load(from: url).hooks?[event] else { return nil }
+            return evaluate(groups)
         }
 
         if let match = probe.match {
-            return probe.readErrors.isEmpty
-                ? .pass("registered in \(match.fileName)")
-                : .warn("registered in \(match.fileName)\(probe.errorSuffix)")
+            switch match.value {
+            case .satisfied:
+                return probe.readErrors.isEmpty
+                    ? .pass("registered in \(match.fileName)")
+                    : .warn("registered in \(match.fileName)\(probe.errorSuffix)")
+            case let .mismatch(detail):
+                // Advisory, not fatal: the registration is present, and a user who narrowed a
+                // matcher on purpose should not be blocked by a red doctor.
+                return isOptional
+                    ? .skip("\(detail) in \(match.fileName) (optional)")
+                    : .warn("\(detail) in \(match.fileName)\(probe.errorSuffix)")
+            }
         }
         guard probe.anyFileExisted else {
             return .fail("no settings file found (searched \(searchedFileNames))")
@@ -323,6 +358,45 @@ struct ExternalHookEventExistsCheck: SettingsReadingCheck {
 
     func fix() -> FixResult {
         .notFixable("Run 'mcs sync' to merge settings")
+    }
+
+    // MARK: - Helpers
+
+    /// Judge the groups registered under `event` against the declared matcher and command.
+    private func evaluate(_ groups: [Settings.HookGroup]) -> Registration {
+        guard matcher != nil || commandSubstring != nil else { return .satisfied }
+
+        // Narrow to the groups the matcher admits, then require the command inside one of those —
+        // checking them independently would let two unrelated groups satisfy the pair between them.
+        let candidates: [Settings.HookGroup]
+        if let matcher {
+            let expected = normalizedMatcher(matcher)
+            candidates = groups.filter { normalizedMatcher($0.matcher) == expected }
+            guard !candidates.isEmpty else {
+                let actual = groups.isEmpty
+                    ? "none"
+                    : groups.map { describeMatcher($0.matcher) }.joined(separator: ", ")
+                return .mismatch(
+                    "\(event) has no hook group with matcher \(describeMatcher(matcher)) — found \(actual)"
+                )
+            }
+        } else {
+            candidates = groups
+        }
+
+        if let commandSubstring {
+            let found = candidates.contains { group in
+                (group.hooks ?? []).contains { $0.command?.contains(commandSubstring) == true }
+            }
+            guard found else {
+                let scope = matcher.map { " with matcher \(describeMatcher($0))" } ?? ""
+                return .mismatch(
+                    "\(event) group\(scope) has no hook command containing '\(commandSubstring)'"
+                )
+            }
+        }
+
+        return .satisfied
     }
 }
 
@@ -522,6 +596,10 @@ enum ExternalDoctorCheckFactory {
                 name: definition.name,
                 section: section,
                 event: event,
+                matcher: definition.matcher,
+                // `command` carries a per-type meaning: a script path for `shellScript`, a binary
+                // for `commandExists`, a hook-command substring here.
+                commandSubstring: definition.command,
                 isOptional: definition.isOptional ?? false,
                 projectRoot: projectRoot,
                 environment: environment

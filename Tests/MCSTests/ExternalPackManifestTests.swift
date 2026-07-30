@@ -671,6 +671,67 @@ struct ExternalPackManifestTests {
         }
     }
 
+    @Test("Validation rejects hookEventExists with an empty matcher")
+    func rejectHookEventExistsEmptyMatcher() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: hookEventExists
+            name: Bad hook check
+            section: Hooks
+            event: PreToolUse
+            matcher: ""
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        // An empty matcher compares equal to a group with no matcher at all, so it reads as an
+        // assertion while asserting nothing. Omitting the key is the way to skip it.
+        #expect(throws: ManifestError.self) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Validation accepts hookEventExists with matcher and command")
+    func acceptHookEventExistsWithMatcherAndCommand() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        version: "1.0.0"
+        supplementaryDoctorChecks:
+          - type: hookEventExists
+            name: Gate hook
+            section: Hooks
+            event: PreToolUse
+            matcher: "Agent|Task"
+            command: kb-gate.sh
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file)
+        try manifest.validate()
+
+        let check = manifest.supplementaryDoctorChecks?.first
+        #expect(check?.matcher == "Agent|Task")
+        #expect(check?.command == "kb-gate.sh")
+    }
+
     @Test("Validation rejects settingsKeyEquals without keyPath")
     func rejectSettingsKeyEqualsNoKeyPath() throws {
         let yaml = """

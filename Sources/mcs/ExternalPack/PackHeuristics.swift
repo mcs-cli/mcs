@@ -25,6 +25,7 @@ enum PackHeuristics {
         findings += checkMCPDependencyGaps(components: components)
         findings += checkPythonModulePaths(components: components, packPath: packPath)
         findings += checkDoctorCheckScopeUsage(manifest: manifest, components: components)
+        findings += checkDoctorCheckMatcherUsage(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
         // (not for the IO-failure warnings that share the same severity).
@@ -359,6 +360,29 @@ enum PackHeuristics {
                     severity: .warning,
                     message: "Doctor check '\(check.name)' declares `scope` but type"
                         + " `\(check.type.rawValue)` ignores it — \(detail)"
+                )
+            }
+    }
+
+    /// Warns when a doctor check declares `matcher` on a type that ignores it.
+    ///
+    /// Same failure mode as `checkDoctorCheckScopeUsage`: a field that reads as an assertion but
+    /// is never consulted. There is no equivalent check for `command` — every type that accepts it
+    /// consumes it, only with a different meaning per type.
+    private static func checkDoctorCheckMatcherUsage(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
+            + components.flatMap { $0.doctorChecks ?? [] }
+
+        return allChecks
+            .filter { $0.matcher != nil && $0.type != .hookEventExists }
+            .map { check in
+                Finding(
+                    severity: .warning,
+                    message: "Doctor check '\(check.name)' declares `matcher` but type"
+                        + " `\(check.type.rawValue)` ignores it — `matcher` applies only to `hookEventExists`"
                 )
             }
     }

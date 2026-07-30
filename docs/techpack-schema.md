@@ -433,8 +433,47 @@ Doctor checks verify pack health. They can be defined at two levels:
 | `fileContains` | `path`, `pattern` | Does a file match a regex pattern? |
 | `fileNotContains` | `path`, `pattern` | Does a file NOT match a regex pattern? |
 | `shellScript` | `command` | Run a command. Exit codes: `0`=pass, `1`=fail, `2`=warn, `3`=skip |
-| `hookEventExists` | `event` | Is a hook event registered in settings? |
+| `hookEventExists` | `event` | Is a hook event registered in settings? Optionally asserts `matcher` and `command` — see below |
 | `settingsKeyEquals` | `keyPath`, `expectedValue` | Does a settings JSON key equal a specific value? |
+
+### `matcher` and `command` — `hookEventExists` only
+
+By default `hookEventExists` asks only whether the event key is present. A hook group whose
+matcher matches nothing satisfies that, so the hook can be registered, green in doctor, and never
+fire. Two optional fields tighten it:
+
+```yaml
+- type: hookEventExists
+  name: "Gate hook registered"
+  section: Hooks
+  event: PreToolUse
+  matcher: "Agent|Task"    # a hook group with exactly this matcher must exist
+  command: kb-gate.sh      # that group must run a command containing this substring
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `matcher` | `String` | No | Exact matcher a hook group under `event` must carry |
+| `command` | `String` | No | Substring a hook command must contain |
+
+- `matcher` is compared as a **raw string**. The regex is not interpreted — Claude Code evaluates
+  it at runtime, and mcs does not second-guess what it will match. A written `""` and an absent
+  matcher are treated as the same thing; declaring `matcher: ""` is rejected at validation.
+- When both are given they must be satisfied by the **same** group. Two unrelated groups
+  satisfying one field each does not prove the registration belongs to your pack.
+- A mismatch is a **warning**, not a failure — the registration exists, and a user who narrowed a
+  matcher deliberately should not get a red doctor. An absent event still fails.
+- `isOptional: true` downgrades both the mismatch and the absence to a skip.
+
+**Use these for hooks you ship through a settings file.** A hook declared as a component
+(`hook:` with `hookEvent`) already gets event and matcher verification automatically, derived from
+the component itself — restating the matcher here just creates a second copy that can drift from
+the first.
+
+**What this does not prove:** that the matcher matches a tool Claude Code actually emits. It proves
+the string you declared reached the settings file. Tool names are harness details that change
+between releases — the sub-agent spawn tool is `Agent` in current Claude Code, and a matcher of
+`Task` alone matches nothing. Only a real session transcript settles that.
 
 ### `scope` — path-based checks only
 
