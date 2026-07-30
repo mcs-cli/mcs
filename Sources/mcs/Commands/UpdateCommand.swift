@@ -280,9 +280,7 @@ struct UpdateCommand: LockedCommand {
                 registryFile.register(updatedEntry, in: &updatedData)
                 anyUpdated = true
                 output.success("  \(entry.displayName): \(entry.shortSHA) → \(updatedEntry.shortSHA)")
-                if let diff, !diff.isEmpty {
-                    output.plain(diff.render(style: output.style, indent: "    "))
-                }
+                output.packChangeSummary(diff, indent: "    ")
             case .trustDeclined:
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)

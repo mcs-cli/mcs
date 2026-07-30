@@ -27,9 +27,8 @@ struct PackSnapshot {
         let manifest = try loader.validate(at: packPath)
         var hashes: [String: String] = [:]
         for path in manifest.referencedPaths {
-            let fileURL = packPath.appendingPathComponent(path)
             do {
-                hashes[path] = try FileHasher.sha256(of: fileURL)
+                hashes[path] = try contentHash(of: path, in: packPath)
             } catch {
                 // Absent or unreadable: leave the key out. Its absence on one side and presence
                 // on the other is exactly the "changed" signal we want, and a manifest that
@@ -38,6 +37,33 @@ struct PackSnapshot {
             }
         }
         return PackSnapshot(manifest: manifest, fileHashes: hashes)
+    }
+
+    /// Content hash for one referenced path, which may be a file *or* a directory.
+    ///
+    /// `copyPackFile` accepts either — `ComponentExecutor` branches on `isDirectory` the same
+    /// way, and skills in particular are commonly shipped as a directory. Hashing a directory
+    /// with `FileHasher.sha256(of:)` throws, which previously made every edit inside a
+    /// directory-sourced component invisible to the diff.
+    ///
+    /// Directories fold their per-file hashes into one digest over `path:hash` pairs sorted by
+    /// path, so the result is order-independent and changes when any contained file is added,
+    /// removed, or edited. Unreadable files contribute their path, so a file becoming
+    /// unreadable still registers as a change rather than vanishing from the digest.
+    private static func contentHash(of path: String, in packPath: URL) throws -> String {
+        let url = packPath.appendingPathComponent(path)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            throw MCSError.fileOperationFailed(path: url.path, reason: "referenced path does not exist")
+        }
+        guard isDirectory.boolValue else {
+            return try FileHasher.sha256(of: url)
+        }
+
+        let result = try FileHasher.directoryFileHashes(at: url)
+        let entries = result.hashes.map { "\($0.relativePath):\($0.hash)" }
+            + result.failures.map { "\($0.relativePath):<unreadable>" }
+        return FileHasher.sha256(data: Data(entries.sorted().joined(separator: "\n").utf8))
     }
 }
 
@@ -257,5 +283,24 @@ struct PackDiff: Equatable {
             lines.append("\(indent)\(style.dim)… and \(hidden) more change\(hidden == 1 ? "" : "s")\(style.reset)")
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+extension CLIOutput {
+    /// Print a pack's change summary beneath the "updated" line the caller just emitted.
+    ///
+    /// Both the diff and the "unavailable" notice are printed here, by the caller, so they land
+    /// *after* the success line. Emitting the notice from `PackUpdater` put it before, since the
+    /// result has to be returned before the caller can announce the update.
+    ///
+    /// `nil` means the snapshot could not be taken; an empty diff means the update changed
+    /// nothing the pack declares, which needs no output at all.
+    func packChangeSummary(_ diff: PackDiff?, indent: String = "  ") {
+        guard let diff else {
+            dimmed("\(indent)no change summary available")
+            return
+        }
+        guard !diff.isEmpty else { return }
+        plain(diff.render(style: style, indent: indent))
     }
 }

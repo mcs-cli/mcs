@@ -682,9 +682,7 @@ struct UpdatePack: LockedCommand {
                 ctx.registry.register(updatedEntry, in: &updatedData)
                 updatedCount += 1
                 ctx.output.success("\(entry.displayName): updated (\(updatedEntry.shortSHA))")
-                if let diff, !diff.isEmpty {
-                    ctx.output.plain(diff.render(style: ctx.output.style))
-                }
+                ctx.output.packChangeSummary(diff)
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
             case .fetchFailed, .manifestInvalid, .internalError:

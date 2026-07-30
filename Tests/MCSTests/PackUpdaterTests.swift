@@ -522,6 +522,109 @@ struct PackUpdaterTests {
     // case a diff assertion needs is unreachable. `diffReportsChangedFileContent` above
     // exercises the identical content-hash path through a skill file, which is not trustable.
 
+    @Test("diff reports an edit inside a directory-sourced component")
+    func diffReportsChangedDirectoryContent() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        // `source:` names a directory, which is how skills are commonly shipped. Hashing it as a
+        // file throws, which previously made every edit inside it invisible to the diff.
+        let manifest = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: docs
+            description: A docs skill
+            type: skill
+            installAction:
+              type: copyPackFile
+              source: skills/docs
+              destination: docs
+              fileType: skill
+        """
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": manifest,
+            "skills/docs/SKILL.md": "# Docs\n",
+            "skills/docs/reference.md": "Reference\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        // Manifest untouched; one file *inside* the directory changes.
+        try pushFiles(fixture: fix, files: ["skills/docs/reference.md": "Reference, revised\n"])
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.entries == [
+            PackDiff.Entry(
+                kind: .component, name: "test-pack.docs",
+                change: .modified(path: "skills/docs")
+            ),
+        ])
+    }
+
+    @Test("diff is empty when a directory-sourced component is untouched")
+    func diffEmptyWhenDirectoryContentUnchanged() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        let manifest = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: docs
+            description: A docs skill
+            type: skill
+            installAction:
+              type: copyPackFile
+              source: skills/docs
+              destination: docs
+              fileType: skill
+        """
+
+        try pushFiles(fixture: fix, files: [
+            "techpack.yaml": manifest,
+            "skills/docs/SKILL.md": "# Docs\n",
+        ])
+        let baseline = fix.updater.updateGitPack(
+            entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry
+        )
+        guard case let .updated(baselineEntry, _) = baseline else {
+            Issue.record("Baseline update failed: \(baseline)")
+            return
+        }
+
+        _ = try pushNewCommit(fixture: fix) // README only — outside the directory
+
+        let result = fix.updater.updateGitPack(
+            entry: baselineEntry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(_, diff) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(diff?.isEmpty == true)
+    }
+
     @Test("diff is empty when the update touches only unreferenced files")
     func diffEmptyForUnreferencedFileChange() throws {
         let fix = try makeFixture()

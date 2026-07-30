@@ -163,12 +163,11 @@ struct PackUpdater {
         // The after-snapshot goes through `snapshot` rather than reusing the `manifest` loaded
         // above because a snapshot is manifest *plus* file hashes, and both sides must be
         // produced by the same code path for their hash maps to be comparable.
-        let diff: PackDiff?
+        // Reporting a missing summary is the caller's job: it has to happen *after* the
+        // "updated" line, which cannot be printed until this result is returned.
+        var diff: PackDiff?
         if let beforeSnapshot, let after = snapshot(packPath: packPath, registry: registry) {
             diff = PackDiff.between(old: beforeSnapshot, new: after)
-        } else {
-            diff = nil
-            output.dimmed("\(entry.displayName): no change summary available")
         }
 
         return .updated(updatedEntry, diff: diff)
