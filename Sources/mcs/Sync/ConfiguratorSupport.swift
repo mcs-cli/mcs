@@ -178,6 +178,12 @@ enum ConfiguratorSupport {
     /// Shared by both project and global `composeSettings` — the inner loop is identical.
     /// The hook command prefix is parameterized via `hookCommandPrefix`.
     ///
+    /// Runs in two passes on purpose. `Settings.merge` deduplicates hook groups by command and
+    /// keeps the entry already present, so whichever source lands first wins. Derived entries must
+    /// be that source: they carry the engine's own scope-correct command path, and they are the
+    /// only ones doctor can verify against a `HookRegistration`. A single pass would decide it by
+    /// the order components happen to appear in `techpack.yaml`.
+    ///
     /// - Returns: Whether any content was added and the per-pack contributed settings keys.
     static func mergePackComponentsIntoSettings(
         packs: [any TechPack],
@@ -190,50 +196,62 @@ enum ConfiguratorSupport {
         var hasContent = false
         var contributedKeys: [String: [String]] = [:]
 
-        for pack in packs {
+        let included: [(pack: any TechPack, component: ComponentDefinition)] = packs.flatMap { pack in
             let excluded = excludedComponents[pack.identifier] ?? []
-            for component in pack.components {
-                guard !excluded.contains(component.id) else { continue }
+            return pack.components
+                .filter { !excluded.contains($0.id) }
+                .map { (pack, $0) }
+        }
 
-                if let reg = component.hookRegistration,
-                   let command = component.hookCommand(prefix: hookCommandPrefix) {
-                    if settings.addHookEntry(
-                        event: reg.event,
-                        command: command,
-                        matcher: reg.matcher,
-                        timeout: reg.timeout,
-                        isAsync: reg.isAsync,
-                        statusMessage: reg.statusMessage
-                    ) {
-                        hasContent = true
-                    }
-                }
-
-                if case let .plugin(name) = component.installAction {
-                    let ref = PluginRef(name)
-                    var plugins = settings.enabledPlugins ?? [:]
-                    if plugins[ref.bareName] == nil {
-                        plugins[ref.bareName] = true
-                    }
-                    settings.enabledPlugins = plugins
+        // Pass 1: entries derived from component definitions.
+        for (pack, component) in included {
+            if let reg = component.hookRegistration,
+               let command = component.hookCommand(prefix: hookCommandPrefix) {
+                if settings.addHookEntry(
+                    event: reg.event,
+                    command: command,
+                    matcher: reg.matcher,
+                    timeout: reg.timeout,
+                    isAsync: reg.isAsync,
+                    statusMessage: reg.statusMessage
+                ) {
                     hasContent = true
-                    contributedKeys[pack.identifier, default: []].append("enabledPlugins.\(ref.bareName)")
                 }
+            }
 
-                if case let .settingsMerge(source) = component.installAction, let source {
-                    do {
-                        let packSettings = try Settings.load(from: source, substituting: resolvedValues)
-                        if !packSettings.extraJSON.isEmpty {
-                            contributedKeys[pack.identifier, default: []].append(contentsOf: packSettings.extraJSON.keys)
-                        }
-                        settings.merge(with: packSettings)
-                        hasContent = true
-                    } catch {
-                        output.warn(
-                            "Could not load settings from \(pack.displayName)/\(source.lastPathComponent): \(error.localizedDescription)"
-                        )
-                    }
+            if case let .plugin(name) = component.installAction {
+                let ref = PluginRef(name)
+                var plugins = settings.enabledPlugins ?? [:]
+                if plugins[ref.bareName] == nil {
+                    plugins[ref.bareName] = true
                 }
+                settings.enabledPlugins = plugins
+                hasContent = true
+                contributedKeys[pack.identifier, default: []].append("enabledPlugins.\(ref.bareName)")
+            }
+        }
+
+        // Pass 2: pack-supplied settings files, merged on top of the derived entries.
+        for (pack, component) in included {
+            guard case let .settingsMerge(source) = component.installAction, let source else { continue }
+            do {
+                let packSettings = try Settings.load(from: source, substituting: resolvedValues)
+                if !packSettings.extraJSON.isEmpty {
+                    contributedKeys[pack.identifier, default: []].append(contentsOf: packSettings.extraJSON.keys)
+                }
+                for dropped in settings.merge(with: packSettings) {
+                    output.warn(
+                        "\(pack.displayName): hook group for '\(dropped.command)' under \(dropped.event)"
+                            + " was not merged — \(source.lastPathComponent) declares matcher"
+                            + " \(describeMatcher(dropped.incomingMatcher)) but"
+                            + " \(describeMatcher(dropped.installedMatcher)) is already registered"
+                    )
+                }
+                hasContent = true
+            } catch {
+                output.warn(
+                    "Could not load settings from \(pack.displayName)/\(source.lastPathComponent): \(error.localizedDescription)"
+                )
             }
         }
 

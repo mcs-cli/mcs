@@ -538,6 +538,34 @@ struct ExternalDoctorCheckTests {
         #expect(check.section == "Hooks")
     }
 
+    @Test("Factory forwards matcher and command to hookEventExists check")
+    func factoryForwardsHookMatcherAndCommand() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let definition = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Gate hook",
+            section: "Hooks",
+            command: "kb-gate.sh",
+            event: "PreToolUse",
+            matcher: "Agent|Task"
+        )
+
+        let check = ExternalDoctorCheckFactory.makeCheck(
+            from: definition,
+            packPath: tmpDir,
+            projectRoot: nil,
+            scriptRunner: makeScriptRunner()
+        )
+
+        // `command` means something different per check type; this asserts it lands on the hook
+        // check as a command substring rather than being ignored or read as a script path.
+        let hookCheck = try #require(check as? ExternalHookEventExistsCheck)
+        #expect(hookCheck.matcher == "Agent|Task")
+        #expect(hookCheck.commandSubstring == "kb-gate.sh")
+    }
+
     @Test("Factory creates settingsKeyEquals check from definition")
     func factoryCreatesSettingsKeyEqualsCheck() throws {
         let tmpDir = try makeTmpDir()

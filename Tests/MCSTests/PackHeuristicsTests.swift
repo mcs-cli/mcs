@@ -916,7 +916,8 @@ struct PackHeuristicsTests {
     private func doctorCheck(
         type: ExternalDoctorCheckType,
         name: String,
-        scope: ExternalDoctorCheckScope?
+        scope: ExternalDoctorCheckScope? = nil,
+        matcher: String? = nil
     ) -> ExternalDoctorCheckDefinition {
         ExternalDoctorCheckDefinition(
             type: type,
@@ -930,6 +931,7 @@ struct PackHeuristicsTests {
             fixCommand: nil,
             fixScript: nil,
             event: type == .hookEventExists ? "SessionStart" : nil,
+            matcher: matcher,
             keyPath: type == .settingsKeyEquals ? "permissions.defaultMode" : nil,
             expectedValue: type == .settingsKeyEquals ? "plan" : nil,
             isOptional: nil
@@ -1002,5 +1004,34 @@ struct PackHeuristicsTests {
         #expect(findings.contains {
             $0.severity == .warning && $0.message.contains("'Plan mode' declares `scope`")
         })
+    }
+
+    @Test("Warns when matcher is declared on a check type that ignores it")
+    func warnsOnIgnoredMatcher() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics-matcher")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithDoctorChecks(supplementary: [
+            doctorCheck(type: .fileExists, name: "Hook file", matcher: "Agent"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("'Hook file' declares `matcher`")
+        })
+    }
+
+    @Test("Does not warn about matcher on hookEventExists or when matcher is omitted")
+    func noWarningForValidMatcherUsage() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics-matcher-ok")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = manifestWithDoctorChecks(supplementary: [
+            doctorCheck(type: .hookEventExists, name: "SessionStart hook", matcher: "Agent"),
+            doctorCheck(type: .fileExists, name: "Hook file"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+
+        #expect(!findings.contains { $0.message.contains("declares `matcher`") })
     }
 }

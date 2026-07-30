@@ -380,6 +380,111 @@ struct SinglePackLifecycleTests {
         var healedRunner = bed.makeDoctorRunner(registry: registry)
         #expect(try healedRunner.run().warnings == clean.warnings)
     }
+
+    @Test("Declarative matcher check covers a hook shipped through a settings file")
+    func settingsFileHookMatcherLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // A hook that arrives via `settingsFile:` rather than a `hook:` component never reaches
+        // PackArtifactRecord.hookCommands, so HookSettingsCheck cannot see it at all. The
+        // declarative assertion is the only verification available for this shape.
+        let settingsSource = try bed.makeSettingsSource(content: """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "Agent|Task",
+                "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }]
+              }
+            ]
+          }
+        }
+        """)
+        var matcherCheck = ExternalHookEventExistsCheck(
+            name: "Gate hook registered", section: "Hooks",
+            event: "PreToolUse", matcher: "Agent|Task", commandSubstring: "gate.sh",
+            isOptional: false, projectRoot: bed.project
+        )
+        matcherCheck.environment = bed.env
+
+        let pack = MockTechPack(
+            identifier: "settings-hook-pack",
+            displayName: "Settings Hook Pack",
+            components: [
+                bed.settingsComponent(pack: "settings-hook-pack", id: "settings", source: settingsSource),
+            ],
+            supplementaryDoctorChecks: [matcherCheck]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // === Step 1: Sync merges the settings file, doctor confirms the matcher landed ===
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        let installed = try Settings.load(from: bed.settingsLocalPath)
+        #expect(installed.hooks?["PreToolUse"]?.first?.matcher == "Agent|Task")
+
+        var runner = bed.makeDoctorRunner(registry: registry)
+        let clean = try runner.run()
+        #expect(clean.warnings == 0)
+
+        // === Step 2: Hand-edit the matcher to one that matches nothing ===
+        var drifted = installed
+        drifted.hooks?["PreToolUse"]?[0].matcher = "Task"
+        try drifted.save(to: bed.settingsLocalPath)
+
+        var driftRunner = bed.makeDoctorRunner(registry: registry)
+        let driftSummary = try driftRunner.run()
+        #expect(driftSummary.warnings > clean.warnings)
+        // Advisory, not fatal — the registration is present, just not as declared.
+        #expect(driftSummary.issues == clean.issues)
+    }
+
+    @Test("Derived hook entry wins over a settings-file copy regardless of component order")
+    func derivedHookWinsOverSettingsFileInEitherOrder() throws {
+        // Precedence rationale lives on `ConfiguratorSupport.mergePackComponentsIntoSettings`.
+        // Specific to this test: hook destinations are always namespaced under <pack-id>/, so a
+        // settings file collides with a derived entry only by spelling out that same namespaced
+        // path — which is what this pack does, to force the collision rather than hope for it.
+        for settingsFirst in [false, true] {
+            let bed = try LifecycleTestBed()
+            defer { bed.cleanup() }
+
+            let hookSource = try bed.makeHookSource(name: "gate.sh")
+            let settingsSource = try bed.makeSettingsSource(content: """
+            {
+              "hooks": {
+                "PreToolUse": [
+                  {
+                    "matcher": "Task",
+                    "hooks": [{ "type": "command", "command": "bash .claude/hooks/order-pack/gate.sh" }]
+                  }
+                ]
+              }
+            }
+            """)
+
+            let hook = bed.hookComponent(
+                pack: "order-pack", id: "gate-hook",
+                source: hookSource, destination: "gate.sh",
+                hookRegistration: HookRegistration(event: .preToolUse, matcher: "Agent|Task")
+            )
+            let settings = bed.settingsComponent(pack: "order-pack", id: "settings", source: settingsSource)
+
+            let pack = MockTechPack(
+                identifier: "order-pack",
+                displayName: "Order Pack",
+                components: settingsFirst ? [settings, hook] : [hook, settings]
+            )
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+                .configure(packs: [pack], confirmRemovals: false)
+
+            let composed = try Settings.load(from: bed.settingsLocalPath)
+            let groups = composed.hooks?["PreToolUse"] ?? []
+            // The component's matcher is the one doctor can verify, so it must be the survivor.
+            #expect(groups.count == 1, "settingsFirst=\(settingsFirst)")
+            #expect(groups.first?.matcher == "Agent|Task", "settingsFirst=\(settingsFirst)")
+        }
+    }
 }
 
 // MARK: - Scenario 2: Multi-Pack Convergence

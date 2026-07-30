@@ -22,6 +22,27 @@ struct Settings: Codable {
         var hooks: [HookEntry]?
     }
 
+    /// A hook group `merge(with:)` discarded because an entry with the same command was already
+    /// registered under that event, and the two disagreed on the matcher.
+    ///
+    /// Dedup by command is deliberate — without it the same hook would register twice and fire
+    /// twice. Reporting the drop is what keeps it from being silent: the surviving matcher is not
+    /// the one the incoming settings asked for, and a matcher that never matches disables a hook
+    /// without any other symptom.
+    ///
+    /// The case that bites is the global scope, where composition starts from the user's existing
+    /// `~/.claude/settings.json`: a hand-written hook there wins over a pack shipping the same
+    /// command with a different matcher. Project scope composes from empty, so collisions are
+    /// limited to two packs' settings files, or a settings file naming a derived hook's path.
+    struct DroppedHookGroup {
+        let event: String
+        let command: String
+        /// The matcher on the group that lost.
+        let incomingMatcher: String?
+        /// The matcher on the group already present, which stays.
+        let installedMatcher: String?
+    }
+
     struct HookEntry: Codable {
         var type: String?
         var command: String?
@@ -184,19 +205,44 @@ struct Settings: Codable {
     /// - Plugin dict: merged at key level (existing keys win).
     /// - Extra JSON: generic merge — JSON objects get key-level merge,
     ///   scalars/arrays use "existing wins" semantics.
-    mutating func merge(with other: Settings) {
+    ///
+    /// - Returns: The hook groups dropped by deduplication whose matcher disagreed with the group
+    ///   that survived. An identical duplicate is the ordinary case and is not reported. Callers
+    ///   with somewhere to report to should surface these; the result is discardable because most
+    ///   callers merge settings that cannot collide.
+    @discardableResult
+    mutating func merge(with other: Settings) -> [DroppedHookGroup] {
+        var dropped: [DroppedHookGroup] = []
+
         // Hooks: deduplicate by command
         if let otherHooks = other.hooks {
             var merged = hooks ?? [:]
             for (event, otherGroups) in otherHooks {
                 var existing = merged[event] ?? []
-                let existingCommands = Set(
-                    existing.compactMap { $0.hooks?.first?.command }
-                )
+                // First group wins per command, matching the append-only behavior below. Keyed to
+                // the whole group rather than its matcher, so a group with no matcher stays
+                // distinguishable from a command that has not been seen at all.
+                var installedByCommand: [String: HookGroup] = [:]
+                for group in existing {
+                    guard let command = group.hooks?.first?.command else { continue }
+                    if installedByCommand[command] == nil { installedByCommand[command] = group }
+                }
                 for group in otherGroups {
-                    if let command = group.hooks?.first?.command,
-                       !existingCommands.contains(command) {
+                    guard let command = group.hooks?.first?.command else { continue }
+                    guard let installed = installedByCommand[command] else {
                         existing.append(group)
+                        installedByCommand[command] = group
+                        continue
+                    }
+                    if normalizedMatcher(group.matcher) != normalizedMatcher(installed.matcher) {
+                        dropped.append(
+                            DroppedHookGroup(
+                                event: event,
+                                command: command,
+                                incomingMatcher: group.matcher,
+                                installedMatcher: installed.matcher
+                            )
+                        )
                     }
                 }
                 merged[event] = existing
@@ -232,6 +278,8 @@ struct Settings: Codable {
                 extraJSON[key] = valueData
             }
         }
+
+        return dropped
     }
 
     // MARK: - Stale key removal
@@ -411,4 +459,23 @@ struct Settings: Codable {
         }
         // Re-serialization failure: keep existing value (no-op)
     }
+}
+
+// MARK: - Hook Matcher Semantics
+
+/// Treats an empty matcher as an absent one.
+///
+/// A `HookGroup` with `matcher: ""` and one with no `matcher` key select the same tools, so
+/// everything that compares matchers must agree on that or it reports drift that does not exist.
+/// Shared by `Settings.merge`, `HookSettingsCheck`, and `ExternalHookEventExistsCheck` — the three
+/// places that reason about matcher equality — so their verdicts cannot diverge.
+func normalizedMatcher(_ matcher: String?) -> String? {
+    guard let matcher, !matcher.isEmpty else { return nil }
+    return matcher
+}
+
+/// Renders a matcher for user-facing output, so all three call sites phrase it identically.
+func describeMatcher(_ matcher: String?) -> String {
+    guard let matcher = normalizedMatcher(matcher) else { return "no matcher" }
+    return "'\(matcher)'"
 }

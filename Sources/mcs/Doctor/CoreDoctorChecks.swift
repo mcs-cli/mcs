@@ -492,22 +492,11 @@ struct HookSettingsCheck: DoctorCheck {
         // Any group under the declared event carrying the declared matcher satisfies this: a
         // command can legitimately sit in more than one group, since `addHookEntry` matches on the
         // group's *first* entry and appends rather than replaces when it finds no match.
-        let expected = normalized(registration.matcher)
-        guard !underEvent.contains(where: { normalized($0.matcher) == expected }) else { return nil }
-        let actual = underEvent.map { describe($0.matcher) }.joined(separator: ", ")
+        let expected = normalizedMatcher(registration.matcher)
+        guard !underEvent.contains(where: { normalizedMatcher($0.matcher) == expected }) else { return nil }
+        let actual = underEvent.map { describeMatcher($0.matcher) }.joined(separator: ", ")
         return "'\(command)' has matcher \(actual) under \(expectedEvent),"
-            + " pack declares \(describe(registration.matcher))"
-    }
-
-    /// Treats an empty matcher as an absent one, so a written `""` is not reported as drift.
-    private func normalized(_ matcher: String?) -> String? {
-        guard let matcher, !matcher.isEmpty else { return nil }
-        return matcher
-    }
-
-    private func describe(_ matcher: String?) -> String {
-        guard let matcher = normalized(matcher) else { return "no matcher" }
-        return "'\(matcher)'"
+            + " pack declares \(describeMatcher(registration.matcher))"
     }
 }
 

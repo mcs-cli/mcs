@@ -1459,3 +1459,210 @@ extension ExternalSettingsKeyEqualsCheckSandboxTests {
         #expect(msg.contains("settings.local.json is unreadable"))
     }
 }
+
+// MARK: - ExternalHookEventExistsCheck Matcher / Command Assertions (issue #355)
+
+extension ExternalHookEventExistsCheckSandboxTests {
+    /// Two groups under PreToolUse: one matching `Agent|Task` running the gate, one matching
+    /// `Bash` running something else. Enough shape to tell "same group" from "any group".
+    private static let twoGroupSettings = """
+    {
+      "hooks": {
+        "PreToolUse": [
+          {
+            "matcher": "Agent|Task",
+            "hooks": [{ "type": "command", "command": "bash .claude/hooks/kb-gate.sh" }]
+          },
+          {
+            "matcher": "Bash",
+            "hooks": [{ "type": "command", "command": "bash .claude/hooks/audit.sh" }]
+          }
+        ]
+      }
+    }
+    """
+
+    private func makeCheck(
+        in home: URL,
+        settings: String,
+        matcher: String? = nil,
+        command: String? = nil,
+        isOptional: Bool = false
+    ) throws -> ExternalHookEventExistsCheck {
+        let env = Environment(home: home)
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+        var check = ExternalHookEventExistsCheck(
+            name: "PreToolUse hook", section: "Hooks",
+            event: "PreToolUse", matcher: matcher, commandSubstring: command,
+            isOptional: isOptional
+        )
+        check.environment = env
+        return check
+    }
+
+    @Test("pass when the declared matcher is registered")
+    func passWhenMatcherMatches() throws {
+        let home = try makeGlobalTmpDir(label: "hook-matcher-pass")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = try makeCheck(in: home, settings: Self.twoGroupSettings, matcher: "Agent|Task")
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("warn when the event is registered but the matcher differs")
+    func warnWhenMatcherDiffers() throws {
+        let home = try makeGlobalTmpDir(label: "hook-matcher-differs")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // The motivating shape: settings carry `Agent|Task`, the check declares only `Task`.
+        let check = try makeCheck(in: home, settings: Self.twoGroupSettings, matcher: "Task")
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        // Both the expected and the actual matchers must be named, or the reader cannot tell a
+        // mismatch from an absent registration.
+        #expect(msg.contains("'Task'"))
+        #expect(msg.contains("'Agent|Task'"))
+        #expect(msg.contains("'Bash'"))
+    }
+
+    @Test("warn when the matcher matches but the command substring is absent")
+    func warnWhenCommandAbsent() throws {
+        let home = try makeGlobalTmpDir(label: "hook-command-absent")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = try makeCheck(
+            in: home, settings: Self.twoGroupSettings,
+            matcher: "Agent|Task", command: "missing.sh"
+        )
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        #expect(msg.contains("missing.sh"))
+    }
+
+    @Test("warn when matcher and command are satisfied by different groups")
+    func warnWhenSatisfiedByDifferentGroups() throws {
+        let home = try makeGlobalTmpDir(label: "hook-different-groups")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // `Agent|Task` exists and `audit.sh` exists, but not together — the pair must be proven by
+        // one group or it proves nothing about which registration belongs to the pack.
+        let check = try makeCheck(
+            in: home, settings: Self.twoGroupSettings,
+            matcher: "Agent|Task", command: "audit.sh"
+        )
+        let result = check.check()
+        guard case .warn = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+    }
+
+    @Test("pass on command substring alone, matched in any group")
+    func passWhenCommandOnlyMatches() throws {
+        let home = try makeGlobalTmpDir(label: "hook-command-only")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = try makeCheck(in: home, settings: Self.twoGroupSettings, command: "audit.sh")
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("pass on event presence alone when neither field is declared")
+    func passWhenNoAssertionsDeclared() throws {
+        let home = try makeGlobalTmpDir(label: "hook-no-assertions")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = try makeCheck(in: home, settings: Self.twoGroupSettings)
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("empty matcher in settings satisfies an undeclared matcher")
+    func emptyMatcherNormalizesToAbsent() throws {
+        let home = try makeGlobalTmpDir(label: "hook-empty-matcher")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let settings = """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "", "hooks": [{ "type": "command", "command": "bash run.sh" }] }
+            ]
+          }
+        }
+        """
+        // A written "" and an absent key select the same tools, so this must not read as drift.
+        let check = try makeCheck(in: home, settings: settings, command: "run.sh")
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+    }
+
+    @Test("skip when optional and the matcher differs")
+    func skipWhenOptionalMismatch() throws {
+        let home = try makeGlobalTmpDir(label: "hook-optional-mismatch")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = try makeCheck(
+            in: home, settings: Self.twoGroupSettings,
+            matcher: "Task", isOptional: true
+        )
+        let result = check.check()
+        guard case .skip = result else {
+            Issue.record("Expected .skip, got \(result)")
+            return
+        }
+    }
+
+    @Test("a mismatched project registration is not rescued by a correct global one")
+    func projectMismatchWinsOverGlobal() throws {
+        let home = try makeGlobalTmpDir(label: "hook-project-mismatch")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectSettings = """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "matcher": "Task", "hooks": [{ "type": "command", "command": "bash gate.sh" }] }
+            ]
+          }
+        }
+        """
+        let projectRoot = try makeProjectSettings(in: home, contents: projectSettings)
+        try Self.twoGroupSettings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PreToolUse hook", section: "Hooks",
+            event: "PreToolUse", matcher: "Agent|Task",
+            isOptional: false, projectRoot: projectRoot
+        )
+        check.environment = env
+        // settings.local.json takes precedence and is what Claude Code will actually run, so its
+        // wrong matcher must be reported rather than masked by the correct global file.
+        let result = check.check()
+        guard case let .warn(msg) = result else {
+            Issue.record("Expected .warn, got \(result)")
+            return
+        }
+        #expect(msg.contains("settings.local.json"))
+    }
+}
