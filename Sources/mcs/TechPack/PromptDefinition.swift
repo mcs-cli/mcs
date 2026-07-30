@@ -1,4 +1,4 @@
-struct PromptDefinition: Codable {
+struct PromptDefinition: Codable, Equatable {
     let key: String
     let type: PromptType
     let label: String?

@@ -58,18 +58,10 @@ enum PackHeuristics {
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
         var findings: [Finding] = []
-        for component in components {
-            if case let .copyPackFile(config) = component.installAction {
-                var normalized = config.source.trimmingCharacters(in: .whitespaces)
-                if normalized.hasPrefix("./") {
-                    normalized = String(normalized.dropFirst(2))
-                }
-                if normalized.isEmpty || normalized == "." {
-                    let msg = "Component '\(component.id)' uses source '.' which copies the entire pack root"
-                        + " (including techpack.yaml, LICENSE, README)"
-                    findings.append(Finding(severity: .error, message: msg))
-                }
-            }
+        for component in components where component.copiesPackRoot {
+            let msg = "Component '\(component.id)' uses source '.' which copies the entire pack root"
+                + " (including techpack.yaml, LICENSE, README)"
+            findings.append(Finding(severity: .error, message: msg))
         }
         return findings
     }
@@ -100,46 +92,12 @@ enum PackHeuristics {
         "node_modules", "__pycache__", ".build",
     ]
 
-    /// Paths the manifest relies on for its install surface.
-    /// Used by `checkUnreferencedFiles`, by `ExternalPackManifest.validate()` to reject
-    /// load-bearing entries in the `ignore:` list (issue #338), and by the runtime safety
-    /// guard in `ExternalPackLoader` that strips forbidden `ignore:` entries defensively.
-    static func referencedPaths(from manifest: ExternalPackManifest) -> Set<String> {
-        var paths = Set<String>()
-        for component in manifest.components ?? [] {
-            switch component.installAction {
-            case let .copyPackFile(config):
-                paths.insert(normalizeReferencedPath(config.source))
-            case let .settingsFile(source):
-                paths.insert(normalizeReferencedPath(source))
-            default:
-                break
-            }
-        }
-        for template in manifest.templates ?? [] {
-            paths.insert(normalizeReferencedPath(template.contentFile))
-        }
-        if let script = manifest.configureProject?.script {
-            paths.insert(normalizeReferencedPath(script))
-        }
-        return paths
-    }
-
-    /// Normalize a referenced path so equivalent expressions collapse to the same key.
-    /// Trims whitespace and strips a leading `./` so `ignore:` validation doesn't miss
-    /// the same file expressed as `hooks/foo.sh` vs `./hooks/foo.sh` vs ` hooks/foo.sh`.
-    private static func normalizeReferencedPath(_ path: String) -> String {
-        var normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.hasPrefix("./") { normalized = String(normalized.dropFirst(2)) }
-        return normalized
-    }
-
     private static func checkUnreferencedFiles(
         manifest: ExternalPackManifest,
         packPath: URL
     ) -> [Finding] {
         let fm = FileManager.default
-        let referencedPaths = referencedPaths(from: manifest)
+        let referencedPaths = manifest.referencedPaths
 
         let rootContents: [URL]
         do {
@@ -232,7 +190,7 @@ enum PackHeuristics {
         packPath: URL
     ) -> [Finding] {
         let fm = FileManager.default
-        let referencedRootFiles = referencedPaths(from: manifest).filter { !$0.contains("/") }
+        let referencedRootFiles = manifest.referencedPaths.filter { !$0.contains("/") }
 
         let rootContents: [URL]
         do {
