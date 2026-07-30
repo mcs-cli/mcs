@@ -357,7 +357,25 @@ func makeGlobalTmpDir(label: String = "global") throws -> URL {
         at: dir.appendingPathComponent(".mcs"),
         withIntermediateDirectories: true
     )
+    try seedGlobalGitignore(home: dir)
     return dir
+}
+
+/// Write mcs's core entries to the sandbox's global gitignore.
+///
+/// `GitignoreCheck` resolves this file from the injected `Environment`'s home, so a sandbox
+/// without one reports "global gitignore not found" and every doctor run inside it carries an
+/// extra issue unrelated to what the test is asserting. Seeding it makes the sandbox look like a
+/// machine `mcs sync` has already run on, which is the state these fixtures assume.
+func seedGlobalGitignore(home: URL) throws {
+    let gitDir = home
+        .appendingPathComponent(".config")
+        .appendingPathComponent("git")
+    try FileManager.default.createDirectory(at: gitDir, withIntermediateDirectories: true)
+    try (GitignoreManager.coreEntries.joined(separator: "\n") + "\n").write(
+        to: gitDir.appendingPathComponent("ignore"),
+        atomically: true, encoding: .utf8
+    )
 }
 
 /// Create a temp home pre-configured with the Claude Code canonical layout:
