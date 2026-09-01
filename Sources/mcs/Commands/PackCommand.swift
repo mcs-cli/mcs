@@ -700,7 +700,7 @@ struct UpdatePack: LockedCommand {
                 throw ExitCode.failure
             }
             ctx.output.plain("")
-            ctx.output.info("Run 'mcs update' to apply updates across all configured scopes.")
+            ctx.output.info("Run 'mcs update --all-projects' to apply updates across every configured project plus the global scope.")
         }
 
         if PackUpdater.shouldExitNonZero(
