@@ -116,7 +116,12 @@ struct ConfigurationDiscovery {
         )
 
         // 3. Discover files in .claude/ subdirectories
-        discoverFiles(in: hooksDir, hookCommands: hookCommands, into: &config)
+        discoverFiles(
+            in: hooksDir,
+            hookDirectory: hookDirectory,
+            hookCommands: hookCommands,
+            into: &config
+        )
         config.skillFiles = listFiles(in: skillsDir)
         config.commandFiles = listFiles(in: commandsDir)
         config.agentFiles = listFiles(in: agentsDir)
@@ -292,7 +297,12 @@ struct ConfigurationDiscovery {
 
     // MARK: - File Discovery
 
-    private func discoverFiles(in hooksDir: URL, hookCommands: [String: HookRegistration]?, into config: inout DiscoveredConfiguration) {
+    private func discoverFiles(
+        in hooksDir: URL,
+        hookDirectory: String,
+        hookCommands: [String: HookRegistration]?,
+        into config: inout DiscoveredConfiguration
+    ) {
         let fm = FileManager.default
         guard fm.fileExists(atPath: hooksDir.path) else { return }
 
@@ -301,63 +311,73 @@ struct ConfigurationDiscovery {
         let commandToReg = hookCommands ?? [:]
 
         for file in files {
-            let filename = file.lastPathComponent
-            // Try to match this file to a hook event via settings commands
+            // Match on the whole managed path, not the basename. Commands name the namespaced
+            // path (`.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts`
+            // capture the event and interpreter belonging to `pre-gate.ts`.
+            let managedPath = hookDirectory + file.relativePath
             let matchedReg = commandToReg.first { command, _ in
-                command.contains(filename)
+                HookInterpreter.managedHookPath(in: command, directory: hookDirectory) == managedPath
             }?.value
 
             config.hookFiles.append(DiscoveredFile(
-                filename: filename,
-                absolutePath: file,
+                filename: file.url.lastPathComponent,
+                absolutePath: file.url,
                 hookRegistration: matchedReg
             ))
         }
     }
 
-    /// Hook scripts under `hooksDir`, including the `<pack-id>/` subdirectories sync installs into.
+    /// Hook scripts under `hooksDir`, paired with their path relative to it.
     ///
     /// A flat listing misses every hook mcs itself placed: `DestinationCollisionResolver` always
-    /// namespaces hooks, so a synced hook never sits at the top level. Files are returned by
-    /// basename, which is what a settings command references and what the exported manifest uses
-    /// as its destination — so a basename appearing twice is reported and skipped rather than
-    /// producing a manifest with duplicate destinations.
-    private func hookFiles(in hooksDir: URL) -> [URL] {
+    /// namespaces hooks, so a synced hook never sits at the top level.
+    ///
+    /// Relative paths come from `subpathsOfDirectory` rather than from subtracting `hooksDir` off
+    /// an absolute path — `FileManager`'s enumerators hand back symlink-resolved paths
+    /// (`/private/var/…` for a `/var/…` base), so prefix subtraction silently yields the whole
+    /// path and every correlation fails.
+    ///
+    /// The exported manifest destination is the basename, so a basename appearing twice under
+    /// different pack directories is reported and skipped rather than producing a manifest with
+    /// duplicate destinations.
+    private func hookFiles(in hooksDir: URL) -> [(url: URL, relativePath: String)] {
         let fm = FileManager.default
-        guard let enumerator = fm.enumerator(
-            at: hooksDir,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else {
-            output.warn("Could not read hooks directory at \(hooksDir.path)")
+        let subpaths: [String]
+        do {
+            subpaths = try fm.subpathsOfDirectory(atPath: hooksDir.path)
+        } catch {
+            output.warn("Could not read hooks directory at \(hooksDir.path): \(error.localizedDescription)")
             return []
         }
 
-        var byName: [String: URL] = [:]
-        var ordered: [URL] = []
-        for case let url as URL in enumerator {
+        var byName: [String: String] = [:]
+        var found: [(url: URL, relativePath: String)] = []
+        for relativePath in subpaths.sorted() {
+            // Skip hidden files and anything inside a hidden directory.
+            guard !relativePath.split(separator: "/").contains(where: { $0.hasPrefix(".") }) else {
+                continue
+            }
+            let url = hooksDir.appendingPathComponent(relativePath)
             do {
                 guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
                     continue
                 }
             } catch {
-                output.warn("  Could not read file type for \(url.lastPathComponent) — skipping")
+                output.warn("  Could not read file type for \(relativePath) — skipping")
                 continue
             }
             let name = url.lastPathComponent
-            if let existing = byName[name] {
-                let shown = PathContainment.relativePath(of: url.path, within: hooksDir.path)
-                let kept = PathContainment.relativePath(of: existing.path, within: hooksDir.path)
+            if let kept = byName[name] {
                 output.warn(
-                    "  Two hooks are named '\(name)' ('\(kept)' and '\(shown)') — exporting the"
-                        + " first; rename one to export both"
+                    "  Two hooks are named '\(name)' ('\(kept)' and '\(relativePath)') — exporting"
+                        + " the first; rename one to export both"
                 )
                 continue
             }
-            byName[name] = url
-            ordered.append(url)
+            byName[name] = relativePath
+            found.append((url, relativePath))
         }
-        return ordered.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        return found.sorted { $0.url.lastPathComponent < $1.url.lastPathComponent }
     }
 
     private func listFiles(in directory: URL) -> [DiscoveredFile] {

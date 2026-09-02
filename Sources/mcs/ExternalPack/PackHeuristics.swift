@@ -292,38 +292,19 @@ enum PackHeuristics {
         return findings
     }
 
-    /// The interpreter a hook component's script will run under, or nil when the component
-    /// registers no hook.
-    ///
-    /// Mirrors `ComponentDefinition.hookInvocation` for the pre-adaptation manifest model, which
-    /// carries `source` as a string rather than a URL.
-    private static func hookInvocation(
-        of component: ExternalComponentDefinition
-    ) -> (interpreter: String, destination: String)? {
-        guard let registration = component.hookRegistration,
-              case let .copyPackFile(config) = component.installAction,
-              config.fileType == .hook
-        else { return nil }
-        let interpreter = HookInterpreter.resolve(
-            explicit: registration.interpreter,
-            destination: config.destination,
-            source: config.source
-        )
-        return (interpreter, config.destination)
-    }
-
     /// A script language we refuse to guess an interpreter for, left to run under bash.
     private static func checkAmbiguousHookExtensions(
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
         var findings: [Finding] = []
         for component in components {
-            guard let registration = component.hookRegistration,
-                  registration.interpreter == nil,
+            guard component.hookInvocation != nil,
+                  component.hookRegistration?.interpreter == nil,
                   case let .copyPackFile(config) = component.installAction,
-                  config.fileType == .hook,
-                  HookInterpreter.isAmbiguous(path: config.destination)
-                  || HookInterpreter.isAmbiguous(path: config.source)
+                  HookInterpreter.isAmbiguouslyTyped(
+                      destination: config.destination,
+                      source: config.source
+                  )
             else { continue }
             findings.append(Finding(
                 severity: .warning,
@@ -347,7 +328,7 @@ enum PackHeuristics {
         var findings: [Finding] = []
         var reported = Set<String>()
         for component in components {
-            guard let invocation = hookInvocation(of: component) else { continue }
+            guard let invocation = component.hookInvocation else { continue }
             let binary = HookInterpreter.binary(of: invocation.interpreter)
             guard HookInterpreter.isCheckable(binary: binary),
                   !binary.hasPrefix("/"),
@@ -362,18 +343,29 @@ enum PackHeuristics {
         return findings
     }
 
+    /// The interpreter a `hookEventExists` assertion demands, or nil when it names none.
+    ///
+    /// The assertion is a substring of the registered command, so it may be just the script path
+    /// (`gate.ts`, asserting nothing about the interpreter) or the whole invocation
+    /// (`bash .claude/hooks/gate.ts`). Only the latter can contradict the component, and comparing
+    /// it against the resolved interpreter catches what a `bash ` prefix test missed: a node hook
+    /// asserting `python3`, and a bash hook asserting `node`.
+    private static func assertedInterpreter(in asserted: String, destination: String) -> String? {
+        let tokens = asserted.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let pathIndex = tokens.lastIndex(where: { $0.contains(destination) }), pathIndex > 0
+        else { return nil }
+        return tokens[0 ..< pathIndex].joined(separator: " ")
+    }
+
     /// A `hookEventExists` check asserting an interpreter its own component does not use.
     private static func checkHookDoctorCheckInterpreters(
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
         let supplementary = manifest.supplementaryDoctorChecks ?? []
-        let defaultPrefix = Constants.HookCommand.defaultInterpreter + " "
         var findings: [Finding] = []
         for component in components {
-            guard let invocation = hookInvocation(of: component),
-                  !HookInterpreter.isDefault(invocation.interpreter)
-            else { continue }
+            guard let invocation = component.hookInvocation else { continue }
             // A pack-level check belongs to this component only if it names this hook's file.
             // Pairing every supplementary check with every hook would flag a legitimate bash
             // assertion — meant for the pack's bash hook — against each non-bash one.
@@ -382,7 +374,10 @@ enum PackHeuristics {
             }
             for check in (component.doctorChecks ?? []) + correlated
                 where check.type == .hookEventExists {
-                guard let asserted = check.command, asserted.contains(defaultPrefix) else { continue }
+                guard let asserted = check.command,
+                      let demanded = assertedInterpreter(in: asserted, destination: invocation.destination),
+                      demanded != invocation.interpreter
+                else { continue }
                 findings.append(Finding(
                     severity: .warning,
                     message: "Doctor check '\(check.name)' asserts command '\(asserted)' but hook"

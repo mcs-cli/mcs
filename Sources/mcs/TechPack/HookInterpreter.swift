@@ -77,6 +77,20 @@ enum HookInterpreter {
         ambiguousExtensions.contains(fileExtension(of: path))
     }
 
+    /// Whether inference declined to answer because the extension that *decides* resolution names
+    /// a language with no safe default.
+    ///
+    /// Applies the same destination-then-source precedence as `resolve`, so a warning about an
+    /// undeclared interpreter cannot contradict the interpreter actually chosen: with destination
+    /// `gate.js` and source `gate.ts`, resolution picks `node` and this is false.
+    static func isAmbiguouslyTyped(destination: String, source: String?) -> Bool {
+        if !fileExtension(of: destination).isEmpty {
+            return isAmbiguous(path: destination)
+        }
+        guard let source else { return false }
+        return isAmbiguous(path: source)
+    }
+
     /// Whether an interpreter is the engine default, compared as a whole value.
     ///
     /// Not a prefix test on the composed command: `bash -e` is an explicit choice that happens to

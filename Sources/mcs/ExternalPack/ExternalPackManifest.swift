@@ -353,6 +353,30 @@ extension ExternalPackManifest {
     }
 }
 
+// MARK: - Hook eligibility
+
+extension ExternalComponentDefinition {
+    /// The interpreter and installed filename this component's hook runs as, or nil when it
+    /// registers no hook.
+    ///
+    /// The manifest-model counterpart of `ComponentDefinition.hookInvocation`, and it must apply
+    /// the same three conditions — `type`, a registration, and `fileType` — because the adapter
+    /// drops any component failing them. A copy of this rule that omits one reports findings for
+    /// hooks sync never registers, which is how the two sides drifted before.
+    var hookInvocation: (interpreter: String, destination: String)? {
+        guard type == .hookFile, let registration = hookRegistration,
+              case let .copyPackFile(config) = installAction,
+              config.fileType == .hook
+        else { return nil }
+        let interpreter = HookInterpreter.resolve(
+            explicit: registration.interpreter,
+            destination: config.destination,
+            source: config.source
+        )
+        return (interpreter, config.destination)
+    }
+}
+
 // MARK: - Hook interpreter sanitization (runtime safety guard)
 
 extension ExternalPackManifest {

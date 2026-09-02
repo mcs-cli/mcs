@@ -63,13 +63,22 @@ struct PackTrustManager {
                     // rather than in the script — so trusting the file's hash alone would let a
                     // pack update swap `node` for `sh -c` without any renewed review. Tracked as an
                     // inline item so its content, not the script's, drives change detection.
-                    if fileType == .hook,
-                       let interpreter = hookInterpreterNeedingTrust(for: component, config: config) {
+                    //
+                    // Emitted for every registered hook, including plain bash ones, so that
+                    // *losing* an interpreter is detectable too: an item that simply disappears
+                    // would leave the old hash in place and let a script trusted as JS start
+                    // running as shell unreviewed. First-time trust of a default invocation is
+                    // waived in `detectNewScripts`, which is what keeps legacy packs quiet.
+                    if let invocation = component.hookInvocation {
                         items.append(TrustableItem(
                             type: .hookInterpreter,
                             relativePath: nil,
-                            content: "\(interpreter) \(config.destination)",
-                            description: "\(component.displayName) — command its hook is invoked with"
+                            content: "\(invocation.interpreter) \(invocation.destination)",
+                            // Keyed indirectly by description, so it must be unique per component:
+                            // two hooks sharing a display name would otherwise overwrite each
+                            // other's hash and compare against the wrong hook.
+                            description: "\(component.id) — command its hook is invoked with",
+                            representsDefaultBehavior: HookInterpreter.isDefault(invocation.interpreter)
                         ))
                     }
 
@@ -275,10 +284,13 @@ struct PackTrustManager {
                 let hash = SHA256.hash(data: contentData)
                     .map { String(format: "%02x", $0) }.joined()
                 let syntheticKey = Self.syntheticKey(for: item)
-                if let trustedHash = currentHashes[syntheticKey], trustedHash == hash {
-                    return false // Unchanged
+                if let trustedHash = currentHashes[syntheticKey] {
+                    return trustedHash != hash // Changed since last trust
                 }
-                return true // New or changed
+                // Never trusted before. An item that merely restates the behaviour a pack already
+                // had needs no prompt — that is how packs predating hook-interpreter tracking stay
+                // quiet on their first update. Anything else is genuinely new.
+                return !item.representsDefaultBehavior
             }
             guard let trustedHash = currentHashes[relativePath] else {
                 return true // New script not in trusted set
@@ -305,22 +317,6 @@ struct PackTrustManager {
         let descHash = SHA256.hash(data: descData)
             .map { String(format: "%02x", $0) }.joined()
         return "inline:\(descHash)"
-    }
-
-    /// The command a hook is invoked with, when that is not the default interpreter.
-    ///
-    /// Returns nil for plain bash hooks, so packs that predate configurable interpreters keep
-    /// exactly the trust surface they had and are not re-prompted on their next update.
-    private func hookInterpreterNeedingTrust(
-        for component: ExternalComponentDefinition,
-        config: ExternalCopyPackFileConfig
-    ) -> String? {
-        let interpreter = HookInterpreter.resolve(
-            explicit: component.hookRegistration?.interpreter,
-            destination: config.destination,
-            source: config.source
-        )
-        return HookInterpreter.isDefault(interpreter) ? nil : interpreter
     }
 
     private func readFileContent(at url: URL, fallback: String) throws -> String {
@@ -443,6 +439,13 @@ struct TrustableItem {
     let relativePath: String? // For script files
     let content: String // The actual content to display
     let description: String // Human-readable description
+    /// Whether this item describes the behaviour a pack already had before the artifact it covers
+    /// was tracked for trust.
+    ///
+    /// Only meaningful for inline items on their *first* sighting: it distinguishes "this pack
+    /// predates the tracking" from "this pack asks for something new", so introducing a new
+    /// trustable artifact does not re-prompt every installed pack.
+    var representsDefaultBehavior: Bool = false
 
     enum TrustableType {
         case shellCommand // From component install actions

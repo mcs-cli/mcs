@@ -167,6 +167,100 @@ struct PackHeuristicsTests {
         #expect(findings.contains { $0.message.contains("will never match") })
     }
 
+    @Test("A component with a hook copy action but another type is not treated as a hook")
+    func nonHookTypeIsIgnored() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Sync only registers hooks whose component type is hookFile, so validation must not
+        // report runtime findings for this one.
+        let component = ExternalComponentDefinition(
+            id: "test-pack.odd",
+            displayName: "Odd",
+            description: "A copy action that is not a hook component",
+            type: .configuration,
+            hookRegistration: HookRegistration(event: .sessionStart),
+            installAction: .copyPackFile(ExternalCopyPackFileConfig(
+                source: "hooks/fmt.js",
+                destination: "fmt.js",
+                fileType: .hook
+            ))
+        )
+        let findings = PackHeuristics.check(manifest: minimalManifest(components: [component]), packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("uses node") })
+        #expect(!findings.contains { $0.message.contains("hookInterpreter") })
+    }
+
+    @Test("An ambiguous source does not warn when the destination extension decides")
+    func ambiguousSourceDoesNotWarnWhenDestinationDecides() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Resolution picks node from the destination, so the "will run under bash" warning
+        // would contradict what actually happens.
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/gate.ts", destination: "gate.js"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("declares no") })
+    }
+
+    @Test("A doctor check asserting the wrong non-bash interpreter is flagged")
+    func mismatchedNonBashAssertionIsFlagged() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Neither side is bash, so a `bash `-prefix test saw nothing.
+        let check = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Format hook registered",
+            command: "python3 .claude/hooks/fmt.js",
+            event: "PostToolUse"
+        )
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js", doctorChecks: [check]),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains { $0.message.contains("will never match") })
+    }
+
+    @Test("A bash hook asserting a non-bash interpreter is flagged")
+    func bashHookAssertingNodeIsFlagged() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let check = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Legacy hook registered",
+            command: "node .claude/hooks/legacy.sh",
+            event: "SessionStart"
+        )
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/legacy.sh", destination: "legacy.sh", doctorChecks: [check]),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains { $0.message.contains("will never match") })
+    }
+
+    @Test("A check asserting only the path is not a mismatch")
+    func pathOnlyAssertionIsNotFlagged() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Asserting the path alone says nothing about the interpreter.
+        let check = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Format hook registered",
+            command: "fmt.js",
+            event: "PostToolUse"
+        )
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js", doctorChecks: [check]),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("will never match") })
+    }
+
     @Test("Bash hooks never warn about their interpreter")
     func bashNeverWarns() throws {
         let tmpDir = try makeTmpDir(label: "heuristics")

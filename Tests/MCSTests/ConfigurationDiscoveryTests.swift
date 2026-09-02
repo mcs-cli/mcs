@@ -146,6 +146,49 @@ struct ConfigurationDiscoveryTests {
         #expect(gate.hookRegistration?.interpreter == "node --experimental-strip-types")
     }
 
+    @Test("a hook does not inherit the registration of one whose name it is a suffix of")
+    func doesNotCorrelateBySubstring() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-substring")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory)
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        let packHooks = claudeDir.appendingPathComponent("hooks/p")
+        try FileManager.default.createDirectory(at: packHooks, withIntermediateDirectories: true)
+        // "gate.ts" is a substring of "pre-gate.ts".
+        try "1".write(to: packHooks.appendingPathComponent("gate.ts"), atomically: true, encoding: .utf8)
+        try "2".write(to: packHooks.appendingPathComponent("pre-gate.ts"), atomically: true, encoding: .utf8)
+
+        // Only `pre-gate.ts` is registered, and under a distinctive interpreter.
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "bun .claude/hooks/p/pre-gate.ts" }] }
+            ]
+          }
+        }
+        """.write(
+            to: claudeDir.appendingPathComponent(Constants.FileNames.settingsLocal),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput(colorsEnabled: false))
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(projectRoot))
+
+        let pre = try #require(config.hookFiles.first { $0.filename == "pre-gate.ts" })
+        #expect(pre.hookRegistration?.interpreter == "bun")
+        // The unregistered hook must stay unregistered rather than borrowing the other's event.
+        let gate = try #require(config.hookFiles.first { $0.filename == "gate.ts" })
+        #expect(gate.hookRegistration == nil)
+    }
+
     @Test("discovers MCP servers when project root equals git root")
     func discoversMCPServersExactMatch() throws {
         let home = try makeGlobalTmpDir(label: "discovery-exact")
