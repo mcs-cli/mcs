@@ -43,10 +43,13 @@ private struct LifecycleTestBed {
         )
     }
 
-    func makeGlobalSyncConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
+    func makeGlobalSyncConfigurator(
+        registry: TechPackRegistry = TechPackRegistry(),
+        warningCounter: WarningCounter? = nil
+    ) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false),
+            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: GlobalSyncStrategy(environment: env),
@@ -1064,6 +1067,149 @@ struct GlobalScopeLifecycleTests {
 
         // === Doctor passes ===
         try bed.runGlobalDoctor(registry: registry)
+    }
+}
+
+// MARK: - Scenario 5c: Global install warns about projects that already hold the pack
+
+struct GlobalDuplicationWarningTests {
+    /// Seed `~/.mcs/projects.yaml` as a prior `mcs sync` in each project would have.
+    private func seedIndex(env: Environment, entries: [(String, [String])]) throws {
+        let indexFile = ProjectIndex(path: env.projectsIndexFile)
+        var data = ProjectIndex.IndexData()
+        for entry in entries {
+            indexFile.upsert(projectPath: entry.0, packIDs: entry.1, in: &data)
+        }
+        try indexFile.save(data)
+    }
+
+    /// Project entries only. The `__global__` entry legitimately changes during a global
+    /// sync (step 11 upserts it), so it is excluded from the read-only assertion.
+    private func projectEntries(env: Environment) throws -> [ProjectIndex.ProjectEntry] {
+        try ProjectIndex(path: env.projectsIndexFile).load()
+            .projects
+            .filter { !$0.isGlobal }
+            .sorted { $0.path < $1.path }
+    }
+
+    private func makeProjects(in home: URL, _ names: [String]) throws -> [URL] {
+        try names.map { name in
+            let url = home.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            return url
+        }
+    }
+
+    private func duplicatedPack(bed: LifecycleTestBed) throws -> MockTechPack {
+        let hookSource = try bed.makeHookSource(name: "dup-hook.sh")
+        return MockTechPack(
+            identifier: "dup-pack",
+            displayName: "Dup Pack",
+            components: [
+                bed.hookComponent(pack: "dup-pack", id: "hook", source: hookSource, destination: "dup-hook.sh"),
+            ]
+        )
+    }
+
+    @Test("Warns when tracked projects already configure a pack entering the global scope")
+    func warnsAndLeavesProjectEntriesUntouched() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let projects = try makeProjects(in: bed.home, ["project-a", "project-b"])
+        try seedIndex(env: bed.env, entries: projects.map { ($0.path, ["dup-pack"]) })
+        let before = try projectEntries(env: bed.env)
+
+        let pack = try duplicatedPack(bed: bed)
+        let counter = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]), warningCounter: counter)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        // One `warn` header covers every pack and project it names, so the count is
+        // stable no matter how many duplicates there are.
+        #expect(counter.count == 1)
+
+        // Advisory only: the warning must not touch the projects it names, nor prune
+        // their index entries. Only the global scope changes.
+        let after = try projectEntries(env: bed.env)
+        #expect(after == before)
+        #expect(try ProjectState(stateFile: bed.env.globalStateFile).configuredPacks.contains("dup-pack"))
+    }
+
+    @Test("Silent when no tracked project holds the pack being installed globally")
+    func silentWithoutOverlap() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let projects = try makeProjects(in: bed.home, ["project-a"])
+        try seedIndex(env: bed.env, entries: projects.map { ($0.path, ["other-pack"]) })
+
+        let pack = try duplicatedPack(bed: bed)
+        let counter = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]), warningCounter: counter)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(counter.count == 0)
+    }
+
+    @Test("Re-syncing a pack the global scope already has does not warn again")
+    func silentOnSecondGlobalSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let projects = try makeProjects(in: bed.home, ["project-a"])
+        try seedIndex(env: bed.env, entries: projects.map { ($0.path, ["dup-pack"]) })
+
+        let pack = try duplicatedPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        let first = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: first)
+            .configure(packs: [pack], confirmRemovals: false)
+        #expect(first.count == 1)
+
+        // The trigger is a transition, not an identity: the pack is no longer an addition,
+        // so the second sync is quiet. This is also what keeps `mcs update` silent.
+        let second = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: second)
+            .configure(packs: [pack], confirmRemovals: false)
+        #expect(second.count == 0)
+    }
+
+    @Test("--dry-run surfaces the same warning and installs nothing")
+    func warnsOnDryRunWithoutInstalling() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let projects = try makeProjects(in: bed.home, ["project-a"])
+        try seedIndex(env: bed.env, entries: projects.map { ($0.path, ["dup-pack"]) })
+
+        let pack = try duplicatedPack(bed: bed)
+        let counter = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]), warningCounter: counter)
+            .dryRun(packs: [pack])
+
+        // `dryRun` keeps no diff of its own, so this covers the second call site's
+        // locally-derived additions set.
+        #expect(counter.count == 1)
+        #expect(try ProjectState(stateFile: bed.env.globalStateFile).configuredPacks.isEmpty)
+    }
+
+    @Test("An unreadable project index degrades to a notice — the sync still completes")
+    func unreadableIndexDoesNotFailSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        try "{{ not yaml".write(to: bed.env.projectsIndexFile, atomically: true, encoding: .utf8)
+
+        let pack = try duplicatedPack(bed: bed)
+        let counter = WarningCounter()
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]), warningCounter: counter)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        // One warning for the unreadable index. The later index *write* also fails, but
+        // reports through `output.error`, which does not touch the counter.
+        #expect(counter.count == 1)
+        #expect(try ProjectState(stateFile: bed.env.globalStateFile).configuredPacks.contains("dup-pack"))
     }
 }
 

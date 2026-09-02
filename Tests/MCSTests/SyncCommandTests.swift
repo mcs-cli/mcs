@@ -197,6 +197,116 @@ struct SyncCommandTests {
         )
         #expect(blocked.isEmpty)
     }
+
+    // MARK: - Project duplication warning (the reverse of the block above)
+
+    /// Build an index from `(path, packs)` pairs. `lastSynced` is irrelevant to the query.
+    private func makeIndex(_ entries: [(String, [String])]) -> ProjectIndex.IndexData {
+        ProjectIndex.IndexData(
+            projects: entries.map {
+                ProjectIndex.ProjectEntry(path: $0.0, packs: $0.1, lastSynced: "")
+            }
+        )
+    }
+
+    private let allPathsExist: (String) -> Bool = { _ in true }
+
+    @Test("Names every project already holding a pack that is entering the global scope")
+    func warnsNamingAffectedProjects() {
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: ["ios": "iOS"],
+            index: makeIndex([("/dev/b", ["ios"]), ("/dev/a", ["ios"]), ("/dev/c", ["android"])]),
+            pathExists: allPathsExist
+        )
+        // Paths sorted so the output is stable across index orderings.
+        #expect(lines.count == 4)
+        #expect(lines[0] == "1 pack(s) being installed globally are already configured in other projects:")
+        #expect(lines[1] == "    iOS → /dev/a, /dev/b")
+        #expect(lines[3].contains("mcs doctor --fix"))
+    }
+
+    @Test("Excludes the global sentinel — it is the scope being installed into")
+    func excludesGlobalSentinel() {
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: ["ios": "iOS"],
+            index: makeIndex([(ProjectIndex.globalSentinel, ["ios"])]),
+            pathExists: allPathsExist
+        )
+        #expect(lines.isEmpty)
+    }
+
+    @Test("Drops projects whose directory no longer exists")
+    func dropsStaleProjectPaths() {
+        let index = makeIndex([("/dev/gone", ["ios"]), ("/dev/live", ["ios"])])
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: ["ios": "iOS"],
+            index: index,
+            pathExists: { $0 == "/dev/live" }
+        )
+        #expect(lines[1] == "    iOS → /dev/live")
+
+        // Every path stale is the same as no duplication at all.
+        let allStale = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: ["ios": "iOS"],
+            index: index,
+            pathExists: { _ in false }
+        )
+        #expect(allStale.isEmpty)
+    }
+
+    @Test("Silent when no project holds the pack being added globally")
+    func silentWhenNoProjectHoldsPack() {
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: ["ios": "iOS"],
+            index: makeIndex([("/dev/a", ["android"])]),
+            pathExists: allPathsExist
+        )
+        #expect(lines.isEmpty)
+    }
+
+    @Test("Silent when nothing is being added — the transition rule that keeps 'mcs update' quiet")
+    func silentWhenNoAdditions() {
+        // `mcs update` re-applies each scope's existing pack set, so `additions` is always
+        // empty there. Warning on identity instead would make every update noisy.
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: [],
+            displayNames: ["ios": "iOS"],
+            index: makeIndex([("/dev/a", ["ios"])]),
+            pathExists: allPathsExist
+        )
+        #expect(lines.isEmpty)
+    }
+
+    @Test("Falls back to the identifier when no display name is known")
+    func fallsBackToIdentifier() {
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios"],
+            displayNames: [:],
+            index: makeIndex([("/dev/a", ["ios"])]),
+            pathExists: allPathsExist
+        )
+        #expect(lines[1] == "    ios → /dev/a")
+    }
+
+    @Test("Multiple packs share one header line so the warning count stays 1")
+    func multiplePacksEmitOneHeader() {
+        let lines = ConfiguratorSupport.projectDuplicationWarning(
+            additions: ["ios", "backend"],
+            displayNames: ["ios": "iOS", "backend": "Backend"],
+            index: makeIndex([("/dev/a", ["ios"]), ("/dev/b", ["backend"])]),
+            pathExists: allPathsExist
+        )
+        // header + one line per pack (sorted by id) + two trailing advice lines
+        #expect(lines.count == 5)
+        #expect(lines[0] == "2 pack(s) being installed globally are already configured in other projects:")
+        #expect(lines[1] == "    Backend → /dev/b")
+        #expect(lines[2] == "    iOS → /dev/a")
+    }
 }
 
 // MARK: - Guard: cwd inside ~/.claude detection
