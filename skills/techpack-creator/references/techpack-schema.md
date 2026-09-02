@@ -184,9 +184,11 @@ Copies a hook script file. Infers `type: hookFile`. Combine with `hookEvent` to 
     destination: gate.ts
 ```
 
-Accepts a bare command, an absolute path, and plain arguments. Rejects shell metacharacters and
-relative paths — use a wrapper script for anything more complex, or when the interpreter only
-exists inside a version manager (nvm, pyenv, mise), since Claude Code may not see that `PATH`.
+Accepts a bare command, an absolute path, and plain arguments. Rejects shell metacharacters,
+control characters and relative paths — use a wrapper script for anything more complex, or when the
+interpreter only exists inside a version manager (nvm, pyenv, mise), since Claude Code may not see
+that `PATH`. A non-default interpreter is part of the pack's trust prompt, and changing it in a
+later version asks the user for renewed trust.
 
 ### `command: {source, destination}`
 

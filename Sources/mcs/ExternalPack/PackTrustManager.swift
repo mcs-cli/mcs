@@ -59,6 +59,19 @@ struct PackTrustManager {
                             description: "\(component.displayName) — \(fileType.rawValue) file installed during configure"
                         ))
                     }
+                    // The interpreter decides what actually executes, and it lives in the manifest
+                    // rather than in the script — so trusting the file's hash alone would let a
+                    // pack update swap `node` for `sh -c` without any renewed review. Tracked as an
+                    // inline item so its content, not the script's, drives change detection.
+                    if fileType == .hook,
+                       let interpreter = hookInterpreterNeedingTrust(for: component, config: config) {
+                        items.append(TrustableItem(
+                            type: .hookInterpreter,
+                            relativePath: nil,
+                            content: "\(interpreter) \(config.destination)",
+                            description: "\(component.displayName) — command its hook is invoked with"
+                        ))
+                    }
 
                 default:
                     break
@@ -155,6 +168,15 @@ struct PackTrustManager {
                 let lineCount = item.content.components(separatedBy: "\n").count
                 let path = item.relativePath ?? "inline"
                 output.plain("    \(path) (\(lineCount) lines) — \(item.description)")
+            }
+        }
+
+        let hookInterpreters = items.filter { $0.type == .hookInterpreter }
+        if !hookInterpreters.isEmpty {
+            output.plain("")
+            output.sectionHeader("Hook Interpreters (run on every session)")
+            for item in hookInterpreters {
+                output.plain("    \(item.content)")
             }
         }
 
@@ -285,6 +307,22 @@ struct PackTrustManager {
         return "inline:\(descHash)"
     }
 
+    /// The command a hook is invoked with, when that is not the default interpreter.
+    ///
+    /// Returns nil for plain bash hooks, so packs that predate configurable interpreters keep
+    /// exactly the trust surface they had and are not re-prompted on their next update.
+    private func hookInterpreterNeedingTrust(
+        for component: ExternalComponentDefinition,
+        config: ExternalCopyPackFileConfig
+    ) -> String? {
+        let interpreter = HookInterpreter.resolve(
+            explicit: component.hookRegistration?.interpreter,
+            destination: config.destination,
+            source: config.source
+        )
+        return HookInterpreter.isDefault(interpreter) ? nil : interpreter
+    }
+
     private func readFileContent(at url: URL, fallback: String) throws -> String {
         if FileManager.default.fileExists(atPath: url.path) {
             return try String(contentsOf: url, encoding: .utf8)
@@ -365,7 +403,13 @@ struct PackTrustManager {
     }
 
     /// Compute SHA-256 hashes for all trustable items — both script files and inline commands.
-    private func computeScriptHashes(
+    /// Hashes for a set of trustable items — file hash by relative path, content hash under a
+    /// synthetic key for inline items.
+    ///
+    /// Internal rather than private so tests can exercise the real key derivation: hand-rolling
+    /// the synthetic-key formula in a test would let the two drift and hide exactly the
+    /// change-detection gap these tests exist to catch.
+    func computeScriptHashes(
         items: [TrustableItem],
         packPath: URL
     ) throws -> [String: String] {
@@ -409,5 +453,6 @@ struct TrustableItem {
         case fixScript // From fix scripts / fix commands
         case mcpServerCommand // MCP server command (runs with user privs)
         case commandFile // Command file copied into .claude/commands/ (invoked by Claude)
+        case hookInterpreter // Non-default command a hook file is invoked with (runs every session)
     }
 }

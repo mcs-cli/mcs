@@ -296,28 +296,12 @@ struct ConfigurationDiscovery {
         let fm = FileManager.default
         guard fm.fileExists(atPath: hooksDir.path) else { return }
 
-        let files: [URL]
-        do {
-            files = try fm.contentsOfDirectory(at: hooksDir, includingPropertiesForKeys: [.isRegularFileKey])
-        } catch {
-            output.warn("Could not read hooks directory at \(hooksDir.path): \(error.localizedDescription)")
-            return
-        }
+        let files = hookFiles(in: hooksDir)
 
         let commandToReg = hookCommands ?? [:]
 
-        for file in files.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        for file in files {
             let filename = file.lastPathComponent
-            guard !filename.hasPrefix(".") else { continue }
-            // Hooks must be regular files
-            do {
-                let vals = try file.resourceValues(forKeys: [.isRegularFileKey])
-                guard vals.isRegularFile == true else { continue }
-            } catch {
-                output.warn("  Could not read file type for \(filename) — skipping")
-                continue
-            }
-
             // Try to match this file to a hook event via settings commands
             let matchedReg = commandToReg.first { command, _ in
                 command.contains(filename)
@@ -329,6 +313,51 @@ struct ConfigurationDiscovery {
                 hookRegistration: matchedReg
             ))
         }
+    }
+
+    /// Hook scripts under `hooksDir`, including the `<pack-id>/` subdirectories sync installs into.
+    ///
+    /// A flat listing misses every hook mcs itself placed: `DestinationCollisionResolver` always
+    /// namespaces hooks, so a synced hook never sits at the top level. Files are returned by
+    /// basename, which is what a settings command references and what the exported manifest uses
+    /// as its destination — so a basename appearing twice is reported and skipped rather than
+    /// producing a manifest with duplicate destinations.
+    private func hookFiles(in hooksDir: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: hooksDir,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else {
+            output.warn("Could not read hooks directory at \(hooksDir.path)")
+            return []
+        }
+
+        var byName: [String: URL] = [:]
+        var ordered: [URL] = []
+        for case let url as URL in enumerator {
+            do {
+                guard try url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                    continue
+                }
+            } catch {
+                output.warn("  Could not read file type for \(url.lastPathComponent) — skipping")
+                continue
+            }
+            let name = url.lastPathComponent
+            if let existing = byName[name] {
+                let shown = PathContainment.relativePath(of: url.path, within: hooksDir.path)
+                let kept = PathContainment.relativePath(of: existing.path, within: hooksDir.path)
+                output.warn(
+                    "  Two hooks are named '\(name)' ('\(kept)' and '\(shown)') — exporting the"
+                        + " first; rename one to export both"
+                )
+                continue
+            }
+            byName[name] = url
+            ordered.append(url)
+        }
+        return ordered.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     private func listFiles(in directory: URL) -> [DiscoveredFile] {

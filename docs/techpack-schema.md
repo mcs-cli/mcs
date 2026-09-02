@@ -148,7 +148,9 @@ Infers: `type: hookFile`, `installAction: copyPackFile(fileType: hook)`
 The registered command is `<interpreter> <path>`. The interpreter is resolved in three steps:
 
 1. `hookInterpreter`, if you declare one.
-2. The file extension of `destination` — falling back to `source` when `destination` has none.
+2. The file extension of `destination`, falling back to `source` only when `destination` has no
+   extension at all. An extension that is present but ambiguous or unrecognised resolves to bash
+   rather than consulting `source`.
 3. `bash`.
 
 | Extension | Interpreter |
@@ -178,10 +180,15 @@ when a TypeScript hook declares no interpreter.
 
 `hookInterpreter` accepts a bare command name (`node`), an absolute path
 (`/opt/homebrew/bin/bun`), and arguments (`uv run`, `python3 -u`). It rejects shell
-metacharacters, relative paths, and quoted arguments containing spaces — wrap those in a script
-instead. `mcs doctor` verifies the binary resolves, and warns when it resolves only through a
-version manager such as nvm or pyenv, since Claude Code may not have that on `PATH` when it runs
-your hook.
+metacharacters, control characters and line breaks, relative paths, and quoted arguments
+containing spaces — wrap those in a script instead. `mcs doctor` verifies the binary resolves, and
+warns when it resolves only through a version manager such as nvm or pyenv, since Claude Code may
+not have that on `PATH` when it runs your hook. For `/usr/bin/env node` it looks through `env` and
+verifies `node`, since `env` itself is always present.
+
+Because the interpreter decides what actually runs, it is part of the pack's trust surface: a
+non-default interpreter is shown alongside the hook's contents when you install the pack, and
+changing it in a later version asks for renewed trust even when the script is untouched.
 
 **When a wrapper script is still the right answer:** an interpreter that only exists inside a
 version manager, a flag value containing spaces, or any setup that needs shell initialisation

@@ -101,6 +101,51 @@ struct ConfigurationDiscoveryTests {
         #expect(start?.hookRegistration?.interpreter == nil)
     }
 
+    @Test("discovers hooks inside the pack-id subdirectories sync installs into")
+    func discoversNamespacedHooks() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-namespaced")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory)
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        // Exactly how sync lays hooks out: .claude/hooks/<pack-id>/<file>.
+        let packHooks = claudeDir.appendingPathComponent("hooks/ts-pack")
+        try FileManager.default.createDirectory(at: packHooks, withIntermediateDirectories: true)
+        try "console.log('gate')".write(
+            to: packHooks.appendingPathComponent("gate.ts"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "node --experimental-strip-types .claude/hooks/ts-pack/gate.ts" }] }
+            ]
+          }
+        }
+        """.write(
+            to: claudeDir.appendingPathComponent(Constants.FileNames.settingsLocal),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput(colorsEnabled: false))
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(projectRoot))
+
+        // A flat listing found nothing here, so the interpreter round-trip never reached a real
+        // synced hook — only hand-written ones at the top level.
+        let gate = try #require(config.hookFiles.first { $0.filename == "gate.ts" })
+        #expect(gate.hookRegistration?.event == .preToolUse)
+        #expect(gate.hookRegistration?.interpreter == "node --experimental-strip-types")
+    }
+
     @Test("discovers MCP servers when project root equals git root")
     func discoversMCPServersExactMatch() throws {
         let home = try makeGlobalTmpDir(label: "discovery-exact")

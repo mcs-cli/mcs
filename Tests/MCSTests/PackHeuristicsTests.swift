@@ -83,6 +83,90 @@ struct PackHeuristicsTests {
         #expect(!findings.contains { $0.message.contains("installs node") })
     }
 
+    @Test("A python3 hook is satisfied by a brew: python component")
+    func python3SatisfiedByPythonFormula() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // The executable and the formula are spelled differently — python3 ships in `python`.
+        let brew = ExternalComponentDefinition(
+            id: "test-pack.python",
+            displayName: "Python",
+            description: "Python runtime",
+            type: .brewPackage,
+            installAction: .brewInstall(package: "python")
+        )
+        let manifest = minimalManifest(components: [
+            brew,
+            hookComponent(source: "hooks/audit.py", destination: "audit.py"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("installs python") })
+    }
+
+    @Test("A versioned formula satisfies the runtime requirement")
+    func versionedFormulaSatisfies() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = ExternalComponentDefinition(
+            id: "test-pack.node",
+            displayName: "Node",
+            description: "Node runtime",
+            type: .brewPackage,
+            installAction: .brewInstall(package: "node@22")
+        )
+        let manifest = minimalManifest(components: [
+            brew,
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("installs node") })
+    }
+
+    @Test("A pack-level check for another hook does not warn against this one")
+    func supplementaryCheckNotPairedWithEveryHook() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // A legitimate bash assertion, aimed at the pack's bash hook by naming its file.
+        let bashCheck = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Legacy hook registered",
+            command: "bash .claude/hooks/legacy.sh",
+            event: "SessionStart"
+        )
+        let manifest = minimalManifest(
+            components: [
+                hookComponent(id: "test-pack.legacy", source: "hooks/legacy.sh", destination: "legacy.sh"),
+                hookComponent(id: "test-pack.fmt", source: "hooks/fmt.js", destination: "fmt.js"),
+            ],
+            supplementaryDoctorChecks: [bashCheck]
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        // The node hook must not be flagged over a check that names the bash hook's file.
+        #expect(!findings.contains { $0.message.contains("will never match") })
+    }
+
+    @Test("A pack-level check naming this hook's file is still correlated")
+    func supplementaryCheckCorrelatedByPath() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let wrongCheck = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Format hook registered",
+            command: "bash .claude/hooks/fmt.js",
+            event: "PostToolUse"
+        )
+        let manifest = minimalManifest(
+            components: [hookComponent(source: "hooks/fmt.js", destination: "fmt.js")],
+            supplementaryDoctorChecks: [wrongCheck]
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains { $0.message.contains("will never match") })
+    }
+
     @Test("Bash hooks never warn about their interpreter")
     func bashNeverWarns() throws {
         let tmpDir = try makeTmpDir(label: "heuristics")

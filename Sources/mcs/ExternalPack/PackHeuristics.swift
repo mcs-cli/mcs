@@ -240,11 +240,26 @@ enum PackHeuristics {
         return packages
     }
 
-    /// Whether `formula` is installed by the pack, accepting a versioned formula (`node@22`).
-    private static func installs(_ formula: String, in packages: Set<String>) -> Bool {
-        if packages.contains(formula) { return true }
-        let versioned = formula + "@"
-        return packages.contains { $0.hasPrefix(versioned) }
+    /// Homebrew formulae that provide a given executable.
+    ///
+    /// The executable and the formula are not always spelled the same: `python3` ships in the
+    /// `python` formula, and `npx` ships with `node`. Without the alias a pack that correctly
+    /// declares `brew: python` still gets warned about its `.py` hook.
+    private static let formulaAliases: [String: [String]] = [
+        "python3": ["python"],
+        "python": ["python3"],
+        "npx": ["node"],
+    ]
+
+    /// Whether an executable is installed by the pack, accepting a versioned formula (`node@22`)
+    /// or a differently-named formula that provides it.
+    private static func installs(_ executable: String, in packages: Set<String>) -> Bool {
+        for formula in [executable] + (formulaAliases[executable] ?? []) {
+            if packages.contains(formula) { return true }
+            let versioned = formula + "@"
+            if packages.contains(where: { $0.hasPrefix(versioned) }) { return true }
+        }
+        return false
     }
 
     private static func checkMCPDependencyGaps(
@@ -282,16 +297,19 @@ enum PackHeuristics {
     ///
     /// Mirrors `ComponentDefinition.hookInvocation` for the pre-adaptation manifest model, which
     /// carries `source` as a string rather than a URL.
-    private static func hookInterpreter(of component: ExternalComponentDefinition) -> String? {
+    private static func hookInvocation(
+        of component: ExternalComponentDefinition
+    ) -> (interpreter: String, destination: String)? {
         guard let registration = component.hookRegistration,
               case let .copyPackFile(config) = component.installAction,
               config.fileType == .hook
         else { return nil }
-        return HookInterpreter.resolve(
+        let interpreter = HookInterpreter.resolve(
             explicit: registration.interpreter,
             destination: config.destination,
             source: config.source
         )
+        return (interpreter, config.destination)
     }
 
     /// A script language we refuse to guess an interpreter for, left to run under bash.
@@ -329,8 +347,8 @@ enum PackHeuristics {
         var findings: [Finding] = []
         var reported = Set<String>()
         for component in components {
-            guard let interpreter = hookInterpreter(of: component) else { continue }
-            let binary = HookInterpreter.binary(of: interpreter)
+            guard let invocation = hookInvocation(of: component) else { continue }
+            let binary = HookInterpreter.binary(of: invocation.interpreter)
             guard HookInterpreter.isCheckable(binary: binary),
                   !binary.hasPrefix("/"),
                   !installs(binary, in: brewPackages),
@@ -350,19 +368,26 @@ enum PackHeuristics {
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
         let supplementary = manifest.supplementaryDoctorChecks ?? []
+        let defaultPrefix = Constants.HookCommand.defaultInterpreter + " "
         var findings: [Finding] = []
         for component in components {
-            guard let interpreter = hookInterpreter(of: component),
-                  !HookInterpreter.isDefault(interpreter)
+            guard let invocation = hookInvocation(of: component),
+                  !HookInterpreter.isDefault(invocation.interpreter)
             else { continue }
-            let defaultPrefix = Constants.HookCommand.defaultInterpreter + " "
-            let declaredChecks = (component.doctorChecks ?? []) + supplementary
-            for check in declaredChecks where check.type == .hookEventExists {
+            // A pack-level check belongs to this component only if it names this hook's file.
+            // Pairing every supplementary check with every hook would flag a legitimate bash
+            // assertion — meant for the pack's bash hook — against each non-bash one.
+            let correlated = supplementary.filter {
+                $0.command?.contains(invocation.destination) == true
+            }
+            for check in (component.doctorChecks ?? []) + correlated
+                where check.type == .hookEventExists {
                 guard let asserted = check.command, asserted.contains(defaultPrefix) else { continue }
                 findings.append(Finding(
                     severity: .warning,
                     message: "Doctor check '\(check.name)' asserts command '\(asserted)' but hook"
-                        + " '\(component.id)' is registered with '\(interpreter)' — the check will never match"
+                        + " '\(component.id)' is registered with '\(invocation.interpreter)'"
+                        + " — the check will never match"
                 ))
             }
         }

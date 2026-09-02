@@ -56,6 +56,20 @@ struct HookInterpreterResolutionTests {
         #expect(resolved == "python3")
     }
 
+    @Test("An ambiguous or unknown destination does not fall through to the source")
+    func ambiguousDestinationDoesNotFallThrough() {
+        // `.ts` infers nothing by policy; falling back to a `.js` source would smuggle node in.
+        #expect(
+            HookInterpreter.resolve(explicit: nil, destination: "gate.ts", source: "hooks/gate.js")
+                == "bash"
+        )
+        // Same for an extension the table simply does not know.
+        #expect(
+            HookInterpreter.resolve(explicit: nil, destination: "gate.bin", source: "hooks/gate.py")
+                == "bash"
+        )
+    }
+
     @Test("Destination extension takes precedence over source")
     func destinationBeatsSource() {
         let resolved = HookInterpreter.resolve(
@@ -86,6 +100,18 @@ struct HookInterpreterResolutionTests {
         #expect(HookInterpreter.binary(of: "uv run") == "uv")
         #expect(HookInterpreter.binary(of: "bash") == "bash")
         #expect(HookInterpreter.binary(of: "/opt/homebrew/bin/bun") == "/opt/homebrew/bin/bun")
+    }
+
+    @Test("Binary looks through env to the command it dispatches")
+    func binaryLooksThroughEnv() {
+        // Checking `env` would always pass while the hook dies for want of `node`.
+        #expect(HookInterpreter.binary(of: "/usr/bin/env node") == "node")
+        #expect(HookInterpreter.binary(of: "env python3") == "python3")
+        #expect(HookInterpreter.binary(of: "/usr/bin/env -S node --experimental-strip-types") == "node")
+        #expect(HookInterpreter.binary(of: "/usr/bin/env FOO=bar node") == "node")
+        #expect(HookInterpreter.binary(of: "/usr/bin/env -u NODE_OPTIONS node") == "node")
+        // Nothing to dispatch — report env rather than inventing a binary.
+        #expect(HookInterpreter.binary(of: "/usr/bin/env") == "/usr/bin/env")
     }
 }
 
@@ -132,6 +158,29 @@ struct HookInterpreterValidationTests {
         for interpreter in invalid {
             #expect(HookInterpreter.rejectionReason(for: interpreter) != nil, "should reject '\(interpreter)'")
         }
+    }
+
+    @Test("Rejects embedded newlines and control characters")
+    func rejectsControlCharacters() {
+        // A newline is split away as token whitespace, so per-token charset checks never see it —
+        // but it survives into the composed command as a shell command separator.
+        for interpreter in ["node\nrm -rf", "node\trm", "node\rm", "node\u{0B}rm", "node\u{00A0}rm"] {
+            #expect(HookInterpreter.rejectionReason(for: interpreter) != nil, "should reject '\(interpreter)'")
+        }
+        // A plain single space between tokens remains legal.
+        #expect(HookInterpreter.rejectionReason(for: "uv run") == nil)
+    }
+
+    @Test("Normalizing on resolve keeps irregular whitespace out of the composed command")
+    func resolveNormalizesWhitespace() {
+        let resolved = HookInterpreter.resolve(
+            explicit: "node\nrm -rf",
+            destination: "x.sh",
+            source: nil
+        )
+        // Structural backstop for the validation above: no newline can reach the command string.
+        #expect(!resolved.contains("\n"))
+        #expect(resolved == "node rm -rf")
     }
 
     @Test("Rejects empty and whitespace-only values")

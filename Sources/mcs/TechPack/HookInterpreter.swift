@@ -52,13 +52,21 @@ enum HookInterpreter {
     ///   - destination: Installed filename — the script that actually runs.
     ///   - source: Pack-relative source path, consulted when `destination` has no extension.
     static func resolve(explicit: String?, destination: String, source: String?) -> String {
-        if let trimmed = explicit?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-            return trimmed
+        // Rejoin on single spaces rather than returning the raw value. Validation already refuses
+        // embedded newlines, and this makes that guarantee structural: no run of whitespace can
+        // reach the composed command, where a newline would act as a shell command separator.
+        if let explicit, case let normalized = tokens(of: explicit).joined(separator: " "),
+           !normalized.isEmpty {
+            return normalized
         }
         if let inferred = inferred(forPath: destination) {
             return inferred
         }
-        if let source, let inferred = inferred(forPath: source) {
+        // Only when the destination carries no extension at all. An extension that is present but
+        // ambiguous (TypeScript) or unrecognised is an answer in itself — falling through to the
+        // source would infer `node` for a `.ts` destination whose source happens to be `.js`.
+        if fileExtension(of: destination).isEmpty,
+           let source, let inferred = inferred(forPath: source) {
             return inferred
         }
         return Constants.HookCommand.defaultInterpreter
@@ -82,9 +90,29 @@ enum HookInterpreter {
         !assumedPresent.contains(binary)
     }
 
-    /// The binary an interpreter string invokes — its first token, for existence checks.
+    /// The binary an interpreter string invokes, for existence checks.
+    ///
+    /// Looks through `env`: `/usr/bin/env node` dispatches to `node`, and verifying `env` — which
+    /// is always present — would make the check pass while the hook dies for want of `node`.
+    /// Skips env's own options and any `NAME=value` assignments preceding the command.
     static func binary(of interpreter: String) -> String {
-        tokens(of: interpreter).first ?? interpreter
+        let parts = tokens(of: interpreter)
+        guard let first = parts.first else { return interpreter }
+        guard URL(fileURLWithPath: first).lastPathComponent == "env" else { return first }
+
+        var rest = Array(parts.dropFirst())
+        while let token = rest.first {
+            if token == "-u" || token == "--unset" {
+                // Consumes the following variable name.
+                rest = Array(rest.dropFirst(2))
+            } else if token.hasPrefix("-") || token.contains("=") {
+                rest = Array(rest.dropFirst())
+            } else {
+                return token
+            }
+        }
+        // `env` with nothing to dispatch — report it as-is rather than inventing a binary.
+        return first
     }
 
     private static func tokens(of string: String) -> [String] {
@@ -155,6 +183,13 @@ enum HookInterpreter {
     /// `validate()` throws at publish time, the sync-time load path drops the value with a warning.
     static func rejectionReason(for interpreter: String) -> String? {
         let trimmed = interpreter.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Before tokenizing: a newline inside the value would be split away as token whitespace
+        // and never reach the per-token charset check, while surviving into the composed command
+        // as a shell command separator. Same for any other control character.
+        if let offender = trimmed.unicodeScalars.first(where: { isForbiddenScalar($0) }) {
+            return "hookInterpreter must not contain control characters or line breaks"
+                + " (found U+\(String(format: "%04X", offender.value)))"
+        }
         if trimmed.count > maxLength {
             return "hookInterpreter must be at most \(maxLength) characters (got \(trimmed.count))"
         }
@@ -171,6 +206,17 @@ enum HookInterpreter {
                 + " shell metacharacters — use a wrapper script for anything else"
         }
         return nil
+    }
+
+    /// Whether a scalar may never appear in an interpreter value.
+    ///
+    /// Every whitespace character except the plain space: tab, newline, carriage return and the
+    /// exotic Unicode spaces all either separate shell commands or separate arguments in ways the
+    /// per-token validation cannot see once splitting has consumed them.
+    private static func isForbiddenScalar(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar == " " { return false }
+        return CharacterSet.controlCharacters.contains(scalar)
+            || CharacterSet.whitespacesAndNewlines.contains(scalar)
     }
 
     // MARK: - Token shapes
