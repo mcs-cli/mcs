@@ -16,6 +16,38 @@ enum FileHasher {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// How a file on disk compares to a hash recorded when it was installed.
+    ///
+    /// Callers map these onto their own vocabulary — `FileContentCheck` reports them, and
+    /// `ScopeDuplicationCheck` refuses to delete anything that is not `.matches` — but the
+    /// policy for *what counts as drift* lives here so the two cannot disagree. A disagreement
+    /// would mean deleting a file doctor elsewhere reports as user-modified.
+    enum DriftState {
+        case matches
+        case missing
+        case directory
+        case changed
+        case unreadable(any Error)
+    }
+
+    /// Compare a file against its recorded hash.
+    ///
+    /// A missing file has nothing to compare and a directory is covered by the entries for the
+    /// files inside it, so neither is drift. An unreadable file is reported rather than assumed
+    /// intact — the caller decides how cautious to be.
+    static func drift(of url: URL, expecting expectedHash: String) -> DriftState {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return .missing
+        }
+        if isDirectory.boolValue { return .directory }
+        do {
+            return try sha256(of: url) == expectedHash ? .matches : .changed
+        } catch {
+            return .unreadable(error)
+        }
+    }
+
     /// Result of hashing all files in a directory, with per-file error resilience.
     struct DirectoryHashResult {
         let hashes: [(relativePath: String, hash: String)]

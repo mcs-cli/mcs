@@ -2112,3 +2112,416 @@ struct GlobalPackBlockingLifecycleTests {
         }
     }
 }
+
+// MARK: - Scope Duplication (Issue #371)
+
+/// A pack configured in both the global scope and a project installs its artifacts twice.
+/// `mcs sync` blocks the *transition* that creates a duplicate but deliberately leaves an existing
+/// one in place, so these tests cover the only thing that finds it afterwards.
+///
+/// The check reads two real `ProjectState` files with populated artifact records and file hashes,
+/// so every fixture is built with the real configurators rather than hand-planted JSON.
+@Suite("Scope duplication check")
+struct ScopeDuplicationCheckTests {
+    /// Configure `pack` in the project first, then globally — `filterGloballyBlocked` rejects the
+    /// reverse order, so this is the only sequence that produces a both-scope pack.
+    private func configureBothScopes(
+        bed: LifecycleTestBed,
+        pack: any TechPack,
+        registry: TechPackRegistry,
+        projectExclusions: [String: Set<String>] = [:],
+        globalExclusions: [String: Set<String>] = [:]
+    ) throws {
+        try bed.makeConfigurator(registry: registry).configure(
+            packs: [pack], confirmRemovals: false, excludedComponents: projectExclusions
+        )
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(
+            packs: [pack], confirmRemovals: false, excludedComponents: globalExclusions
+        )
+    }
+
+    private func checks(
+        bed: LifecycleTestBed,
+        registry: TechPackRegistry,
+        packFilter: String? = nil
+    ) -> [any DoctorCheck] {
+        ScopeDuplicationCheck.checks(
+            projectRoot: bed.project,
+            registry: registry,
+            environment: bed.env,
+            packFilter: packFilter.map { Set($0.components(separatedBy: ",")) }
+        )
+    }
+
+    /// A pack with one skill, one hook and one template — the three surfaces that duplicate.
+    private func duplicatingPack(bed: LifecycleTestBed) throws -> any TechPack {
+        try MockTechPack(
+            identifier: "dup-pack",
+            displayName: "Dup Pack",
+            components: [
+                bed.skillComponent(
+                    pack: "dup-pack", id: "skillA",
+                    source: bed.makeSkillSource(name: "dup-skill.md"),
+                    destination: "dup-skill.md"
+                ),
+                bed.hookComponent(
+                    pack: "dup-pack", id: "hookA",
+                    source: bed.makeHookSource(name: "dup-hook.sh"),
+                    destination: "dup-hook.sh",
+                    hookRegistration: HookRegistration(event: .preToolUse)
+                ),
+            ],
+            templates: [
+                TemplateContribution(
+                    sectionIdentifier: "dup-pack",
+                    templateContent: "Dup pack guidance.",
+                    placeholders: []
+                ),
+            ]
+        )
+    }
+
+    // MARK: Detection
+
+    @Test("Names every duplicated surface when a pack is configured in both scopes")
+    func reportsDuplicatedSurfaces() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let emitted = checks(bed: bed, registry: registry)
+        let check = try #require(emitted.first)
+        #expect(emitted.count == 1)
+        let result = check.check()
+        guard case let .fail(message) = result else {
+            Issue.record("Expected .fail, got \(result)")
+            return
+        }
+        #expect(message.contains("also installed globally"))
+        #expect(message.contains("1 skill"))
+        #expect(message.contains("1 hook"))
+        #expect(message.contains("1 CLAUDE.md section"))
+        #expect(check.name == "Scope duplication: dup-pack")
+        #expect(check.section == "Project")
+    }
+
+    @Test("Passes when the pack is in both scopes but nothing actually duplicates")
+    func passesWhenNoArtifactsOverlap() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // An MCP server registers `local` in the project and `user` globally — the local one
+        // shadows rather than duplicating — and the pack ships no templates or files.
+        let pack = MockTechPack(
+            identifier: "mcp-only",
+            displayName: "MCP Only",
+            components: [bed.mcpComponent(pack: "mcp-only", id: "srv", name: "srv")]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let emitted = checks(bed: bed, registry: registry)
+        let check = try #require(emitted.first)
+        #expect(emitted.count == 1)
+        let result = check.check()
+        guard case let .pass(message) = result else {
+            Issue.record("Expected .pass, got \(result)")
+            return
+        }
+        #expect(message.contains("no artifacts overlap"))
+    }
+
+    @Test("A template excluded in one scope is not counted as duplicated")
+    func templateFilteredByDependencyIsNotDuplicated() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // The template depends on the hook, so excluding the hook globally drops the section
+        // there too — `Configurator.preloadTemplates` filters it before composition.
+        let pack = try MockTechPack(
+            identifier: "tmpl-pack",
+            displayName: "Template Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "tmpl-pack", id: "hookA",
+                    source: bed.makeHookSource(name: "tmpl-hook.sh"),
+                    destination: "tmpl-hook.sh",
+                    isRequired: false
+                ),
+            ],
+            templates: [
+                TemplateContribution(
+                    sectionIdentifier: "tmpl-pack",
+                    templateContent: "Guidance.",
+                    placeholders: [],
+                    dependencies: ["tmpl-pack.hookA"]
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(
+            bed: bed, pack: pack, registry: registry,
+            globalExclusions: ["tmpl-pack": Set(["tmpl-pack.hookA"])]
+        )
+
+        let emitted = checks(bed: bed, registry: registry)
+        let check = try #require(emitted.first)
+        #expect(emitted.count == 1)
+        let result = check.check()
+        guard case .pass = result else {
+            Issue.record("Expected .pass — nothing survives in both scopes, got \(result)")
+            return
+        }
+    }
+
+    // MARK: Factory scoping
+
+    @Test("Emits nothing when no global scope has ever been synced")
+    func emitsNothingWithoutGlobalState() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        // The regression guard: falling back to the pack registry here — as DoctorRunner does
+        // for check scoping — would report every project pack as a duplicate.
+        #expect(checks(bed: bed, registry: registry).isEmpty)
+    }
+
+    @Test("Emits nothing for a pack configured in only one scope")
+    func emitsNothingForSingleScopePack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(checks(bed: bed, registry: registry).isEmpty)
+    }
+
+    @Test("Honours the --pack filter")
+    func respectsPackFilter() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        #expect(checks(bed: bed, registry: registry, packFilter: "other-pack").isEmpty)
+        #expect(checks(bed: bed, registry: registry, packFilter: "dup-pack").count == 1)
+    }
+
+    // MARK: Fixability gates
+
+    @Test("Refuses to fix when the project installs a component the global scope excludes")
+    func blocksFixOnDivergentExclusions() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(
+            bed: bed, pack: pack, registry: registry,
+            globalExclusions: ["dup-pack": Set(["dup-pack.hookA"])]
+        )
+
+        let check = try #require(checks(bed: bed, registry: registry).first)
+        #expect(check.fixCommandPreview == nil)
+        let result = check.fix()
+        guard case let .notFixable(reason) = result else {
+            Issue.record("Expected .notFixable, got \(result)")
+            return
+        }
+        #expect(reason.contains("hookA"))
+        #expect(try bed.projectState().configuredPacks.contains("dup-pack"))
+    }
+
+    @Test("Refuses to fix when the two scopes answered a prompt differently")
+    func blocksFixOnDivergentPromptAnswers() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try MockPromptTechPack(
+            identifier: "prompt-pack",
+            displayName: "Prompt Pack",
+            prompts: [PromptDefinition(
+                key: "__TOKEN__", type: .input,
+                label: nil, defaultValue: "shared", options: nil,
+                detectPatterns: nil, scriptCommand: nil
+            )],
+            components: [
+                bed.skillComponent(
+                    pack: "prompt-pack", id: "skillA",
+                    source: bed.makeSkillSource(name: "prompt-skill.md"),
+                    destination: "prompt-skill.md"
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        // Simulate the global scope having been answered differently.
+        var globalState = try ProjectState(stateFile: bed.env.globalStateFile)
+        globalState.setResolvedValues(["__TOKEN__": "a-different-answer"])
+        try globalState.save()
+
+        let check = try #require(checks(bed: bed, registry: registry).first)
+        let result = check.fix()
+        guard case let .notFixable(reason) = result else {
+            Issue.record("Expected .notFixable, got \(result)")
+            return
+        }
+        #expect(reason.contains("__TOKEN__"))
+    }
+
+    /// The guard for issue #365: `unconfigurePack` deletes tracked files without consulting the
+    /// recorded hash, so an edited file would be silently destroyed. Drift must block the fix.
+    @Test("Refuses to fix when an installed file was edited, and leaves it untouched")
+    func blocksFixOnEditedFile() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let installedSkill = bed.project.appendingPathComponent(".claude/skills/dup-skill.md")
+        try "# Skill\nMy own edits.".write(to: installedSkill, atomically: true, encoding: .utf8)
+
+        let check = try #require(checks(bed: bed, registry: registry).first)
+        #expect(check.fixCommandPreview == nil)
+        let result = check.fix()
+        guard case let .notFixable(reason) = result else {
+            Issue.record("Expected .notFixable, got \(result)")
+            return
+        }
+        #expect(reason.contains("dup-skill.md"))
+        #expect(reason.contains("changed since install"))
+
+        let survived = try String(contentsOf: installedSkill, encoding: .utf8)
+        #expect(survived.contains("My own edits."))
+        #expect(try bed.projectState().configuredPacks.contains("dup-pack"))
+    }
+
+    // MARK: Fix
+
+    @Test("Fix removes the project copy, keeps the global one, and prunes the project index")
+    func fixRemovesProjectCopyOnly() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let projectSkill = bed.project.appendingPathComponent(".claude/skills/dup-skill.md")
+        let globalSkill = bed.home.appendingPathComponent(".claude/skills/dup-skill.md")
+        #expect(FileManager.default.fileExists(atPath: projectSkill.path))
+        #expect(FileManager.default.fileExists(atPath: globalSkill.path))
+
+        let check = try #require(checks(bed: bed, registry: registry).first)
+        #expect(check.fixCommandPreview != nil)
+        let result = check.fix()
+        guard case let .fixed(message) = result else {
+            Issue.record("Expected .fixed, got \(result)")
+            return
+        }
+        #expect(message.contains("global copy kept"))
+
+        // Project copy gone, global copy intact.
+        #expect(!FileManager.default.fileExists(atPath: projectSkill.path))
+        #expect(FileManager.default.fileExists(atPath: globalSkill.path))
+        #expect(try !(bed.projectState().configuredPacks.contains("dup-pack")))
+        #expect(try ProjectState(stateFile: bed.env.globalStateFile)
+            .configuredPacks.contains("dup-pack"))
+
+        // The project's CLAUDE.local.md section is gone; the global CLAUDE.md keeps its own.
+        let projectClaude = (try? String(contentsOf: bed.claudeLocalPath, encoding: .utf8)) ?? ""
+        #expect(!projectClaude.contains("Dup pack guidance."))
+
+        // The project index no longer credits this project with the pack.
+        let indexData = try ProjectIndex(path: bed.env.projectsIndexFile).load()
+        let projectEntry = indexData.projects.first { $0.path == bed.project.path }
+        #expect(projectEntry?.packs.contains("dup-pack") != true)
+
+        // Re-running finds nothing left to report.
+        #expect(checks(bed: bed, registry: registry).isEmpty)
+    }
+
+    /// `unconfigurePack` removes gitignore entries without reference counting, so the project
+    /// removal would otherwise strip a line the global copy still claims.
+    @Test("Fix preserves gitignore entries the global copy still claims")
+    func fixPreservesSharedGitignoreEntries() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try MockTechPack(
+            identifier: "ignore-pack",
+            displayName: "Ignore Pack",
+            components: [
+                bed.skillComponent(
+                    pack: "ignore-pack", id: "skillA",
+                    source: bed.makeSkillSource(name: "ignore-skill.md"),
+                    destination: "ignore-skill.md"
+                ),
+                ComponentDefinition(
+                    id: "ignore-pack.ignores",
+                    displayName: "ignores",
+                    description: "Gitignore entries",
+                    type: .configuration,
+                    packIdentifier: "ignore-pack",
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .gitignoreEntries(entries: [".mcs-scratch"])
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let gitignore = bed.home.appendingPathComponent(".config/git/ignore")
+        #expect(try String(contentsOf: gitignore, encoding: .utf8).contains(".mcs-scratch"))
+
+        let fixResult = try #require(checks(bed: bed, registry: registry).first).fix()
+        guard case .fixed = fixResult else {
+            Issue.record("Expected .fixed, got \(fixResult)")
+            return
+        }
+
+        let after = try String(contentsOf: gitignore, encoding: .utf8)
+        #expect(after.contains(".mcs-scratch"))
+    }
+
+    // MARK: Runner integration
+
+    @Test("Doctor surfaces the duplication as an issue")
+    func doctorReportsDuplicationAsIssue() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [pack], confirmRemovals: false)
+        var baselineRunner = bed.makeDoctorRunner(registry: registry)
+        let baseline = try baselineRunner.run()
+
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [pack], confirmRemovals: false)
+        var runner = bed.makeDoctorRunner(registry: registry)
+        let duplicated = try runner.run()
+
+        // Deltas, not absolutes: ambient checks contribute their own results.
+        #expect(duplicated.issues > baseline.issues)
+    }
+}

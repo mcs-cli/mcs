@@ -9,12 +9,18 @@ import Foundation
 // - **Cleanup**: Removing deprecated components (MCP servers, plugins)
 // - **Migration**: One-time data moves (state files)
 // - **Trivial repairs**: Permission fixes (chmod), gitignore additions (idempotent)
+// - **Scope reconciliation**: Removing a pack from one scope when a provably equivalent copy
+//   exists in another, by calling `Configurator.unconfigurePack` rather than re-implementing
+//   removal. This is the one category that drives the sync engine, so it carries a higher bar:
+//   the check must refuse the fix unless it can prove nothing is lost — see
+//   `ScopeDuplicationCheck`, which gates on component subset, prompt-answer parity, and the
+//   recorded hash of every file it would delete. Do not copy the pattern without the gates.
 //
 // `doctor --fix` does NOT handle:
 // - **Additive operations**: Installing packages, registering servers, copying hooks/skills/commands.
 //   These are `mcs sync`'s responsibility.
 //
-// This separation keeps `doctor --fix` predictable and non-destructive.
+// This separation keeps `doctor --fix` predictable, and destructive only where it can show its work.
 
 struct CommandCheck: DoctorCheck {
     let name: String
@@ -196,21 +202,17 @@ struct FileContentCheck: DoctorCheck {
     let expectedHash: String
 
     func check() -> CheckResult {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path.path, isDirectory: &isDir) else {
-            return .skip("missing (checked separately)")
-        }
-        if isDir.boolValue {
-            return .skip("directory (contents checked individually)")
-        }
-        do {
-            let currentHash = try FileHasher.sha256(of: path)
-            if currentHash == expectedHash {
-                return .pass("content matches")
-            }
-            return .warn("modified since last sync")
-        } catch {
-            return .fail("could not read file: \(error.localizedDescription)")
+        switch FileHasher.drift(of: path, expecting: expectedHash) {
+        case .matches:
+            .pass("content matches")
+        case .missing:
+            .skip("missing (checked separately)")
+        case .directory:
+            .skip("directory (contents checked individually)")
+        case .changed:
+            .warn("modified since last sync")
+        case let .unreadable(error):
+            .fail("could not read file: \(error.localizedDescription)")
         }
     }
 
