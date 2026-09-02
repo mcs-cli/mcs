@@ -155,7 +155,11 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ## Code Style
 
-SwiftFormat and SwiftLint enforce consistent code style. Both are installed via Homebrew.
+SwiftFormat and SwiftLint enforce consistent code style. CI installs both from Homebrew and always
+gets the latest release; a local install may come from a different manager (Mint, for instance) and
+sit earlier on `PATH`, so `brew install` can appear to succeed while the old binary keeps answering.
+If the formatter fails with `error: Unknown rule '<name>'` on every file, that is a stale local
+install rather than a broken config — check `which -a swiftformat` and the version of each copy.
 
 ```bash
 # Format modified files (run before committing)
@@ -186,8 +190,9 @@ swiftlint --fix
 
 ## Git
 
-- **Never amend commits** — always create new commits so the change history stays trackable
-- **Never force-push** — use regular `git push` only
+- **Prefer linear history** — rebase a feature branch onto `main` to resolve conflicts or catch up, rather than merging `main` into it. `git push --force-with-lease` afterwards is expected and fine
+- **Never rewrite shared history** — never force-push `main`, or a branch someone else may be building on. `--force-with-lease` on your own feature branch is fine; a bare `--force` is not
+- **Amend only what has not been pushed under its final hash** — otherwise add a new commit, so the change history stays trackable. Correcting a botched conflict resolution mid-rebase is amending in this sense and is fine; rewriting a reviewed commit is not
 - **Always run `swiftformat` and `swiftlint` on changed files before committing** — CI will reject PRs that fail lint. Run `swiftformat <changed-files>` then `swiftlint` to catch issues locally
 
 ## Key Design Decisions
