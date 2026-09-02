@@ -43,6 +43,64 @@ struct ConfigurationDiscoveryTests {
         #expect(config.mcpServers.first?.scope == "local")
     }
 
+    @Test("recovers a multi-token hook interpreter from the registered command")
+    func recoversHookInterpreter() throws {
+        let home = try makeGlobalTmpDir(label: "discovery-interpreter")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let projectRoot = home.appendingPathComponent("my-project")
+        let claudeDir = projectRoot.appendingPathComponent(Constants.FileNames.claudeDirectory)
+        try FileManager.default.createDirectory(
+            at: projectRoot.appendingPathComponent(".git"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: claudeDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+
+        try """
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "node --experimental-strip-types .claude/hooks/gate.ts" }] }
+            ],
+            "SessionStart": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/start.sh" }] }
+            ]
+          }
+        }
+        """.write(
+            to: claudeDir.appendingPathComponent(Constants.FileNames.settingsLocal),
+            atomically: true,
+            encoding: .utf8
+        )
+        let hooksDir = claudeDir.appendingPathComponent("hooks")
+        try "console.log('gate')".write(
+            to: hooksDir.appendingPathComponent("gate.ts"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "#!/bin/bash\necho start".write(
+            to: hooksDir.appendingPathComponent("start.sh"),
+            atomically: true,
+            encoding: .utf8
+        )
+
+        let discovery = ConfigurationDiscovery(environment: env, output: CLIOutput(colorsEnabled: false))
+        let config = discovery.discover(scope: ConfigurationDiscovery.Scope.project(projectRoot))
+
+        let gate = config.hookFiles.first { $0.filename == "gate.ts" }
+        #expect(gate?.hookRegistration?.event == .preToolUse)
+        #expect(gate?.hookRegistration?.interpreter == "node --experimental-strip-types")
+
+        // A bash hook records no interpreter — that is the default, not a value to carry.
+        let start = config.hookFiles.first { $0.filename == "start.sh" }
+        #expect(start?.hookRegistration?.event == .sessionStart)
+        #expect(start?.hookRegistration?.interpreter == nil)
+    }
+
     @Test("discovers MCP servers when project root equals git root")
     func discoversMCPServersExactMatch() throws {
         let home = try makeGlobalTmpDir(label: "discovery-exact")

@@ -93,7 +93,7 @@ struct ProjectSyncStrategy: SyncStrategy {
                 )
                 artifacts.files.append(contentsOf: result.paths)
                 artifacts.fileHashes.merge(result.hashes) { _, new in new }
-                if let hookCommand = component.hookCommand(prefix: scope.hookCommandPrefix) {
+                if let hookCommand = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                     artifacts.hookCommands.append(hookCommand)
                 }
                 if !result.paths.isEmpty {
@@ -154,7 +154,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             packs: packs,
             excludedComponents: excludedComponents,
             settings: &settings,
-            hookCommandPrefix: scope.hookCommandPrefix,
+            hookPathPrefix: scope.hookPathPrefix,
             resolvedValues: resolvedValues,
             output: output
         )

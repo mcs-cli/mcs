@@ -186,6 +186,41 @@ cat .claude/.mcs-project
 mcs sync
 ```
 
+### A hook is registered but never runs
+
+**Symptom**: `mcs doctor` passes, the hook file exists, the settings entry is there — and nothing
+happens. Hook logs are empty, which reads as "no problems" rather than "never ran".
+
+**Causes**:
+
+1. **The interpreter is not on Claude Code's PATH.** This is the common one. Claude Code runs hooks
+   through a shell that may not have `/opt/homebrew/bin` or a version manager's shims (nvm, mise,
+   pyenv, rbenv, volta). `node` in your terminal is not proof `node` resolves for the hook.
+2. **The interpreter is missing entirely.** Check the `Hooks` section of `mcs doctor`, which
+   verifies each pack's interpreter binary.
+3. **The interpreter is wrong for the file.** A `.ts` hook with no `hookInterpreter` runs under
+   bash, which cannot parse it. `mcs pack validate` warns the pack author about this.
+4. **The flags are unsupported by the installed version** — for example
+   `node --experimental-strip-types` needs Node 22.6 or newer. The derived doctor check verifies
+   the binary, not its flags.
+
+**Fix**:
+```bash
+# What command is actually registered?
+python3 -m json.tool .claude/settings.local.json | grep -A2 '"command"'
+
+# Does the interpreter resolve, and from where?
+which node
+
+# Run the registered command by hand from the project root
+bash -c 'node --version'
+```
+
+If `which` points inside `~/.nvm`, `~/.pyenv`, `~/.asdf`, `~/.rbenv` or similar, `mcs doctor`
+reports it as a warning. Install the runtime somewhere always on PATH (`brew install node`), or ask
+the pack author for a `.sh` wrapper that sources the version manager before invoking the real
+interpreter.
+
 ### Components showing "excluded via --customize"
 
 **Symptom**: `mcs doctor` shows dimmed `○ <component>: excluded via --customize` entries.

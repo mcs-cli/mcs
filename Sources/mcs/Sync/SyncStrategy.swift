@@ -152,7 +152,14 @@ extension SyncStrategy {
 
         let files = pack.components.compactMap { component -> String? in
             if case let .copyPackFile(_, destination, fileType) = component.installAction {
-                return "+\(scope.fileDisplayPrefix)\(fileType.subdirectory)\(destination)"
+                let path = "+\(scope.fileDisplayPrefix)\(fileType.subdirectory)\(destination)"
+                // Name the interpreter only when it isn't the default: it is the one thing about a
+                // hook a reader cannot predict from the path, and bash is the status quo.
+                if let invocation = component.hookInvocation,
+                   !HookInterpreter.isDefault(invocation.interpreter) {
+                    return "\(path) (\(invocation.interpreter))"
+                }
+                return path
             }
             return nil
         }

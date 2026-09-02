@@ -62,6 +62,7 @@ Each component represents something MCS can install, verify, and uninstall.
 | `hookTimeout` | Integer | No | Seconds before cancel. Requires `hookEvent` |
 | `hookAsync` | Boolean | No | Run hook in background. Requires `hookEvent` |
 | `hookStatusMessage` | String | No | Custom spinner message. Requires `hookEvent` |
+| `hookInterpreter` | String | No | Command the script runs under (`node`, `python3`, `uv run`). Defaults to the extension's interpreter, else `bash`. Requires `hookEvent` |
 | `doctorChecks` | [DoctorCheck] | No | Custom health checks for this component |
 
 ### Component Types
@@ -156,9 +157,36 @@ Copies a hook script file. Infers `type: hookFile`. Combine with `hookEvent` to 
 ```
 
 - `source`: path to script in the pack repo
-- `destination`: filename in `<project>/.claude/hooks/`
+- `destination`: filename in `<project>/.claude/hooks/`, always namespaced under `<pack-id>/`
 - MUST set `hookEvent` at component level to register the hook in settings
 - `hookMatcher` is a regex that filters when the hook fires (e.g., tool name for `PreToolUse`)
+
+**Interpreter.** The registered command is `<interpreter> <path>`. Resolution order:
+`hookInterpreter` → the extension's interpreter → `bash`.
+
+| Extension | Interpreter |
+|-----------|-------------|
+| `.sh`, `.bash`, none | `bash` |
+| `.zsh` | `zsh` |
+| `.js`, `.mjs`, `.cjs` | `node` |
+| `.py` | `python3` |
+| `.rb` | `ruby` |
+| `.pl` | `perl` |
+| `.ts`, `.mts`, `.cts`, `.tsx` | none — declare `hookInterpreter` |
+
+```yaml
+- id: gate-hook
+  description: Blocks risky tool calls
+  hookEvent: PreToolUse
+  hookInterpreter: node --experimental-strip-types --disable-warning=ExperimentalWarning
+  hook:
+    source: hooks/gate.ts
+    destination: gate.ts
+```
+
+Accepts a bare command, an absolute path, and plain arguments. Rejects shell metacharacters and
+relative paths — use a wrapper script for anything more complex, or when the interpreter only
+exists inside a version manager (nvm, pyenv, mise), since Claude Code may not see that `PATH`.
 
 ### `command: {source, destination}`
 
@@ -389,7 +417,7 @@ Doctor checks verify pack health. Two levels:
 | `brew: X` | `commandExists` for X |
 | `mcp: {...}` | MCP server registered |
 | `plugin: "..."` | Plugin enabled |
-| `hook: {...}` | Hook file exists |
+| `hook: {...}` | Hook file exists + interpreter binary resolves (not for bash/sh/zsh) |
 | `skill: {...}` | Skill directory exists |
 | `command: {...}` | Command file exists |
 | `agent: {...}` | Agent file exists |
@@ -427,7 +455,9 @@ The script receives environment variables:
 - Prompt `key` values must be unique
 - Doctor check required fields must be present and non-empty
 - `hookTimeout` must be a positive integer
-- `hookMatcher`, `hookTimeout`, `hookAsync`, `hookStatusMessage` all require `hookEvent` to be set
+- `hookMatcher`, `hookTimeout`, `hookAsync`, `hookStatusMessage`, `hookInterpreter` all require `hookEvent` to be set
+- `hookInterpreter` must be a bare command or absolute path plus plain arguments — no shell
+  metacharacters, no relative paths
 - `shell:` shorthand requires explicit `type:` field
 
 ### File References

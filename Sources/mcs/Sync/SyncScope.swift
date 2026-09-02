@@ -49,8 +49,9 @@ struct SyncScope {
     /// Suffix for output messages: `" (global)"` when in global scope, empty otherwise.
     let labelSuffix: String
 
-    /// Prefix for hook commands in settings (e.g. `"bash .claude/hooks/"` or `"bash ~/.claude/hooks/"`).
-    let hookCommandPrefix: String
+    /// Directory portion of hook commands in settings (e.g. `".claude/hooks/"` or
+    /// `"~/.claude/hooks/"`). The interpreter that precedes it comes from the component.
+    let hookPathPrefix: String
 
     /// Display prefix for file paths in dry-run output (e.g. `".claude/"` or `"~/.claude/"`).
     let fileDisplayPrefix: String
@@ -75,7 +76,7 @@ extension SyncScope {
             isGlobalScope: false,
             syncHint: "mcs sync",
             labelSuffix: "",
-            hookCommandPrefix: Constants.HookCommand.projectPrefix,
+            hookPathPrefix: Constants.HookCommand.projectDirectory,
             fileDisplayPrefix: ".claude/"
         )
     }
@@ -95,7 +96,7 @@ extension SyncScope {
             isGlobalScope: true,
             syncHint: "mcs sync --global",
             labelSuffix: " (global)",
-            hookCommandPrefix: Constants.HookCommand.globalPrefix,
+            hookPathPrefix: Constants.HookCommand.globalDirectory,
             fileDisplayPrefix: "~/.claude/"
         )
     }

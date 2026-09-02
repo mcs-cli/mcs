@@ -25,6 +25,128 @@ struct PackHeuristicsTests {
         )
     }
 
+    // MARK: - Hook Interpreters
+
+    private func hookComponent(
+        id: String = "test-pack.hook",
+        source: String,
+        destination: String,
+        interpreter: String? = nil,
+        doctorChecks: [ExternalDoctorCheckDefinition]? = nil
+    ) -> ExternalComponentDefinition {
+        ExternalComponentDefinition(
+            id: id,
+            displayName: "Hook",
+            description: "A hook",
+            type: .hookFile,
+            hookRegistration: HookRegistration(event: .sessionStart, interpreter: interpreter),
+            installAction: .copyPackFile(ExternalCopyPackFileConfig(
+                source: source,
+                destination: destination,
+                fileType: .hook
+            )),
+            doctorChecks: doctorChecks
+        )
+    }
+
+    @Test("Warns when a hook interpreter has no brew component installing it")
+    func warnsOnUninstalledInterpreter() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("uses node but no brew component installs node")
+        })
+    }
+
+    @Test("No interpreter warning when a brew component installs it")
+    func noWarningWhenBrewInstallsInterpreter() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = ExternalComponentDefinition(
+            id: "test-pack.node",
+            displayName: "Node",
+            description: "Node runtime",
+            type: .brewPackage,
+            installAction: .brewInstall(package: "node")
+        )
+        let manifest = minimalManifest(components: [
+            brew,
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("installs node") })
+    }
+
+    @Test("Bash hooks never warn about their interpreter")
+    func bashNeverWarns() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/start.sh", destination: "start.sh"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("hookInterpreter") })
+        #expect(!findings.contains { $0.message.contains("installs bash") })
+    }
+
+    @Test("Warns when a TypeScript hook declares no interpreter")
+    func warnsOnAmbiguousExtension() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/gate.ts", destination: "gate.ts"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("declares no")
+                && $0.message.contains("hookInterpreter")
+        })
+    }
+
+    @Test("No ambiguity warning once the TypeScript hook declares an interpreter")
+    func noAmbiguityWarningWhenDeclared() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = minimalManifest(components: [
+            hookComponent(
+                source: "hooks/gate.ts",
+                destination: "gate.ts",
+                interpreter: "node --experimental-strip-types"
+            ),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("declares no") })
+    }
+
+    @Test("Warns when a hookEventExists check asserts bash against a non-bash hook")
+    func warnsOnInconsistentDoctorCheck() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let check = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Session hook registered",
+            command: "bash .claude/hooks/fmt.js",
+            event: "SessionStart"
+        )
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js", doctorChecks: [check]),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("the check will never match")
+        })
+    }
+
     // MARK: - Root Source Copy
 
     @Test("Detects source: '.' copying pack root")

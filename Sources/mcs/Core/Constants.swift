@@ -116,17 +116,24 @@ enum Constants {
 
     // MARK: - Hook Commands
 
-    /// Prefixes for the `command` string a hook component registers in settings.
+    /// Pieces of the `command` string a hook component registers in settings.
+    ///
+    /// A registered command is `"<interpreter> <directory><destination>"`. The interpreter comes
+    /// from the component (explicit `hookInterpreter`, else inferred from the file extension, else
+    /// `defaultInterpreter`); only the directory is scope-dependent.
     ///
     /// Sync writes these and doctor reads them back to match a settings entry against the
     /// component that declared it, so both sides must build the string identically — see
-    /// `ComponentDefinition.hookCommand(prefix:)`.
+    /// `ComponentDefinition.hookCommand(pathPrefix:)`.
     enum HookCommand {
+        /// Interpreter used when a component declares none and the extension implies none.
+        static let defaultInterpreter = "bash"
+
         /// Project scope — hooks live in `<project>/.claude/hooks/`.
-        static let projectPrefix = "bash .claude/hooks/"
+        static let projectDirectory = ".claude/hooks/"
 
         /// Global scope — hooks live in `~/.claude/hooks/`.
-        static let globalPrefix = "bash ~/.claude/hooks/"
+        static let globalDirectory = "~/.claude/hooks/"
     }
 
     // MARK: - MCP Scopes

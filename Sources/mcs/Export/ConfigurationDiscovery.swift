@@ -105,7 +105,15 @@ struct ConfigurationDiscovery {
         discoverMCPServers(scope: scope, into: &config)
 
         // 2. Discover settings (hooks, plugins, remaining keys)
-        let hookCommands = discoverSettings(at: settingsPath, into: &config)
+        let hookDirectory = switch scope {
+        case .global: Constants.HookCommand.globalDirectory
+        case .project: Constants.HookCommand.projectDirectory
+        }
+        let hookCommands = discoverSettings(
+            at: settingsPath,
+            hookDirectory: hookDirectory,
+            into: &config
+        )
 
         // 3. Discover files in .claude/ subdirectories
         discoverFiles(in: hooksDir, hookCommands: hookCommands, into: &config)
@@ -196,7 +204,11 @@ struct ConfigurationDiscovery {
 
     /// Discovers settings and returns hook command → metadata mappings for file correlation.
     @discardableResult
-    private func discoverSettings(at settingsPath: URL, into config: inout DiscoveredConfiguration) -> [String: HookRegistration]? {
+    private func discoverSettings(
+        at settingsPath: URL,
+        hookDirectory: String,
+        into config: inout DiscoveredConfiguration
+    ) -> [String: HookRegistration]? {
         let settings: Settings
         do {
             settings = try Settings.load(from: settingsPath)
@@ -244,7 +256,11 @@ struct ConfigurationDiscovery {
                             matcher: group.matcher,
                             timeout: entry.timeout,
                             isAsync: entry.isAsync,
-                            statusMessage: entry.statusMessage
+                            statusMessage: entry.statusMessage,
+                            interpreter: Self.interpreter(
+                                ofHookCommand: command,
+                                directory: hookDirectory
+                            )
                         )
                     } else {
                         output.warn("Skipping hook with unknown event '\(event)' — mcs may need to be updated")
@@ -253,6 +269,25 @@ struct ConfigurationDiscovery {
             }
         }
         return commandToReg.isEmpty ? nil : commandToReg
+    }
+
+    /// The interpreter portion of a registered hook command, or nil when it is the default or the
+    /// command is not a managed hook invocation.
+    ///
+    /// Delegates the parse to `HookInterpreter`, which requires the trailing token to be a hook
+    /// path. That requirement is what keeps an unrelated multi-token entry — `mcs check-updates
+    /// --hook`, or a `python3 -m pkg.hook` pointing elsewhere — from being exported as a bogus
+    /// `hookInterpreter`. Without any of this, exporting a live `node …/gate.ts` hook would emit a
+    /// manifest that re-registers it under bash.
+    private static func interpreter(ofHookCommand command: String, directory: String) -> String? {
+        guard let interpreter = HookInterpreter.interpreter(
+            ofRegisteredCommand: command,
+            directory: directory
+        ),
+            !HookInterpreter.isDefault(interpreter),
+            HookInterpreter.rejectionReason(for: interpreter) == nil
+        else { return nil }
+        return interpreter
     }
 
     // MARK: - File Discovery

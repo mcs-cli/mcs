@@ -41,6 +41,7 @@ These fields are available on every component, regardless of which shorthand key
 | `hookTimeout` | `Integer` | No | Seconds before canceling the hook (defaults: 600 command, 30 prompt, 60 agent) |
 | `hookAsync` | `Boolean` | No | If `true`, runs the hook in the background without blocking |
 | `hookStatusMessage` | `String` | No | Custom spinner message displayed while the hook runs |
+| `hookInterpreter` | `String` | No | Command the hook script runs under, e.g. `node`. Defaults to the interpreter implied by the file extension, else `bash`. Requires `hookEvent` |
 | `doctorChecks` | `[DoctorCheck]` | No | Custom health checks (see [Doctor Checks](#doctor-checks)) |
 
 ### Shorthand Keys
@@ -134,13 +135,57 @@ Infers: `type: plugin`, `installAction: plugin`
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `source` | `String` | Yes | Path to script in the pack repo |
-| `destination` | `String` | Yes | Filename in `<project>/.claude/hooks/` |
+| `destination` | `String` | Yes | Filename in `<project>/.claude/hooks/`. Any extension is valid — see [Hook interpreters](#hook-interpreters) |
 
-Use with `hookEvent` to register the hook in `settings.local.json`. The optional `hookMatcher`, `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map directly to Claude Code's hook handler fields (`matcher`, `timeout`, `async`, `statusMessage`).
+Use with `hookEvent` to register the hook in `settings.local.json`. The optional `hookMatcher`, `hookTimeout`, `hookAsync`, and `hookStatusMessage` fields map directly to Claude Code's hook handler fields (`matcher`, `timeout`, `async`, `statusMessage`). `hookInterpreter` is different — it does not reach Claude Code at all; it changes the `command` string mcs composes.
 
-If two packs declare the same `destination`, both are automatically namespaced with a `<pack-id>/` subdirectory prefix to prevent collisions.
+Hook destinations are **always** namespaced with a `<pack-id>/` subdirectory prefix, whether or not another pack declares the same `destination`. That prevents a pack from overwriting a hook you wrote by hand at a flat path like `.claude/hooks/lint.sh`.
 
 Infers: `type: hookFile`, `installAction: copyPackFile(fileType: hook)`
+
+##### Hook interpreters
+
+The registered command is `<interpreter> <path>`. The interpreter is resolved in three steps:
+
+1. `hookInterpreter`, if you declare one.
+2. The file extension of `destination` — falling back to `source` when `destination` has none.
+3. `bash`.
+
+| Extension | Interpreter |
+|-----------|-------------|
+| `.sh`, `.bash`, no extension | `bash` |
+| `.zsh` | `zsh` |
+| `.js`, `.mjs`, `.cjs` | `node` |
+| `.py` | `python3` |
+| `.rb` | `ruby` |
+| `.pl` | `perl` |
+| `.ts`, `.mts`, `.cts`, `.tsx` | **none** — declare `hookInterpreter` |
+
+TypeScript is deliberately excluded: `node --experimental-strip-types`, `tsx`, `bun` and `deno` are
+all reasonable, and guessing wrong produces a hook that fails at runtime. `mcs pack validate` warns
+when a TypeScript hook declares no interpreter.
+
+```yaml
+- id: gate-hook
+  description: Blocks risky tool calls
+  hookEvent: PreToolUse
+  hookInterpreter: node --experimental-strip-types --disable-warning=ExperimentalWarning
+  hook:
+    source: hooks/gate.ts
+    destination: gate.ts
+# → node --experimental-strip-types --disable-warning=ExperimentalWarning .claude/hooks/<pack-id>/gate.ts
+```
+
+`hookInterpreter` accepts a bare command name (`node`), an absolute path
+(`/opt/homebrew/bin/bun`), and arguments (`uv run`, `python3 -u`). It rejects shell
+metacharacters, relative paths, and quoted arguments containing spaces — wrap those in a script
+instead. `mcs doctor` verifies the binary resolves, and warns when it resolves only through a
+version manager such as nvm or pyenv, since Claude Code may not have that on `PATH` when it runs
+your hook.
+
+**When a wrapper script is still the right answer:** an interpreter that only exists inside a
+version manager, a flag value containing spaces, or any setup that needs shell initialisation
+first. A `.sh` wrapper that `exec`s the real interpreter remains fully supported.
 
 ---
 
@@ -470,6 +515,10 @@ fire. Two optional fields tighten it:
 the component itself — restating the matcher here just creates a second copy that can drift from
 the first.
 
+When you do match on `command`, match the script path rather than the interpreter: a check
+asserting `bash .claude/hooks/…` stops matching the moment the component declares a
+`hookInterpreter`. `mcs pack validate` warns about that specific inconsistency.
+
 **What this does not prove:** that the matcher matches a tool Claude Code actually emits. It proves
 the string you declared reached the settings file. Tool names are harness details that change
 between releases — the sub-agent spawn tool is `Agent` in current Claude Code, and a matcher of
@@ -514,7 +563,7 @@ Most components get free doctor checks from their install action — no need to 
 | `brew: node` | `commandExists` for `node` |
 | `mcp: {command: npx, ...}` | MCP server registered in `~/.claude.json` |
 | `plugin: "name@org"` | Plugin enabled in settings |
-| `hook: {source, dest}` | File exists at destination |
+| `hook: {source, dest}` | File exists at destination, plus the interpreter binary resolves (skipped for `bash`/`sh`/`zsh`) |
 | `skill: {source, dest}` | Directory exists at destination |
 | `command: {source, dest}` | File exists at destination |
 | `agent: {source, dest}` | File exists at destination |
@@ -555,6 +604,11 @@ The engine validates manifests on load. These rules are enforced:
 - Component IDs must be short names without dots (auto-prefixed with `<pack>.`) and unique within the pack
 - Intra-pack dependency references must resolve to existing component IDs in the same pack
 - Template `sectionIdentifier` must be a short name without dots (auto-prefixed with `<pack>.`)
+- `hookTimeout` must be a positive integer
+- `hookMatcher`, `hookTimeout`, `hookAsync`, `hookStatusMessage` and `hookInterpreter` all require `hookEvent` to be set
+- `hookInterpreter` must be a bare command name or absolute path, optionally followed by plain
+  arguments — no shell metacharacters, no relative paths. `mcs pack validate` fails on a bad value;
+  `mcs sync` drops it with a warning so one pack cannot block your sync
 - Prompt `key` values must be unique
 - Doctor check required fields must be present and non-empty
 

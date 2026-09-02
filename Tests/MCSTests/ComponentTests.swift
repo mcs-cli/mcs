@@ -2,7 +2,7 @@ import Foundation
 @testable import mcs
 import Testing
 
-// MARK: - hookCommand(prefix:)
+// MARK: - hookCommand(pathPrefix:)
 
 struct ComponentHookCommandTests {
     private func makeComponent(
@@ -39,12 +39,58 @@ struct ComponentHookCommandTests {
             installAction: hookFile(destination: "gate.sh")
         )
         #expect(
-            component.hookCommand(prefix: Constants.HookCommand.projectPrefix)
+            component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
                 == "bash .claude/hooks/gate.sh"
         )
         #expect(
-            component.hookCommand(prefix: Constants.HookCommand.globalPrefix)
+            component.hookCommand(pathPrefix: Constants.HookCommand.globalDirectory)
                 == "bash ~/.claude/hooks/gate.sh"
+        )
+    }
+
+    @Test("uses an explicitly declared interpreter, arguments included")
+    func usesExplicitInterpreter() {
+        let component = makeComponent(
+            type: .hookFile,
+            hookRegistration: HookRegistration(
+                event: .postToolUse,
+                interpreter: "node --experimental-strip-types --disable-warning=ExperimentalWarning"
+            ),
+            installAction: hookFile(destination: "gate.ts")
+        )
+        #expect(
+            component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
+                == "node --experimental-strip-types --disable-warning=ExperimentalWarning .claude/hooks/gate.ts"
+        )
+    }
+
+    @Test("infers the interpreter from the destination extension")
+    func infersInterpreterFromExtension() {
+        let component = makeComponent(
+            type: .hookFile,
+            hookRegistration: HookRegistration(event: .sessionStart),
+            installAction: hookFile(destination: "fmt.js")
+        )
+        #expect(
+            component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
+                == "node .claude/hooks/fmt.js"
+        )
+    }
+
+    @Test("falls back to the source extension when the destination has none")
+    func infersFromSourceExtension() {
+        let component = makeComponent(
+            type: .hookFile,
+            hookRegistration: HookRegistration(event: .sessionStart),
+            installAction: .copyPackFile(
+                source: URL(fileURLWithPath: "/tmp/hooks/audit.py"),
+                destination: "audit",
+                fileType: .hook
+            )
+        )
+        #expect(
+            component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
+                == "python3 .claude/hooks/audit"
         )
     }
 
@@ -55,7 +101,7 @@ struct ComponentHookCommandTests {
             hookRegistration: nil,
             installAction: hookFile(destination: "gate.sh")
         )
-        #expect(component.hookCommand(prefix: Constants.HookCommand.projectPrefix) == nil)
+        #expect(component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory) == nil)
     }
 
     @Test("nil for a non-hook file type")
@@ -69,7 +115,7 @@ struct ComponentHookCommandTests {
                 fileType: .command
             )
         )
-        #expect(component.hookCommand(prefix: Constants.HookCommand.projectPrefix) == nil)
+        #expect(component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory) == nil)
     }
 
     @Test("nil for an install action that copies no file")
@@ -79,6 +125,6 @@ struct ComponentHookCommandTests {
             hookRegistration: HookRegistration(event: .sessionStart, matcher: nil),
             installAction: .shellCommand(command: "echo hi")
         )
-        #expect(component.hookCommand(prefix: Constants.HookCommand.projectPrefix) == nil)
+        #expect(component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory) == nil)
     }
 }

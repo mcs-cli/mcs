@@ -24,7 +24,7 @@ The export wizard discovers your MCP servers, hooks, skills, commands, agents, p
 
 **What it handles automatically:**
 - Sensitive env vars (API keys, tokens) are replaced with `__PLACEHOLDER__` tokens and corresponding `prompts:` entries are generated
-- Hook files are matched to their Claude Code events via settings cross-reference
+- Hook files are matched to their Claude Code events via settings cross-reference, and a non-default interpreter in the registered command is carried over as `hookInterpreter`
 - CLAUDE.md managed sections are extracted as template files
 - Brew dependency hints are added as TODO comments for MCP server commands
 
@@ -211,7 +211,25 @@ Hook scripts run at specific Claude Code lifecycle events:
       destination: session_start.sh
 ```
 
-This copies `hooks/session_start.sh` from your pack repo into `<project>/.claude/hooks/` and registers it in `settings.local.json` under the `SessionStart` event.
+This copies `hooks/session_start.sh` from your pack repo into `<project>/.claude/hooks/<pack-id>/` and registers it in `settings.local.json` under the `SessionStart` event, as `bash .claude/hooks/<pack-id>/session_start.sh`.
+
+**Hooks are not bash-only.** The interpreter comes from the file extension — `.js` and `.mjs` run
+under `node`, `.py` under `python3`, `.rb` under `ruby`, `.sh` and extensionless files under
+`bash`. Declare `hookInterpreter` when you need something else, including arguments:
+
+```yaml
+  - id: gate-hook
+    description: Blocks risky tool calls
+    hookEvent: PreToolUse
+    hookInterpreter: node --experimental-strip-types --disable-warning=ExperimentalWarning
+    hook:
+      source: hooks/gate.ts
+      destination: gate.ts
+```
+
+TypeScript extensions infer nothing on purpose — `tsx`, `bun`, `deno` and node's own flags are all
+plausible — so declare one. See [Hook interpreters](techpack-schema.md#hook-interpreters) for the
+full table and the validation rules.
 
 Available events: `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PostToolUseFailure`, `Notification`, `SubagentStart`, `SubagentStop`, `Stop`, `TeammateIdle`, `TaskCompleted`, `ConfigChange`, `WorktreeCreate`, `WorktreeRemove`, `PreCompact`, `SessionEnd`.
 
@@ -479,7 +497,7 @@ prompts:
 | `brew: node` | Is `node` on PATH? |
 | `mcp: {command: npx, ...}` | Is the MCP server registered? |
 | `plugin: "name@org"` | Is the plugin enabled? |
-| `hook: {source, destination}` | Does the hook file exist? |
+| `hook: {source, destination}` | Does the hook file exist, and does its interpreter resolve? |
 | `skill: {source, destination}` | Does the skill directory exist? |
 | `command: {source, destination}` | Does the command file exist? |
 | `agent: {source, destination}` | Does the agent file exist? |
@@ -666,7 +684,9 @@ mcs sync                  # Local packs pick up changes automatically
 
 **Default to `local` scope for MCP servers.** This gives per-user, per-project isolation. Only use `project` scope for team-shared servers, and `user` scope for truly global tools.
 
-**Make hooks resilient.** Always start with `set -euo pipefail` and `trap 'exit 0' ERR`. Check for required tools before using them (`command -v jq >/dev/null 2>&1 || exit 0`). A crashing hook blocks Claude Code.
+**Make hooks resilient.** A crashing hook blocks Claude Code, so fail open. In bash, start with `set -euo pipefail` and `trap 'exit 0' ERR`, and check for required tools before using them (`command -v jq >/dev/null 2>&1 || exit 0`). In another language, do the equivalent: catch everything at the top level and exit 0 on anything unexpected.
+
+**Prefer a runtime users already have.** A hook is only as reliable as its interpreter. `bash` is always there; `node` or `python3` may be missing, or installed only inside a version manager that Claude Code's environment cannot see. Declare a brew component for the runtime your hooks need — `mcs pack validate` warns when you don't — and reach for a `.sh` wrapper when the interpreter needs shell initialisation first.
 
 **Use `isRequired: true`** for components that should always be installed (settings, gitignore). Required components can't be deselected during `mcs sync --customize`.
 

@@ -32,6 +32,41 @@ struct ExternalPackLoader {
         }
     }
 
+    /// A message a pack author can act on.
+    ///
+    /// `DecodingError.localizedDescription` collapses to "The data couldn't be read because it
+    /// isn't in the correct format", discarding the `debugDescription` that names the offending
+    /// component and rule — which is where the manifest's own decode-time guards put their
+    /// explanation (unknown `hookEvent`, hook metadata without `hookEvent`).
+    static func describe(_ error: any Error) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return error.localizedDescription
+        }
+        switch decodingError {
+        case let .dataCorrupted(context),
+             let .keyNotFound(_, context),
+             let .typeMismatch(_, context),
+             let .valueNotFound(_, context):
+            let location = Self.describe(codingPath: context.codingPath)
+            return context.debugDescription + location
+        @unknown default:
+            return decodingError.localizedDescription
+        }
+    }
+
+    /// Render a coding path as `components[0].hookEvent`, or "" when there is nothing useful.
+    private static func describe(codingPath: [any CodingKey]) -> String {
+        var rendered = ""
+        for key in codingPath {
+            if let index = key.intValue {
+                rendered += "[\(index)]"
+            } else if !key.stringValue.isEmpty {
+                rendered += rendered.isEmpty ? key.stringValue : ".\(key.stringValue)"
+            }
+        }
+        return rendered.isEmpty ? "" : " (at \(rendered))"
+    }
+
     // MARK: - Loading
 
     /// Load all registered external packs from disk.
@@ -103,7 +138,7 @@ struct ExternalPackLoader {
         } catch {
             throw LoadError.invalidManifest(
                 identifier: "unknown",
-                reason: error.localizedDescription
+                reason: Self.describe(error)
             )
         }
         do {
@@ -115,9 +150,11 @@ struct ExternalPackLoader {
             )
         }
 
-        // Runtime safety guard: strip forbidden `ignore:` entries before strict validation.
+        // Runtime safety guard: strip forbidden `ignore:` entries and unusable hook
+        // interpreters before strict validation.
         if let sanitizeOutput {
             manifest = manifest.sanitizedIgnoreEntries(output: sanitizeOutput)
+            manifest = manifest.sanitizedHookInterpreters(output: sanitizeOutput)
         }
 
         // Validate manifest structure

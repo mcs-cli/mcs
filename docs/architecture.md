@@ -55,18 +55,20 @@ Per-project paths (created by `mcs sync`):
 
 `Settings` is a Codable model that mirrors the structure of Claude Code settings files. It supports deep-merge: when merging, hooks are deduplicated by command string, plugins are merged additively, and scalar values from the template take precedence.
 
-In the per-project model, `Configurator` (with `ProjectSyncStrategy`) composes `settings.local.json` from all selected packs' hook entries. Each pack gets its own `HookGroup` entry pointing to a script in `<project>/.claude/hooks/`:
+In the per-project model, `Configurator` (with `ProjectSyncStrategy`) composes `settings.local.json` from all selected packs' hook entries. Each pack gets its own `HookGroup` entry pointing to a script in `<project>/.claude/hooks/<pack-id>/`:
 
 ```json
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "bash .claude/hooks/core-session-start.sh" }] },
-      { "hooks": [{ "type": "command", "command": "bash .claude/hooks/ios-session-start.sh" }] }
+      { "hooks": [{ "type": "command", "command": "bash .claude/hooks/core/session-start.sh" }] },
+      { "hooks": [{ "type": "command", "command": "node .claude/hooks/ios/session-start.js" }] }
     ]
   }
 }
 ```
+
+The command is `<interpreter> <path>`, composed in one place — `ComponentDefinition.hookCommand(pathPrefix:)`. Only the directory is scope-dependent (`Constants.HookCommand.projectDirectory` / `.globalDirectory`); the interpreter comes from the component, via `HookInterpreter.resolve` (explicit `hookInterpreter` → file extension → `bash`). Global-scope cleanup recognises its own entries by the **path token**, not an interpreter prefix, so a `node` hook is stripped as readily as a bash one.
 
 ### Project State (`Core/ProjectState.swift`)
 
@@ -282,13 +284,15 @@ Settings-reading checks do too. `PluginCheck` and the pack-declared `hookEventEx
 
 A hook whose matcher names a tool Claude Code never emits installs cleanly, registers in settings, and fires for nothing. The symptom is an *empty* log, which reads as "no problems found" rather than "never ran" — so `HookSettingsCheck` verifies not just that each pack-contributed hook command is present, but that it is registered the way the declaring component said it should be.
 
-The check joins the commands recorded in `PackArtifactRecord.hookCommands` back to the components that declared them, keyed on the command string that `ComponentDefinition.hookCommand(prefix:)` builds for both sides. Where a component supplied a `HookRegistration`, its `event` and `matcher` are compared against what is installed:
+The check joins the commands recorded in `PackArtifactRecord.hookCommands` back to the components that declared them, keyed on the command string that `ComponentDefinition.hookCommand(pathPrefix:)` builds for both sides. Where a component supplied a `HookRegistration`, its `event` and `matcher` are compared against what is installed:
 
 - **Command absent** — `✗ fail`. The hook is not registered at all.
 - **Registered under a different event, or with a different matcher** — `⚠ warn`. `Settings.addHookEntry` rewrites a differing matcher on the next sync, so `mcs sync` is a remedy that actually works, and a user who narrowed a matcher deliberately is not blocked by a red doctor.
 - **No declaration to compare against** — presence-only, as before. This means the recorded command no longer maps to any component in the pack: it was removed, or its destination renamed, since the last sync.
 
 Extra registrations under events the pack never declared are not policed, and an empty matcher string is treated as an absent one. `timeout`, `async`, and `statusMessage` stay unverified — a wrong value there is cosmetic, whereas `event` and `matcher` are the two whose wrong value silently disables the hook.
+
+The interpreter is verified from the other direction. It is part of the join key itself, so a divergence between what sync wrote and what doctor rebuilds makes the hook read as missing rather than misconfigured. What can still go wrong is the binary: `HookInterpreterCheck` verifies it resolves, once per distinct binary per pack, and warns when it resolves only through a version manager — a path that works in the user's terminal and often not in the environment Claude Code hands its hooks.
 
 **This proves the declared matcher reached settings, not that it matches any tool Claude Code actually emits.** Only a real session transcript proves that. Tool names are harness implementation details that can change between Claude Code releases, so any matcher naming a specific tool is worth re-checking after an upgrade.
 

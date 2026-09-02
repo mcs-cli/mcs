@@ -196,7 +196,7 @@ enum ConfiguratorSupport {
     /// Merge hook entries, plugin enablements, and settings files from pack components into settings.
     ///
     /// Shared by both project and global `composeSettings` — the inner loop is identical.
-    /// The hook command prefix is parameterized via `hookCommandPrefix`.
+    /// The hook directory is parameterized via `hookPathPrefix`.
     ///
     /// Runs in two passes on purpose. `Settings.merge` deduplicates hook groups by command and
     /// keeps the entry already present, so whichever source lands first wins. Derived entries must
@@ -209,7 +209,7 @@ enum ConfiguratorSupport {
         packs: [any TechPack],
         excludedComponents: [String: Set<String>],
         settings: inout Settings,
-        hookCommandPrefix: String,
+        hookPathPrefix: String,
         resolvedValues: [String: String],
         output: CLIOutput
     ) -> (hasContent: Bool, contributedKeys: [String: [String]]) {
@@ -226,7 +226,7 @@ enum ConfiguratorSupport {
         // Pass 1: entries derived from component definitions.
         for (pack, component) in included {
             if let reg = component.hookRegistration,
-               let command = component.hookCommand(prefix: hookCommandPrefix) {
+               let command = component.hookCommand(pathPrefix: hookPathPrefix) {
                 if settings.addHookEntry(
                     event: reg.event,
                     command: command,
@@ -236,6 +236,12 @@ enum ConfiguratorSupport {
                     statusMessage: reg.statusMessage
                 ) {
                     hasContent = true
+                    // Echo anything but the default interpreter, so a value that was inferred
+                    // rather than declared is visible rather than magic.
+                    if let invocation = component.hookInvocation,
+                       !HookInterpreter.isDefault(invocation.interpreter) {
+                        output.dimmed("  \(reg.event.rawValue): \(command)")
+                    }
                 }
             }
 
