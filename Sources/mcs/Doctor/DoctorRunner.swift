@@ -18,6 +18,21 @@ struct DoctorRunner {
     let skipConfirmation: Bool
     /// Explicit pack filter. If nil, uses packs from project state or pack registry.
     let packFilter: String?
+
+    /// `packFilter` split into identifiers, so the comma convention is defined in one place.
+    ///
+    /// Entries are trimmed and empties dropped: `--pack "ios, swift"` is a natural thing to type,
+    /// and an untrimmed `" swift"` matches no pack — the run would just report it as unregistered.
+    private var packFilterIDs: Set<String>? {
+        packFilter.map {
+            Set(
+                $0.components(separatedBy: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            )
+        }
+    }
+
     /// When true, check only globally-configured packs (ignores project scope).
     let globalOnly: Bool
     let registry: TechPackRegistry
@@ -222,6 +237,14 @@ struct DoctorRunner {
                 let context = ProjectDoctorContext(projectRoot: root, registry: registry)
                 nonComponentChecks += ProjectDoctorChecks.checks(context: context)
             }
+            // Packs configured in this project *and* globally. Self-skips when no global
+            // scope exists, so it costs nothing on machines that never ran `--global`.
+            nonComponentChecks += ScopeDuplicationCheck.checks(
+                projectRoot: root,
+                registry: registry,
+                environment: env,
+                packFilter: packFilterIDs
+            )
         }
 
         // Global-scoped template freshness check (always runs, self-skips if no global CLAUDE.md)
@@ -297,8 +320,7 @@ struct DoctorRunner {
         globalExcludedComponentIDs: Set<String>
     ) -> [CheckScope] {
         // --pack flag: single scope, use globalOnly to determine effective root
-        if let filter = packFilter {
-            let packIDs = Set(filter.components(separatedBy: ","))
+        if let packIDs = packFilterIDs {
             let effectiveRoot = globalOnly ? nil : projectRoot
             // Load artifacts and excluded components from the appropriate state
             var artifacts: [String: PackArtifactRecord] = [:]

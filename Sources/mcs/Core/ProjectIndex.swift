@@ -68,6 +68,18 @@ struct ProjectIndex {
         data.projects.removeAll { $0.path == projectPath }
     }
 
+    /// Remove a specific pack from one project entry, pruning the entry if nothing remains.
+    ///
+    /// Deliberately not expressed as `upsert` with the surviving packs: `upsert` stamps
+    /// `lastSynced` with the current time, which would claim a sync that never happened.
+    func removePack(_ packID: String, fromProject path: String, in data: inout IndexData) {
+        guard let index = data.projects.firstIndex(where: { $0.path == path }) else { return }
+        data.projects[index].packs.removeAll { $0 == packID }
+        if data.projects[index].packs.isEmpty {
+            data.projects.remove(at: index)
+        }
+    }
+
     /// Remove a specific pack from all project entries. Prunes entries with no remaining packs.
     func removePack(_ packID: String, from data: inout IndexData) {
         for i in data.projects.indices {

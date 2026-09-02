@@ -106,6 +106,59 @@ struct ProjectIndexTests {
         #expect(data.projects[0].packs == ["swift"])
     }
 
+    @Test("RemovePack from one project leaves other projects untouched")
+    func removePackFromSingleProject() {
+        let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: "/path/a", packIDs: ["ios", "swift"], in: &data)
+        index.upsert(projectPath: "/path/b", packIDs: ["ios"], in: &data)
+
+        index.removePack("ios", fromProject: "/path/a", in: &data)
+
+        #expect(data.projects.count == 2)
+        #expect(data.projects.first { $0.path == "/path/a" }?.packs == ["swift"])
+        #expect(data.projects.first { $0.path == "/path/b" }?.packs == ["ios"])
+    }
+
+    @Test("RemovePack from one project prunes the entry when nothing remains")
+    func removePackPrunesEmptiedProject() {
+        let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: "/path/a", packIDs: ["ios"], in: &data)
+
+        index.removePack("ios", fromProject: "/path/a", in: &data)
+
+        #expect(data.projects.isEmpty)
+    }
+
+    /// The reason this is not expressed as `upsert` with the surviving packs: `upsert` stamps
+    /// `lastSynced` with the current time, which would claim a sync that never happened.
+    @Test("RemovePack from one project preserves lastSynced")
+    func removePackPreservesLastSynced() {
+        let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
+        var data = ProjectIndex.IndexData()
+        data.projects = [ProjectIndex.ProjectEntry(
+            path: "/path/a", packs: ["ios", "swift"], lastSynced: "2020-01-01T00:00:00Z"
+        )]
+
+        index.removePack("ios", fromProject: "/path/a", in: &data)
+
+        #expect(data.projects[0].lastSynced == "2020-01-01T00:00:00Z")
+        #expect(data.projects[0].packs == ["swift"])
+    }
+
+    @Test("RemovePack from one project is a no-op for an unknown path")
+    func removePackUnknownProject() {
+        let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: "/path/a", packIDs: ["ios"], in: &data)
+
+        index.removePack("ios", fromProject: "/path/missing", in: &data)
+
+        #expect(data.projects.count == 1)
+        #expect(data.projects[0].packs == ["ios"])
+    }
+
     // MARK: - Queries
 
     @Test("Projects with pack returns matching entries")

@@ -50,6 +50,19 @@ struct TemplateContribution {
     }
 }
 
+extension Collection<TemplateContribution> {
+    /// The templates a scope actually composes, given the components it excluded.
+    ///
+    /// A template whose `dependencies` name an excluded component is dropped, so excluding a
+    /// component also removes any section that only makes sense alongside it. Sync applies this
+    /// when preloading templates and doctor applies it when deciding whether a section exists in
+    /// both scopes; if the two ever disagreed, doctor would report a duplicated CLAUDE.md section
+    /// that sync never composed.
+    func excludingDependencies(on excluded: Set<String>) -> [TemplateContribution] {
+        filter { !$0.dependencies.contains(where: excluded.contains) }
+    }
+}
+
 /// Protocol that all tech packs must conform to.
 /// Packs are applied to projects via `mcs sync`.
 /// Doctor and configure only run pack-specific logic for installed packs.
