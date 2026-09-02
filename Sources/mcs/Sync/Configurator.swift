@@ -1138,7 +1138,7 @@ struct Configurator {
 
     /// Remove a brew package with reference counting.
     ///
-    /// Logs the "Keeping" message when the package is still needed by another scope.
+    /// Logs the "Keeping" message when the package is still needed by another scope or pack.
     /// Callers provide their own success/failure context messages.
     private func removeBrewArtifact(
         _ package: String,
@@ -1152,7 +1152,7 @@ struct Configurator {
             excludingScope: excludingScope,
             excludingPack: excludingPack
         ) {
-            output.dimmed("  Keeping brew package '\(package)' — still needed by another scope")
+            output.dimmed("  Keeping brew package '\(package)' — still needed by another scope or pack")
             return .stillNeeded
         }
         if exec.uninstallBrewPackage(package) {
@@ -1163,7 +1163,7 @@ struct Configurator {
 
     /// Remove a plugin with reference counting.
     ///
-    /// Logs the "Keeping" message when the plugin is still needed by another scope.
+    /// Logs the "Keeping" message when the plugin is still needed by another scope or pack.
     /// Callers provide their own success/failure context messages.
     private func removePluginArtifact(
         _ name: String,
@@ -1177,7 +1177,7 @@ struct Configurator {
             excludingScope: excludingScope,
             excludingPack: excludingPack
         ) {
-            output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope")
+            output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope or pack")
             return .stillNeeded
         }
         if exec.removePlugin(name) {
@@ -1206,7 +1206,7 @@ struct Configurator {
             excludingScope: excludingScope,
             excludingPack: excludingPack
         ) {
-            output.dimmed("  Keeping gitignore entry '\(entry)' — still needed by another scope")
+            output.dimmed("  Keeping gitignore entry '\(entry)' — still needed by another scope or pack")
             return .stillNeeded
         }
         do {

@@ -770,6 +770,95 @@ struct ResourceRefCounterTests {
         #expect(!result, "No other scope claims it — safe to remove")
     }
 
+    @Test("A sibling pack in the same project keeps a shared gitignore entry")
+    func siblingPackInSameProjectKeepsEntry() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        // One project, two packs. `installAndReconcileArtifacts` installs and reconciles per
+        // pack in sequence, so pack-b can install the shared line and pack-a can then drop its
+        // now-stale claim in the same run — with nothing left to re-add it afterwards.
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-a", "pack-b"])
+
+        try writeIndex(home: home, entries: [
+            (projectA.path, ["pack-a", "pack-b"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: []
+            ),
+            StubTechPack(
+                identifier: "pack-b",
+                displayName: "Pack B",
+                description: "Test",
+                components: [gitignoreComponent(id: "b.ignores", pack: "pack-b", entries: [".shared"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".shared"),
+            excludingScope: projectA.path,
+            excludingPack: "pack-a"
+        )
+
+        #expect(result, "Should be kept — pack-b in the same project still declares .shared")
+    }
+
+    @Test("The pack being unconfigured is not its own referent in its own scope")
+    func removedPackDoesNotCountItselfInItsOwnScope() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-a"])
+
+        try writeIndex(home: home, entries: [
+            (projectA.path, ["pack-a"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: [gitignoreComponent(id: "a.ignores", pack: "pack-a", entries: [".solo"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        // Now that the removing scope is scanned rather than skipped wholesale, the pack being
+        // removed must still be excluded there — otherwise nothing would ever be removable.
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".solo"),
+            excludingScope: projectA.path,
+            excludingPack: "pack-a"
+        )
+
+        #expect(!result, "Only the pack being removed declares it — safe to remove")
+    }
+
     @Test("Core gitignore entries are never removable, even with no claimant")
     func coreGitignoreEntryAlwaysKept() throws {
         let home = try makeTmpHome()

@@ -152,8 +152,10 @@ struct ResourceRefCounter {
         var stillNeeded = false
 
         search: for entry in indexData.projects {
-            // Skip the scope being removed
-            if entry.path == scopePath { continue }
+            // Skip the global scope's own entry when that is what is being removed:
+            // `checkGlobalArtifacts` already covers it by *ownership*, and re-scanning it here
+            // by *declaration* would keep resources the pack never actually installed.
+            if entry.path == scopePath, entry.path == ProjectIndex.globalSentinel { continue }
 
             // Validate project still exists (skip __global__ — always valid)
             if entry.path != ProjectIndex.globalSentinel {
@@ -163,10 +165,16 @@ struct ResourceRefCounter {
                 }
             }
 
-            // Check each pack in this scope
+            // Check each pack in this scope. The scope being removed is still scanned — a
+            // *sibling* pack there is a genuine referent, and skipping the whole entry let a
+            // shared artifact be deleted out from under a pack that still declares it.
             for otherPackID in entry.packs {
-                // When removing a pack entirely, skip that pack in every scope
-                if scopePath == ProjectIndex.packRemoveSentinel, otherPackID == packID { continue }
+                // Never count the pack being unconfigured: in the scope it is leaving, and in
+                // every scope when the pack is being removed outright.
+                if otherPackID == packID,
+                   entry.path == scopePath || scopePath == ProjectIndex.packRemoveSentinel {
+                    continue
+                }
                 if packDeclaresResource(packID: otherPackID, resource: resource) {
                     stillNeeded = true
                     break search
