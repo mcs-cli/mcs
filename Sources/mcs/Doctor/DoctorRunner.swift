@@ -20,8 +20,17 @@ struct DoctorRunner {
     let packFilter: String?
 
     /// `packFilter` split into identifiers, so the comma convention is defined in one place.
+    ///
+    /// Entries are trimmed and empties dropped: `--pack "ios, swift"` is a natural thing to type,
+    /// and an untrimmed `" swift"` matches no pack — the run would just report it as unregistered.
     private var packFilterIDs: Set<String>? {
-        packFilter.map { Set($0.components(separatedBy: ",")) }
+        packFilter.map {
+            Set(
+                $0.components(separatedBy: ",")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            )
+        }
     }
 
     /// When true, check only globally-configured packs (ignores project scope).

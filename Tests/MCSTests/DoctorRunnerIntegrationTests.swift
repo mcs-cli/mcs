@@ -552,4 +552,38 @@ struct DoctorSummaryWarningCountTests {
 
         #expect(withGhost.warnings == baseline.warnings + 1)
     }
+
+    /// `--pack "ios, swift"` is a natural thing to type. Without trimming, the second id carries a
+    /// leading space, matches no pack, and the run reports it as unregistered instead of checking it.
+    @Test("--pack filter tolerates whitespace around comma-separated ids")
+    func packFilterTrimsWhitespace() throws {
+        let (home, project) = try makeSandboxProject(label: "packfilter-whitespace")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let registry = TechPackRegistry(packs: [
+            MockTechPack(identifier: "pack-a", displayName: "Pack A"),
+            MockTechPack(identifier: "pack-b", displayName: "Pack B"),
+        ])
+
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("pack-a")
+        state.recordPack("pack-b")
+        try state.save()
+
+        var tightRunner = makeRunner(
+            home: home, projectRoot: project, registry: registry, packFilter: "pack-a,pack-b"
+        )
+        let tight = try tightRunner.run()
+
+        var spacedRunner = makeRunner(
+            home: home, projectRoot: project, registry: registry, packFilter: " pack-a , pack-b "
+        )
+        let spaced = try spacedRunner.run()
+
+        // Identical filters spelled differently must produce identical runs — in particular no
+        // extra "not registered" advisory for a space-prefixed id.
+        #expect(spaced.warnings == tight.warnings)
+        #expect(spaced.passed == tight.passed)
+        #expect(spaced.issues == tight.issues)
+    }
 }

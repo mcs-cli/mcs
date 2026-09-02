@@ -241,9 +241,11 @@ struct ScopeDuplicationCheck: DoctorCheck {
     /// Whether installing this action in both scopes leaves two copies that both take effect.
     ///
     /// Only `copyPackFile` does. Its files land in `<project>/.claude/` and `~/.claude/`
-    /// independently, and a hook component's settings entry is written with a different command
-    /// prefix per scope (`Constants.HookCommand`), so the two entries are distinct strings that
-    /// both fire. Everything else either shadows (project `settings.local.json` over global
+    /// independently, and a hook component's settings entry embeds the scope's hook directory
+    /// (`Constants.HookCommand.projectDirectory` / `.globalDirectory`) — the interpreter is
+    /// resolved per component and is the same in both scopes, but the directory differs, so the
+    /// two entries are distinct strings that both fire. Everything else either shadows (project
+    /// `settings.local.json` over global
     /// `settings.json`, MCP `local` over `user`), is installed once (the project scope skips brew
     /// packages and plugins entirely), writes one idempotent line (gitignore), or is a one-shot
     /// side effect rather than a standing artifact (`shellCommand`).
