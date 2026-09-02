@@ -313,17 +313,13 @@ struct ScriptRunnerTests {
     @Test(
         "exceededTimeout truth table",
         arguments: [
-            // Killer fired while the process was alive — the normal path.
-            (0.5, 1.0, true, true),
-            // The starvation case: the killer never fired because the queue was starved
-            // and the item ran after the process was reaped. Elapsed time is the only
-            // remaining evidence, and it must still report a timeout.
-            (30.0, 1.0, false, true),
-            // Comfortably inside budget, nothing fired: success.
-            (0.2, 1.0, false, false),
-            // Exactly at the budget counts as exceeded — the script did not finish sooner.
-            (1.0, 1.0, false, true),
-        ] as [(TimeInterval, TimeInterval, Bool, Bool)]
+            (elapsed: 0.5, timeout: 1.0, killerFired: true, expected: true),
+            // The regression: killer starved, elapsed is the only evidence. Unreachable
+            // from an integration test — the global queue cannot be starved on demand.
+            (elapsed: 30.0, timeout: 1.0, killerFired: false, expected: true),
+            (elapsed: 0.2, timeout: 1.0, killerFired: false, expected: false),
+            (elapsed: 1.0, timeout: 1.0, killerFired: false, expected: true),
+        ]
     )
     func exceededTimeoutTruthTable(elapsed: TimeInterval, timeout: TimeInterval, killerFired: Bool, expected: Bool) {
         #expect(
@@ -331,11 +327,10 @@ struct ScriptRunnerTests {
         )
     }
 
-    @Test("A script that outruns its timeout reports a timeout even if nothing killed it")
-    func timeoutReportedWithoutKill() throws {
-        // `trap '' TERM` makes the script ignore the terminate() the killer sends, standing
-        // in for the case where the kill does not take effect. The verdict must not depend
-        // on the kill succeeding.
+    @Test("A script that ignores SIGTERM still reports a timeout")
+    func timeoutReportedWhenKillIgnored() throws {
+        // Still the `killerFired` branch: the flag is set before the kill is attempted,
+        // so trapping TERM never reaches the verdict. Starvation is the truth table's job.
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -343,10 +338,10 @@ struct ScriptRunnerTests {
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
         let script = packDir.appendingPathComponent("stubborn.sh")
-        try writeScript("#!/bin/bash\ntrap '' TERM\nsleep 2\necho done", at: script)
+        try writeScript("#!/bin/bash\ntrap '' TERM\nsleep 1\necho done", at: script)
 
-        #expect(throws: ScriptRunner.ScriptError.timeout(1)) {
-            try makeRunner().run(script: script, packPath: packDir, timeout: 1)
+        #expect(throws: ScriptRunner.ScriptError.timeout(0.5)) {
+            try makeRunner().run(script: script, packPath: packDir, timeout: 0.5)
         }
     }
 }

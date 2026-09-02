@@ -3,7 +3,11 @@ import os
 
 /// Higher-level wrapper around `ShellRunner` for executing scripts from external packs.
 /// Adds pack-specific concerns: path containment validation, standard environment
-/// variables, timeout enforcement, and executable permission enforcement (auto-chmod).
+/// variables, timeout handling, and executable permission enforcement (auto-chmod).
+///
+/// The timeout is reported reliably but enforced best-effort: `terminate()` sends SIGTERM
+/// to the direct child only, so a script that traps TERM, or whose descendants hold the
+/// output pipes, is waited out in full and only then reported as timed out.
 struct ScriptRunner {
     let shell: any ShellRunning
     let output: CLIOutput
@@ -125,15 +129,11 @@ struct ScriptRunner {
 
     /// Whether a finished process should be reported as having timed out.
     ///
-    /// The killer work item is scheduled on the global concurrent queue, so it is a
-    /// best-effort signal: under load the queue can be starved and the item can fire after
-    /// the process was already reaped, at which point it terminates nothing and records
-    /// nothing. Relying on it alone lets a script that blew its budget be reported as a
-    /// clean success — the timeout silently not applying.
-    ///
-    /// Measured elapsed time cannot be starved, so it is OR-ed in as the authority. This
-    /// adds no false positives: `elapsed >= timeout` means the script really did exceed
-    /// its budget, whether or not anything managed to kill it.
+    /// `elapsed` is the verdict. The killer runs on the global concurrent queue, which can
+    /// be starved: an item that fires after the process was reaped records nothing, so
+    /// deriving the verdict from it reports a script that blew its budget as a success.
+    /// `killerFired` already implies `elapsed >= timeout` and is kept only as redundancy
+    /// against a future change that reorders the deadline and the `start` read.
     static func exceededTimeout(elapsed: TimeInterval, timeout: TimeInterval, killerFired: Bool) -> Bool {
         killerFired || elapsed >= timeout
     }
@@ -185,11 +185,8 @@ struct ScriptRunner {
             throw ScriptError.scriptNotFound("\(executable) (launch failed: \(error.localizedDescription))")
         }
 
-        // Schedule the killer on a background queue. This is best-effort only: the global
-        // concurrent queue can be starved under load, and a work item that fires after the
-        // process has been reaped sees `isRunning == false` and records nothing. The
-        // authoritative verdict is the elapsed measurement below — see `exceededTimeout`.
-        let start = DispatchTime.now()
+        // Best-effort killer — see `exceededTimeout` for why the verdict does not rely on it.
+        let start = ProcessInfo.processInfo.systemUptime
         let killerFired = OSAllocatedUnfairLock(initialState: false)
         let workItem = DispatchWorkItem { [process] in
             if process.isRunning {
@@ -210,8 +207,7 @@ struct ScriptRunner {
         // Cancel timeout if process finished in time
         workItem.cancel()
 
-        let elapsed = TimeInterval(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds)
-            / TimeInterval(NSEC_PER_SEC)
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
         if Self.exceededTimeout(elapsed: elapsed, timeout: timeout, killerFired: killerFired.withLock { $0 }) {
             throw ScriptError.timeout(timeout)
         }
