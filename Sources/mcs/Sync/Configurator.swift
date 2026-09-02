@@ -243,16 +243,6 @@ struct Configurator {
         let removals = previousIDs.subtracting(selectedIDs)
         let additions = selectedIDs.subtracting(previousIDs)
 
-        // Advisory only: a pack entering the global scope duplicates its artifacts in every
-        // project that already holds it. Read-only — it never touches `packs` or the index.
-        ConfiguratorSupport.warnProjectDuplication(
-            isGlobalScope: scope.isGlobalScope,
-            additions: additions,
-            packs: packs,
-            environment: environment,
-            output: output
-        )
-
         // 1. Confirm and unconfigure removed packs
         if confirmRemovals, !removals.isEmpty {
             output.plain("")
@@ -270,6 +260,21 @@ struct Configurator {
                 return
             }
         }
+
+        // Advisory only: a pack entering the global scope duplicates its artifacts in every
+        // project that already holds it. Read-only — it never touches `packs` or the index.
+        //
+        // Placed after the removal gate, not before: cancelling there returns without installing
+        // anything, and a warning about duplicates that were never created would be a lie — one
+        // that also costs a needless index read. Still ahead of all install work, so it precedes
+        // the artifacts it warns about.
+        ConfiguratorSupport.warnProjectDuplication(
+            isGlobalScope: scope.isGlobalScope,
+            additions: additions,
+            packs: packs,
+            environment: environment,
+            output: output
+        )
 
         for packID in removals.sorted() {
             unconfigurePack(packID, state: &state)
