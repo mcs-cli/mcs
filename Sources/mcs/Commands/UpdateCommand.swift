@@ -313,47 +313,68 @@ struct UpdateCommand: LockedCommand {
         output: CLIOutput
     ) throws {
         for run in runs {
-            output.header(run.label)
+            try Self.reapplyScope(
+                run,
+                skippedPackIDs: skippedPackIDs,
+                registry: registry,
+                dryRun: dryRun,
+                env: env,
+                shell: shell,
+                output: output
+            )
+        }
+    }
 
-            let packIDs = run.configuredPackIDs.subtracting(skippedPackIDs).sorted()
+    /// Print one scope's header, resolve its configured packs, and converge the scope onto them.
+    ///
+    /// `static` so tests can drive the real re-apply — `UpdateCommand` builds its own
+    /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
+    /// The list must stay the scope's own configured set: `Configurator.configure` treats it
+    /// as the complete desired state and unconfigures anything missing, with no prompt here.
+    static func reapplyScope(
+        _ run: UpdateScopeResolver.ScopeRun,
+        skippedPackIDs: Set<String>,
+        registry: TechPackRegistry,
+        dryRun: Bool,
+        env: Environment,
+        shell: any ShellRunning,
+        output: CLIOutput,
+        claudeCLI: (any ClaudeCLI)? = nil
+    ) throws {
+        output.header(run.label)
 
-            var packs: [any TechPack] = []
-            var unresolved: [String] = []
-            for packID in packIDs {
-                if let pack = registry.pack(for: packID) {
-                    packs.append(pack)
-                } else {
-                    unresolved.append(packID)
-                }
-            }
-
-            for packID in unresolved {
+        var packs: [any TechPack] = []
+        for packID in run.configuredPackIDs.subtracting(skippedPackIDs).sorted() {
+            guard let pack = registry.pack(for: packID) else {
                 output.warn("  \(packID): tracked in state but missing from pack registry — skipping. Run 'mcs pack add' to restore it.")
-            }
-
-            guard !packs.isEmpty else {
-                output.info("No packs to refresh in this scope.")
                 continue
             }
+            packs.append(pack)
+        }
 
-            let configurator = Configurator(
-                environment: env,
-                output: output,
-                shell: shell,
-                registry: registry,
-                strategy: run.strategy
+        guard !packs.isEmpty else {
+            output.info("No packs to refresh in this scope.")
+            return
+        }
+
+        let configurator = Configurator(
+            environment: env,
+            output: output,
+            shell: shell,
+            registry: registry,
+            strategy: run.strategy,
+            claudeCLI: claudeCLI
+        )
+
+        if dryRun {
+            try configurator.dryRun(packs: packs)
+        } else {
+            try configurator.configure(
+                packs: packs,
+                confirmRemovals: false,
+                excludedComponents: run.excludedComponents,
+                reusePriorValuesSilently: true
             )
-
-            if dryRun {
-                try configurator.dryRun(packs: packs)
-            } else {
-                try configurator.configure(
-                    packs: packs,
-                    confirmRemovals: false,
-                    excludedComponents: run.excludedComponents,
-                    reusePriorValuesSilently: true
-                )
-            }
         }
     }
 

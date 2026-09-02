@@ -204,6 +204,10 @@ private struct LifecycleTestBed {
         try ProjectState(projectRoot: project)
     }
 
+    func globalState() throws -> ProjectState {
+        try ProjectState(stateFile: env.globalStateFile)
+    }
+
     func settingsEnv() throws -> [String: Any] {
         let data = try Data(contentsOf: settingsLocalPath)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
@@ -2256,6 +2260,73 @@ struct GlobalPackBlockingLifecycleTests {
                 output: CLIOutput(colorsEnabled: false)
             )
         }
+    }
+}
+
+// MARK: - Update Re-apply
+
+/// End-to-end coverage for the `mcs update` re-apply phase.
+///
+/// Drives the real `UpdateScopeResolver` and `UpdateCommand.reapplyScope` rather than
+/// `UpdateCommand.perform()`, which builds its own `Environment()` and cannot be pointed
+/// at a sandboxed home.
+struct UpdateReapplyLifecycleTests {
+    @Test(
+        "Both-scope pack survives update re-apply",
+        arguments: [
+            UpdateScopeResolver.Filter.projectOnly, // mcs update --project
+            .all, // bare mcs update: global run, then project run
+        ]
+    )
+    func bothScopePackSurvivesUpdate(filter: UpdateScopeResolver.Filter) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "check.sh")
+        let shared = MockTechPack(
+            identifier: "shared-pack",
+            displayName: "Shared Pack",
+            components: [bed.hookComponent(pack: "shared-pack", id: "check", source: hookSource, destination: "check.sh")]
+        )
+        let registry = TechPackRegistry(packs: [shared])
+
+        // Installed in both scopes — the case the global-pack block must never reach.
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+        #expect(try bed.globalState().configuredPacks.contains("shared-pack"))
+
+        // Delete the project copy of the hook so a surviving pack is distinguishable from a
+        // re-apply that never ran: `copyPackFile` is convergent, so `configure` restores it.
+        let projectHook = bed.project.appendingPathComponent(".claude/hooks/shared-pack/check.sh")
+        #expect(FileManager.default.fileExists(atPath: projectHook.path))
+        try FileManager.default.removeItem(at: projectHook)
+
+        let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))
+            .resolve(filter: filter, projectRoot: bed.project)
+        // An empty run list would pass every assertion below without touching anything.
+        #expect(runs.count == (filter == .all ? 2 : 1))
+
+        for run in runs {
+            try UpdateCommand.reapplyScope(
+                run,
+                skippedPackIDs: [],
+                registry: registry,
+                dryRun: false,
+                env: bed.env,
+                shell: ShellRunner(environment: bed.env),
+                output: CLIOutput(colorsEnabled: false),
+                claudeCLI: bed.mockCLI
+            )
+        }
+
+        // The regression guard: an identity-based filter, or a list sourced from anywhere but
+        // the scope's own state, would have handed `configure` a set missing `shared-pack`
+        // and unconfigured it from the project without a prompt.
+        #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
+        #expect(try bed.globalState().configuredPacks.contains("shared-pack"))
+        #expect(FileManager.default.fileExists(atPath: projectHook.path))
     }
 }
 
