@@ -123,6 +123,21 @@ struct ScriptRunner {
 
     // MARK: - Internal Helpers
 
+    /// Whether a finished process should be reported as having timed out.
+    ///
+    /// The killer work item is scheduled on the global concurrent queue, so it is a
+    /// best-effort signal: under load the queue can be starved and the item can fire after
+    /// the process was already reaped, at which point it terminates nothing and records
+    /// nothing. Relying on it alone lets a script that blew its budget be reported as a
+    /// clean success — the timeout silently not applying.
+    ///
+    /// Measured elapsed time cannot be starved, so it is OR-ed in as the authority. This
+    /// adds no false positives: `elapsed >= timeout` means the script really did exceed
+    /// its budget, whether or not anything managed to kill it.
+    static func exceededTimeout(elapsed: TimeInterval, timeout: TimeInterval, killerFired: Bool) -> Bool {
+        killerFired || elapsed >= timeout
+    }
+
     /// Ensure the file at the given path has executable permission.
     private func ensureExecutable(at path: String) {
         let fm = FileManager.default
@@ -170,11 +185,15 @@ struct ScriptRunner {
             throw ScriptError.scriptNotFound("\(executable) (launch failed: \(error.localizedDescription))")
         }
 
-        // Schedule timeout on a background queue
-        let timedOut = OSAllocatedUnfairLock(initialState: false)
+        // Schedule the killer on a background queue. This is best-effort only: the global
+        // concurrent queue can be starved under load, and a work item that fires after the
+        // process has been reaped sees `isRunning == false` and records nothing. The
+        // authoritative verdict is the elapsed measurement below — see `exceededTimeout`.
+        let start = DispatchTime.now()
+        let killerFired = OSAllocatedUnfairLock(initialState: false)
         let workItem = DispatchWorkItem { [process] in
             if process.isRunning {
-                timedOut.withLock { $0 = true }
+                killerFired.withLock { $0 = true }
                 process.terminate()
             }
         }
@@ -191,7 +210,9 @@ struct ScriptRunner {
         // Cancel timeout if process finished in time
         workItem.cancel()
 
-        if timedOut.withLock({ $0 }) {
+        let elapsed = TimeInterval(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds)
+            / TimeInterval(NSEC_PER_SEC)
+        if Self.exceededTimeout(elapsed: elapsed, timeout: timeout, killerFired: killerFired.withLock { $0 }) {
             throw ScriptError.timeout(timeout)
         }
 
