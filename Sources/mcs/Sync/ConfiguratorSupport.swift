@@ -24,6 +24,98 @@ enum ConfiguratorSupport {
         })
     }
 
+    /// Warning lines naming the tracked projects that already configure packs newly entering
+    /// the *global* scope. Empty when nothing applies.
+    ///
+    /// The mirror of `globallyBlockedIDs`: that rule stops a globally-installed pack being added
+    /// to a project; this one reports the reverse move. Installing globally is legitimate, but it
+    /// duplicates every hook and skill in the projects that already hold the pack — the global and
+    /// project copies register as distinct settings entries and both fire.
+    ///
+    /// Keyed on `additions` rather than the whole selection, so re-syncing a pack the global scope
+    /// already has stays silent, and `mcs update` — which re-applies each scope's existing set —
+    /// never warns at all.
+    ///
+    /// Pure so the wording itself is testable: `CLIOutput` writes straight to stdout and the suite
+    /// has no way to capture it. Element 0 is the `warn` header, the rest are plain detail lines;
+    /// there is exactly one header however many packs are involved.
+    ///
+    /// - Parameter pathExists: Injected so tests never reach the real filesystem.
+    static func projectDuplicationWarning(
+        additions: Set<String>,
+        displayNames: [String: String],
+        index: ProjectIndex.IndexData,
+        pathExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
+    ) -> [String] {
+        var details: [String] = []
+        for packID in additions.sorted() {
+            // The global scope carries its own index entry. It is the scope being installed
+            // into, not a project that ends up with a duplicate.
+            let paths = index.projects
+                .filter { !$0.isGlobal && $0.packs.contains(packID) }
+                .map(\.path)
+                .filter(pathExists)
+                .sorted()
+            guard !paths.isEmpty else { continue }
+            details.append("    \(displayNames[packID] ?? packID) → \(paths.joined(separator: ", "))")
+        }
+        guard !details.isEmpty else { return [] }
+
+        return ["\(details.count) pack(s) being installed globally are already configured in other projects:"]
+            + details
+            + [
+                "  Their hooks and skills will run twice there until the project copy is removed.",
+                "  Run 'mcs doctor --fix' in those projects to drop the project copy.",
+            ]
+    }
+
+    /// Emit `projectDuplicationWarning`, doing nothing outside the global scope.
+    ///
+    /// The scope gate lives here rather than at each call site: only a global install can create
+    /// this duplication, so every caller needs the same check, and a future one that forgot it
+    /// would print a nonsensical "installed globally" notice during a project sync.
+    ///
+    /// Advisory only: it never filters the pack set — `Configurator.configure` treats that set as a
+    /// complete desired state and unconfigures anything missing from it — and never writes to the
+    /// index, stale entries included. An unreadable index degrades to a notice rather than failing
+    /// the sync; `ProjectIndexCheck` is what reports a broken index.
+    static func warnProjectDuplication(
+        isGlobalScope: Bool,
+        additions: Set<String>,
+        packs: [any TechPack],
+        environment: Environment,
+        output: CLIOutput
+    ) {
+        // Ordered so a project-scope sync and a no-op global sync both return before any disk read.
+        guard isGlobalScope, !additions.isEmpty else { return }
+
+        let index: ProjectIndex.IndexData
+        do {
+            index = try ProjectIndex(path: environment.projectsIndexFile).load()
+        } catch {
+            output.warn("Could not read project index: \(error.localizedDescription)")
+            output.plain("  Skipping the check for packs already configured in other projects.")
+            return
+        }
+
+        let displayNames = Dictionary(
+            packs.map { ($0.identifier, $0.displayName) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let lines = projectDuplicationWarning(
+            additions: additions,
+            displayNames: displayNames,
+            index: index
+        )
+        guard let header = lines.first else { return }
+
+        output.plain("")
+        output.warn(header)
+        for line in lines.dropFirst() {
+            output.plain(line)
+        }
+    }
+
     /// Build a `ComponentExecutor` from the common dependencies.
     static func makeExecutor(
         environment: Environment,
@@ -49,6 +141,10 @@ enum ConfiguratorSupport {
     ///
     /// Shared orchestration for both project and global dry-run flows.
     /// Callers provide scope-specific closures for artifact and removal display.
+    ///
+    /// Returns the pack IDs newly entering this scope, so a caller needing the same diff reuses
+    /// this one rather than re-deriving it and risking the two disagreeing.
+    @discardableResult
     static func dryRunSummary(
         packs: [any TechPack],
         state: ProjectState,
@@ -56,7 +152,7 @@ enum ConfiguratorSupport {
         output: CLIOutput,
         artifactSummary: (_ pack: any TechPack) -> Void,
         removalSummary: (_ artifacts: PackArtifactRecord) -> Void
-    ) {
+    ) -> Set<String> {
         let selectedIDs = Set(packs.map(\.identifier))
         let previousIDs = state.configuredPacks
 
@@ -71,7 +167,7 @@ enum ConfiguratorSupport {
             output.info("No packs selected. Nothing would change.")
             output.plain("")
             output.dimmed("No changes made (dry run).")
-            return
+            return additions
         }
 
         // Show additions
@@ -112,6 +208,7 @@ enum ConfiguratorSupport {
         }
         output.plain("")
         output.dimmed("No changes made (dry run).")
+        return additions
     }
 
     /// Present per-pack component multi-select and return excluded component IDs.

@@ -193,13 +193,23 @@ struct Configurator {
             packs: packs, output: output, filesystemContext: fsContext
         )
         let headerLabel = scope.isGlobalScope ? "Plan (Global)" : "Plan"
-        ConfiguratorSupport.dryRunSummary(
+        let additions = ConfiguratorSupport.dryRunSummary(
             packs: packs,
             state: state,
             header: headerLabel,
             output: output,
             artifactSummary: { strategy.printArtifactSummary($0, output: output) },
             removalSummary: { strategy.printRemovalSummary($0, output: output) }
+        )
+
+        // Emitted after the plan so it reads as a consequence of it, reusing the plan's own
+        // additions set so the warning can never disagree with what was just printed.
+        ConfiguratorSupport.warnProjectDuplication(
+            isGlobalScope: scope.isGlobalScope,
+            additions: additions,
+            packs: packs,
+            environment: environment,
+            output: output
         )
     }
 
@@ -250,6 +260,21 @@ struct Configurator {
                 return
             }
         }
+
+        // Advisory only: a pack entering the global scope duplicates its artifacts in every
+        // project that already holds it. Read-only — it never touches `packs` or the index.
+        //
+        // Placed after the removal gate, not before: cancelling there returns without installing
+        // anything, and a warning about duplicates that were never created would be a lie — one
+        // that also costs a needless index read. Still ahead of all install work, so it precedes
+        // the artifacts it warns about.
+        ConfiguratorSupport.warnProjectDuplication(
+            isGlobalScope: scope.isGlobalScope,
+            additions: additions,
+            packs: packs,
+            environment: environment,
+            output: output
+        )
 
         for packID in removals.sorted() {
             unconfigurePack(packID, state: &state)
