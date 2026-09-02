@@ -77,7 +77,6 @@ struct ScopeDuplicationCheck: DoctorCheck {
         let output = CLIOutput()
         let shell = ShellRunner(environment: environment)
         var state = inputs.projectState
-        let sharedGitignoreEntries = inputs.globalState.artifacts(for: packID)?.gitignoreEntries ?? []
 
         let configurator = Configurator(
             environment: environment,
@@ -87,8 +86,8 @@ struct ScopeDuplicationCheck: DoctorCheck {
             strategy: ProjectSyncStrategy(projectPath: projectRoot, environment: environment)
         )
         // Default `refCountScope` (nil → this project's path): the global scope still counts, so
-        // brew packages and plugins report `.stillNeeded` and stay installed. Passing
-        // `packRemoveSentinel` here would exclude every scope and uninstall them.
+        // brew packages, plugins and gitignore entries report `.stillNeeded` and stay in place.
+        // Passing `packRemoveSentinel` here would exclude every scope and remove them.
         configurator.unconfigurePack(packID, state: &state)
 
         do {
@@ -104,38 +103,9 @@ struct ScopeDuplicationCheck: DoctorCheck {
             return .failed("some artifacts could not be removed — re-run 'mcs sync' to retry")
         }
 
-        restoreSharedGitignoreEntries(sharedGitignoreEntries, shell: shell, output: output)
         pruneProjectIndex(output: output)
 
         return .fixed("removed project-scoped '\(packID)' (global copy kept)")
-    }
-
-    /// Re-add gitignore lines the global copy still claims.
-    ///
-    /// `GitignoreManager` writes one file for the whole machine, so a gitignore entry is a shared
-    /// resource exactly like a brew package or a plugin — but it is the one such resource
-    /// `ResourceRefCounter.Resource` omits, so `unconfigurePack` deletes it on behalf of any single
-    /// scope. `addEntry` is idempotent, so re-adding is safe.
-    ///
-    /// This only repairs the doctor path. The same unguarded delete is a live bug in `mcs sync`
-    /// deselection, `mcs pack remove` (where the first scope strips the lines out from under the
-    /// scopes that follow), and stale-artifact reconciliation. Fixing it properly means adding a
-    /// third `ResourceRefCounter.Resource` case so `Configurator.removeGitignoreArtifact` becomes
-    /// ref-counted like its brew and plugin siblings — tracked as a follow-up.
-    private func restoreSharedGitignoreEntries(
-        _ entries: [String],
-        shell: any ShellRunning,
-        output: CLIOutput
-    ) {
-        guard !entries.isEmpty else { return }
-        let manager = GitignoreManager(shell: shell)
-        for entry in entries {
-            do {
-                try manager.addEntry(entry)
-            } catch {
-                output.warn("Could not restore gitignore entry '\(entry)': \(error.localizedDescription)")
-            }
-        }
     }
 
     /// Drop this pack from this project's entry in `~/.mcs/projects.yaml`.

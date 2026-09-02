@@ -2414,6 +2414,23 @@ struct HookInterpreterLifecycleTests {
     }
 }
 
+/// Configure `pack` in the project first, then globally — `filterGloballyBlocked` rejects the
+/// reverse order, so this is the only sequence that produces a both-scope pack.
+private func configureBothScopes(
+    bed: LifecycleTestBed,
+    pack: any TechPack,
+    registry: TechPackRegistry,
+    projectExclusions: [String: Set<String>] = [:],
+    globalExclusions: [String: Set<String>] = [:]
+) throws {
+    try bed.makeConfigurator(registry: registry).configure(
+        packs: [pack], confirmRemovals: false, excludedComponents: projectExclusions
+    )
+    try bed.makeGlobalSyncConfigurator(registry: registry).configure(
+        packs: [pack], confirmRemovals: false, excludedComponents: globalExclusions
+    )
+}
+
 // MARK: - Scope Duplication (Issue #371)
 
 /// A pack configured in both the global scope and a project installs its artifacts twice.
@@ -2424,23 +2441,6 @@ struct HookInterpreterLifecycleTests {
 /// so every fixture is built with the real configurators rather than hand-planted JSON.
 @Suite("Scope duplication check")
 struct ScopeDuplicationCheckTests {
-    /// Configure `pack` in the project first, then globally — `filterGloballyBlocked` rejects the
-    /// reverse order, so this is the only sequence that produces a both-scope pack.
-    private func configureBothScopes(
-        bed: LifecycleTestBed,
-        pack: any TechPack,
-        registry: TechPackRegistry,
-        projectExclusions: [String: Set<String>] = [:],
-        globalExclusions: [String: Set<String>] = [:]
-    ) throws {
-        try bed.makeConfigurator(registry: registry).configure(
-            packs: [pack], confirmRemovals: false, excludedComponents: projectExclusions
-        )
-        try bed.makeGlobalSyncConfigurator(registry: registry).configure(
-            packs: [pack], confirmRemovals: false, excludedComponents: globalExclusions
-        )
-    }
-
     private func checks(
         bed: LifecycleTestBed,
         registry: TechPackRegistry,
@@ -2824,5 +2824,116 @@ struct ScopeDuplicationCheckTests {
 
         // Deltas, not absolutes: ambient checks contribute their own results.
         #expect(duplicated.issues > baseline.issues)
+    }
+}
+
+// MARK: - Gitignore Reference Counting (Issue #378)
+
+/// `GitignoreManager` resolves one file for the whole machine, so a gitignore entry is a shared
+/// resource like a brew package or a plugin: two scopes hold two claims on one physical line.
+///
+/// Both entry points are exercised separately because they orchestrate removal differently:
+/// deselection during `mcs sync` runs inside `configure()`, while `mcs pack remove` calls
+/// `unconfigurePack` directly and runs none of its install or ensure steps — so on that path a
+/// ref-counting miss has nothing after it to put the line back.
+@Suite("Gitignore reference counting")
+struct GitignoreRefCountTests {
+    private func ignorePack(id: String, entry: String) -> any TechPack {
+        MockTechPack(
+            identifier: id,
+            displayName: id,
+            components: [
+                ComponentDefinition(
+                    id: "\(id).ignores",
+                    displayName: "ignores",
+                    description: "Gitignore entries",
+                    type: .configuration,
+                    packIdentifier: id,
+                    dependencies: [],
+                    isRequired: true,
+                    installAction: .gitignoreEntries(entries: [entry])
+                ),
+            ]
+        )
+    }
+
+    @Test("Deselecting in the project keeps a line the global scope still claims")
+    func syncDeselectionKeepsGloballyClaimedEntry() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = ignorePack(id: "ignore-pack", entry: ".mcs-scratch")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let gitignore = bed.home.appendingPathComponent(".config/git/ignore")
+        #expect(try String(contentsOf: gitignore, encoding: .utf8).contains(".mcs-scratch"))
+
+        // Deselect in the project only.
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [], confirmRemovals: false)
+
+        let after = try String(contentsOf: gitignore, encoding: .utf8)
+        #expect(after.contains(".mcs-scratch"), "Global scope still claims the line")
+
+        let globalClaims = try bed.globalState().artifacts(for: "ignore-pack")?.gitignoreEntries
+        #expect(globalClaims == [".mcs-scratch"], "Global record is untouched")
+
+        let projectState = try bed.projectState()
+        #expect(!projectState.configuredPacks.contains("ignore-pack"), "Project claim released")
+    }
+
+    @Test("Pack removal keeps a line another pack still declares")
+    func packRemoveKeepsEntryDeclaredByAnotherPack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let packA = ignorePack(id: "pack-a", entry: ".shared-ignore")
+        let packB = ignorePack(id: "pack-b", entry: ".shared-ignore")
+        let registry = TechPackRegistry(packs: [packA, packB])
+
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [packA, packB], confirmRemovals: false)
+
+        let gitignore = bed.home.appendingPathComponent(".config/git/ignore")
+        #expect(try String(contentsOf: gitignore, encoding: .utf8).contains(".shared-ignore"))
+
+        // The `mcs pack remove pack-a` shape: `packRemoveSentinel` excludes pack-a in every
+        // scope, so only pack-b's declaration can keep the line.
+        var state = try bed.projectState()
+        bed.makeConfigurator(registry: registry).unconfigurePack(
+            "pack-a", state: &state, refCountScope: ProjectIndex.packRemoveSentinel
+        )
+        try state.save()
+
+        let after = try String(contentsOf: gitignore, encoding: .utf8)
+        #expect(after.contains(".shared-ignore"), "pack-b still declares the line")
+        #expect(!state.configuredPacks.contains("pack-a"))
+        #expect(state.configuredPacks.contains("pack-b"))
+    }
+
+    @Test("Pack removal deletes a line no one else claims")
+    func packRemoveDeletesSoleClaimedEntry() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = ignorePack(id: "solo-pack", entry: ".solo-ignore")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        let gitignore = bed.home.appendingPathComponent(".config/git/ignore")
+        #expect(try String(contentsOf: gitignore, encoding: .utf8).contains(".solo-ignore"))
+
+        var state = try bed.projectState()
+        bed.makeConfigurator(registry: registry).unconfigurePack(
+            "solo-pack", state: &state, refCountScope: ProjectIndex.packRemoveSentinel
+        )
+        try state.save()
+
+        let after = try String(contentsOf: gitignore, encoding: .utf8)
+        #expect(!after.contains(".solo-ignore"), "Nothing else claims it — ref counting must not over-keep")
     }
 }

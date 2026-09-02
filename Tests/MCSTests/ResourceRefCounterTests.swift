@@ -53,6 +53,20 @@ private func pluginComponent(id: String, pack: String, pluginName: String) -> Co
     )
 }
 
+/// Creates a ComponentDefinition with a gitignore-entries install action.
+private func gitignoreComponent(id: String, pack: String, entries: [String]) -> ComponentDefinition {
+    ComponentDefinition(
+        id: id,
+        displayName: "Gitignore",
+        description: "Gitignore: \(entries.joined(separator: ", "))",
+        type: .configuration,
+        packIdentifier: pack,
+        dependencies: [],
+        isRequired: true,
+        installAction: .gitignoreEntries(entries: entries)
+    )
+}
+
 struct ResourceRefCounterTests {
     private func makeTmpHome() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -608,5 +622,282 @@ struct ResourceRefCounterTests {
         )
 
         #expect(!result, "No other scope references it — safe to remove")
+    }
+
+    // MARK: - Gitignore entries
+
+    // `GitignoreManager` resolves one file for the whole machine, so a pack installed in two
+    // scopes holds two claims on a single physical line.
+
+    @Test("Same pack globally and per-project keeps gitignore entry when removing from project")
+    func dualScopeKeepGitignoreOnProjectRemoval() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-z"])
+
+        // Global state: pack-z owns ".mcs-scratch"
+        try writeGlobalState(home: home, packs: [
+            ("pack-z", PackArtifactRecord(gitignoreEntries: [".mcs-scratch"])),
+        ])
+
+        try writeIndex(home: home, entries: [
+            (ProjectIndex.globalSentinel, ["pack-z"]),
+            (projectA.path, ["pack-z"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-z",
+                displayName: "Pack Z",
+                description: "Test",
+                components: [
+                    gitignoreComponent(id: "z.ignores", pack: "pack-z", entries: [".mcs-scratch"]),
+                ]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".mcs-scratch"),
+            excludingScope: projectA.path,
+            excludingPack: "pack-z"
+        )
+
+        #expect(result, "Should be kept — global scope still claims .mcs-scratch via pack-z")
+    }
+
+    @Test("Two different packs sharing a gitignore entry → kept")
+    func differentPacksSameGitignoreEntry() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-b"])
+
+        try writeGlobalState(home: home, packs: [
+            ("pack-a", PackArtifactRecord(gitignoreEntries: [".env"])),
+        ])
+
+        // pack-b in the project declares the same entry
+        try writeIndex(home: home, entries: [
+            (ProjectIndex.globalSentinel, ["pack-a"]),
+            (projectA.path, ["pack-b"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: [gitignoreComponent(id: "a.ignores", pack: "pack-a", entries: [".env"])]
+            ),
+            StubTechPack(
+                identifier: "pack-b",
+                displayName: "Pack B",
+                description: "Test",
+                components: [gitignoreComponent(id: "b.ignores", pack: "pack-b", entries: [".env"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        // This is the `mcs pack remove` shape: packRemoveSentinel excludes pack-a everywhere,
+        // so only pack-b's declaration can keep the line.
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".env"),
+            excludingScope: ProjectIndex.packRemoveSentinel,
+            excludingPack: "pack-a"
+        )
+
+        #expect(result, "Should be kept — pack-b in project-a also declares .env")
+    }
+
+    @Test("Gitignore entry claimed by no other scope is safe to remove")
+    func soleClaimantGitignoreEntry() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        try writeGlobalState(home: home, packs: [
+            ("pack-a", PackArtifactRecord(gitignoreEntries: [".mcs-scratch"])),
+        ])
+
+        try writeIndex(home: home, entries: [
+            (ProjectIndex.globalSentinel, ["pack-a"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: [
+                    gitignoreComponent(id: "a.ignores", pack: "pack-a", entries: [".mcs-scratch"]),
+                ]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".mcs-scratch"),
+            excludingScope: ProjectIndex.globalSentinel,
+            excludingPack: "pack-a"
+        )
+
+        #expect(!result, "No other scope claims it — safe to remove")
+    }
+
+    @Test("A sibling pack in the same project keeps a shared gitignore entry")
+    func siblingPackInSameProjectKeepsEntry() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        // One project, two packs. `installAndReconcileArtifacts` installs and reconciles per
+        // pack in sequence, so pack-b can install the shared line and pack-a can then drop its
+        // now-stale claim in the same run — with nothing left to re-add it afterwards.
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-a", "pack-b"])
+
+        try writeIndex(home: home, entries: [
+            (projectA.path, ["pack-a", "pack-b"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: []
+            ),
+            StubTechPack(
+                identifier: "pack-b",
+                displayName: "Pack B",
+                description: "Test",
+                components: [gitignoreComponent(id: "b.ignores", pack: "pack-b", entries: [".shared"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".shared"),
+            excludingScope: projectA.path,
+            excludingPack: "pack-a"
+        )
+
+        #expect(result, "Should be kept — pack-b in the same project still declares .shared")
+    }
+
+    @Test("The pack being unconfigured is not its own referent in its own scope")
+    func removedPackDoesNotCountItselfInItsOwnScope() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        let projectA = home.appendingPathComponent("project-a")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try writeProjectState(projectRoot: projectA, packs: ["pack-a"])
+
+        try writeIndex(home: home, entries: [
+            (projectA.path, ["pack-a"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: [gitignoreComponent(id: "a.ignores", pack: "pack-a", entries: [".solo"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        // Now that the removing scope is scanned rather than skipped wholesale, the pack being
+        // removed must still be excluded there — otherwise nothing would ever be removable.
+        let result = counter.isStillNeeded(
+            .gitignoreEntry(".solo"),
+            excludingScope: projectA.path,
+            excludingPack: "pack-a"
+        )
+
+        #expect(!result, "Only the pack being removed declares it — safe to remove")
+    }
+
+    @Test("Core gitignore entries are never removable, even with no claimant")
+    func coreGitignoreEntryAlwaysKept() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let env = Environment(home: home)
+
+        // A pack that declares a core line as its own. No other scope exists at all, so both
+        // ref-count tiers report "not needed" — only the core guard keeps the line.
+        try writeGlobalState(home: home, packs: [
+            ("pack-a", PackArtifactRecord(gitignoreEntries: ["*.local.*"])),
+        ])
+        try writeIndex(home: home, entries: [
+            (ProjectIndex.globalSentinel, ["pack-a"]),
+        ])
+
+        let registry = TechPackRegistry(packs: [
+            StubTechPack(
+                identifier: "pack-a",
+                displayName: "Pack A",
+                description: "Test",
+                components: [gitignoreComponent(id: "a.ignores", pack: "pack-a", entries: ["*.local.*"])]
+            ),
+        ])
+
+        let counter = ResourceRefCounter(
+            environment: env,
+            output: CLIOutput(),
+            registry: registry
+        )
+
+        #expect(GitignoreManager.coreEntries.contains("*.local.*"), "Precondition: a core entry")
+
+        let result = counter.isStillNeeded(
+            .gitignoreEntry("*.local.*"),
+            excludingScope: ProjectIndex.packRemoveSentinel,
+            excludingPack: "pack-a"
+        )
+
+        #expect(result, "Core lines are mcs's own — a pack must not be able to delete one")
     }
 }
