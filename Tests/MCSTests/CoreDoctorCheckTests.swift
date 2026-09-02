@@ -2,6 +2,59 @@ import Foundation
 @testable import mcs
 import Testing
 
+// MARK: - HookInterpreterCheck
+
+struct HookInterpreterCheckTests {
+    @Test("passes and reports the resolved path for a binary on PATH")
+    func passesForResolvableBinary() {
+        // `ls` stands in for a hook interpreter: on PATH everywhere, never a version-manager shim.
+        let check = HookInterpreterCheck(binary: "ls", packName: "Test Pack")
+        guard case let .pass(message) = check.check() else {
+            Issue.record("Expected pass for a binary on PATH, got \(check.check())")
+            return
+        }
+        #expect(message.contains("resolves to"))
+        #expect(message.contains("ls"))
+    }
+
+    @Test("fails for a binary that does not exist")
+    func failsForMissingBinary() {
+        let check = HookInterpreterCheck(binary: "mcs-definitely-not-a-real-interpreter", packName: "Test Pack")
+        guard case let .fail(message) = check.check() else {
+            Issue.record("Expected fail for a missing binary")
+            return
+        }
+        #expect(message.contains("not found"))
+    }
+
+    @Test("names the binary and pack so a multi-pack report stays readable")
+    func nameIdentifiesBinaryAndPack() {
+        let check = HookInterpreterCheck(binary: "node", packName: "TS Pack")
+        #expect(check.name == "Hook interpreter: node (TS Pack)")
+        #expect(check.section == "Hooks")
+    }
+
+    @Test("is not auto-fixable — mcs cannot install a runtime")
+    func notFixable() {
+        let check = HookInterpreterCheck(binary: "node", packName: "TS Pack")
+        guard case let .notFixable(message) = check.fix() else {
+            Issue.record("Expected notFixable")
+            return
+        }
+        #expect(message.contains("node"))
+        // Must not send the user to `mcs sync`, which cannot install an interpreter.
+        #expect(!message.contains("mcs sync"))
+    }
+
+    @Test("bash, sh and zsh are assumed present and never checked")
+    func shellsAreAssumedPresent() {
+        for shell in ["bash", "sh", "zsh"] {
+            #expect(!HookInterpreter.isCheckable(binary: shell))
+        }
+        #expect(HookInterpreter.isCheckable(binary: "node"))
+    }
+}
+
 // MARK: - HookSettingsCheck
 
 struct HookSettingsCheckTests {

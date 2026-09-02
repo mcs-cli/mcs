@@ -83,7 +83,11 @@ Analyze the target directory. Read files in parallel when possible.
 ```json
 {"hooks": {"SessionStart": [{"command": "bash .claude/hooks/session_start.sh"}]}}
 ```
-This tells you which hook file maps to which event — critical for the `hookEvent` field.
+This tells you which hook file maps to which event — critical for the `hookEvent` field. The
+command is `<interpreter> <path>`: everything before the path is the interpreter, so
+`node --experimental-strip-types .claude/hooks/gate.ts` becomes
+`hookInterpreter: node --experimental-strip-types`. Omit `hookInterpreter` when it is plain `bash`
+or matches what the extension already implies.
 
 **Project manifests** — detect language and dependencies:
 `Package.swift`, `*.xcodeproj`, `*.xcworkspace`, `package.json`, `tsconfig.json`, `Cargo.toml`,
@@ -172,7 +176,7 @@ Generate the pack directory:
 5. **YAML field ordering**:
    - Root: schemaVersion → identifier → displayName → description → author → prompts → components → templates → supplementaryDoctorChecks → configureProject → ignore
    - Components grouped: brew first → MCP servers → hooks → skills → commands → agents → settings → gitignore
-   - Each component: id → displayName → description → dependencies → isRequired → hookEvent/hookMatcher/hookTimeout/hookAsync/hookStatusMessage → shorthand key
+   - Each component: id → displayName → description → dependencies → isRequired → hookEvent/hookMatcher/hookTimeout/hookAsync/hookStatusMessage/hookInterpreter → shorthand key
 6. **Dependencies**: Always declare them. `npx` MCP servers depend on `node`. `uvx`/`python` servers depend on `python`. Hooks using `jq` depend on `jq`.
 7. **isRequired: true** for settings and gitignore components
 8. **MCP scope**: default to `local` (per-user, per-project isolation)
@@ -181,6 +185,13 @@ Generate the pack directory:
 11. **Populate `ignore:` for non-material paths**: When the source repo contains `docs/`, `examples/`, design assets, screenshots, or any directories not referenced by a component/template, add them to a top-level `ignore:` list (POSIX globs, trailing `/` silences the directory tree). This silences `mcs pack validate` unreferenced-file warnings AND stops downstream "pack update available" notifications from firing on doc/CI commits. Never put `techpack.yaml` or referenced paths in `ignore:` — `mcs pack validate` rejects those. Example: `ignore: [docs/, examples/, diagrams/*.png]`.
 
 #### Hook Script Template
+
+Hooks are not bash-only. The interpreter follows the file extension (`.js`/`.mjs` → `node`,
+`.py` → `python3`, `.rb` → `ruby`, `.sh`/no extension → `bash`); declare `hookInterpreter` for
+anything else, including arguments (`node --experimental-strip-types`, `uv run`). TypeScript
+infers nothing — always declare it there. Prefer `bash` when the logic is simple: it is the one
+runtime guaranteed to exist. Whatever the language, declare a brew component for the runtime and
+fail open on every error path.
 
 Every hook script must follow this defensive pattern (hooks must NEVER crash the session):
 
@@ -270,7 +281,7 @@ After generating, perform a self-check:
 3. **Dependencies**: Every ID in `dependencies` exists as a component
 4. **Placeholders**: Every `__KEY__` in templates/settings has a corresponding prompt
 5. **ID uniqueness**: No duplicate component IDs or prompt keys
-6. **Hook metadata**: `hookMatcher`/`hookTimeout`/`hookAsync`/`hookStatusMessage` require `hookEvent`
+6. **Hook metadata**: `hookMatcher`/`hookTimeout`/`hookAsync`/`hookStatusMessage`/`hookInterpreter` require `hookEvent`
 7. **Shell shorthand**: Any `shell:` component has an explicit `type:` field
 8. **No dots in IDs**: Component IDs and template sectionIdentifiers contain no dots
 

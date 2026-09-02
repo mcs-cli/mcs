@@ -216,8 +216,8 @@ private struct LifecycleTestBed {
     }
 
     /// Derive the expected hook command string for a project-scoped hook destination.
-    func projectHookCommand(_ destination: String) -> String {
-        "bash .claude/hooks/\(destination)"
+    func projectHookCommand(_ destination: String, interpreter: String = "bash") -> String {
+        "\(interpreter) .claude/hooks/\(destination)"
     }
 }
 
@@ -2109,6 +2109,90 @@ struct GlobalPackBlockingLifecycleTests {
                 previouslyConfigured: [],
                 output: CLIOutput(colorsEnabled: false)
             )
+        }
+    }
+}
+
+// MARK: - Scenario: Hook Interpreters
+
+struct HookInterpreterLifecycleTests {
+    /// The invocation a real pack needs for a TypeScript hook on Node.
+    private static let tsInterpreter = "node --experimental-strip-types --disable-warning=ExperimentalWarning"
+
+    @Test("Declared, inferred and default hook interpreters all compose, verify and clean up")
+    func hookInterpreterLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let tsSource = try bed.makeHookSource(name: "gate.ts", content: "console.log('gate')")
+        let jsSource = try bed.makeHookSource(name: "fmt.js", content: "console.log('fmt')")
+        let shSource = try bed.makeHookSource(name: "legacy.sh")
+
+        let pack = MockTechPack(
+            identifier: "ts-pack",
+            displayName: "TS Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "ts-pack", id: "gate", source: tsSource, destination: "gate.ts",
+                    hookRegistration: HookRegistration(event: .preToolUse, interpreter: Self.tsInterpreter)
+                ),
+                bed.hookComponent(
+                    pack: "ts-pack", id: "fmt", source: jsSource, destination: "fmt.js",
+                    hookRegistration: HookRegistration(event: .postToolUse)
+                ),
+                bed.hookComponent(
+                    pack: "ts-pack", id: "legacy", source: shSource, destination: "legacy.sh",
+                    hookRegistration: HookRegistration(event: .sessionStart)
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        // 1. Sync
+        let configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        // Hooks are always namespaced under the pack id (collision resolver phase 0).
+        let expected = [
+            bed.projectHookCommand("ts-pack/gate.ts", interpreter: Self.tsInterpreter),
+            bed.projectHookCommand("ts-pack/fmt.js", interpreter: "node"),
+            bed.projectHookCommand("ts-pack/legacy.sh"),
+        ]
+
+        // 2. Each command lands in settings.local.json under its own event
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let registered = (settings.hooks ?? [:]).values.flatMap { groups in
+            groups.compactMap(\.hooks?.first?.command)
+        }
+        for command in expected {
+            #expect(registered.contains(command), "settings should register '\(command)'")
+        }
+        #expect(settings.hooks?["PreToolUse"]?.first?.hooks?.first?.command == expected[0])
+
+        // 3. And is recorded for convergence
+        let artifacts = try #require(bed.projectState().artifacts(for: "ts-pack"))
+        for command in expected {
+            #expect(artifacts.hookCommands.contains(command), "state should record '\(command)'")
+        }
+
+        // 4. Doctor joins the recorded commands back to their components without complaint
+        try bed.runDoctor(registry: registry)
+
+        // 5. Deselecting the pack removes the files and every hook entry, interpreter regardless
+        try configurator.configure(packs: [], confirmRemovals: false)
+
+        if FileManager.default.fileExists(atPath: bed.settingsLocalPath.path) {
+            let after = try Settings.load(from: bed.settingsLocalPath)
+            let remaining = (after.hooks ?? [:]).values.flatMap { groups in
+                groups.compactMap(\.hooks?.first?.command)
+            }
+            for command in expected {
+                #expect(!remaining.contains(command), "'\(command)' should be gone")
+            }
+        }
+        for destination in ["ts-pack/gate.ts", "ts-pack/fmt.js", "ts-pack/legacy.sh"] {
+            let installed = bed.project.appendingPathComponent(".claude/hooks/\(destination)")
+            #expect(!FileManager.default.fileExists(atPath: installed.path))
         }
     }
 }

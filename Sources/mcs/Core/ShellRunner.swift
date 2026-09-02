@@ -76,8 +76,18 @@ struct ShellRunner: ShellRunning {
 
     /// Check if a command exists on PATH.
     func commandExists(_ command: String) -> Bool {
+        resolvedPath(of: command) != nil
+    }
+
+    /// Absolute path `command` resolves to on PATH, or nil when it resolves to nothing.
+    ///
+    /// The trimmed counterpart of `commandExists` — callers that report *where* a binary came
+    /// from need the path, and every hand-rolled `which` invocation risks forgetting the trim.
+    func resolvedPath(of command: String) -> String? {
         let result = run(Constants.CLI.which, arguments: [command])
-        return result.succeeded
+        guard result.succeeded else { return nil }
+        let path = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return path.isEmpty ? nil : path
     }
 
     /// Run an executable with arguments, capturing stdout and stderr.

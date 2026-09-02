@@ -329,7 +329,7 @@ struct GlobalSettingsCompositionTests {
     }
 
     @Test("Hook commands use global path prefix")
-    func hookCommandPrefixUsesGlobalPath() throws {
+    func hookCommandUsesGlobalPath() throws {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -368,6 +368,63 @@ struct GlobalSettingsCompositionTests {
         #expect(command == "bash ~/.claude/hooks/test-pack/start.sh")
         // Must NOT use project-relative path
         #expect(command?.hasPrefix("bash .claude/") != true)
+    }
+
+    @Test("Non-bash hook entries are stripped on unconfigure, user hooks are preserved")
+    func stripsNonBashHooksButKeepsUserHooks() throws {
+        let tmpDir = try makeGlobalTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // A pre-existing global settings file holding a pack hook under a non-bash interpreter,
+        // the first-party update hook, and a hook of the user's own outside the managed directory.
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        let settingsPath = claudeDir.appendingPathComponent("settings.json")
+        try """
+        {
+          "hooks": {
+            "SessionStart": [
+              { "hooks": [{ "type": "command", "command": "node ~/.claude/hooks/test-pack/legacy.js" }] },
+              { "hooks": [{ "type": "command", "command": "\(UpdateChecker.hookCommand)" }] },
+              { "hooks": [{ "type": "command", "command": "node ~/scripts/mine.js" }] }
+            ]
+          }
+        }
+        """.write(to: settingsPath, atomically: true, encoding: .utf8)
+
+        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
+
+        let packDir = tmpDir.appendingPathComponent("pack/hooks")
+        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+        let hookSource = packDir.appendingPathComponent("start.sh")
+        try "#!/bin/bash\necho start".write(to: hookSource, atomically: true, encoding: .utf8)
+
+        let pack = MockTechPack(
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            components: [ComponentDefinition(
+                id: "test-pack.hook",
+                displayName: "Start hook",
+                description: "Session start hook",
+                type: .hookFile,
+                packIdentifier: "test-pack",
+                dependencies: [],
+                isRequired: true,
+                hookRegistration: HookRegistration(event: .sessionStart),
+                installAction: .copyPackFile(source: hookSource, destination: "start.sh", fileType: .hook)
+            )]
+        )
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        let commands = try Settings.load(from: settingsPath)
+            .hooks?["SessionStart"]?.compactMap(\.hooks?.first?.command) ?? []
+
+        // The orphan is gone even though it was not registered under bash.
+        #expect(!commands.contains("node ~/.claude/hooks/test-pack/legacy.js"))
+        // The user's own hook, outside the managed directory, survives.
+        #expect(commands.contains("node ~/scripts/mine.js"))
+        #expect(commands.contains("bash ~/.claude/hooks/test-pack/start.sh"))
     }
 }
 

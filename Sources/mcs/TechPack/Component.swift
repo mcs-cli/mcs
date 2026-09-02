@@ -34,13 +34,27 @@ struct HookRegistration: Equatable {
     let timeout: Int?
     let isAsync: Bool?
     let statusMessage: String?
+    /// Command the hook script is invoked with, e.g. `node` or
+    /// `node --experimental-strip-types`. Nil falls back to extension inference, then bash.
+    ///
+    /// Unlike the other fields here, this one does not map to a Claude Code handler field — it
+    /// changes the `command` string mcs composes. See `HookInterpreter`.
+    let interpreter: String?
 
-    init(event: Constants.HookEvent, matcher: String? = nil, timeout: Int? = nil, isAsync: Bool? = nil, statusMessage: String? = nil) {
+    init(
+        event: Constants.HookEvent,
+        matcher: String? = nil,
+        timeout: Int? = nil,
+        isAsync: Bool? = nil,
+        statusMessage: String? = nil,
+        interpreter: String? = nil
+    ) {
         self.event = event
         self.matcher = matcher
         self.timeout = timeout
         self.isAsync = isAsync
         self.statusMessage = statusMessage
+        self.interpreter = interpreter
     }
 }
 
@@ -124,15 +138,36 @@ extension ComponentDefinition {
     /// Single source of truth for the sync↔doctor join: sync writes this string into
     /// `settings.local.json` and records it in `PackArtifactRecord.hookCommands`, and doctor
     /// rebuilds it to match a recorded command back to the component that declared it. Both sides
-    /// must build it identically — a divergence makes every hook look missing.
+    /// must build it identically — a divergence makes every hook look missing. That is why the
+    /// interpreter is resolved here and nowhere else.
     ///
-    /// - Parameter prefix: Scope-dependent prefix, `Constants.HookCommand.projectPrefix` or
-    ///   `.globalPrefix`.
-    func hookCommand(prefix: String) -> String? {
-        guard type == .hookFile, hookRegistration != nil,
-              case let .copyPackFile(_, destination, .hook) = installAction
+    /// - Parameter pathPrefix: Scope-dependent directory, `Constants.HookCommand.projectDirectory`
+    ///   or `.globalDirectory`.
+    func hookCommand(pathPrefix: String) -> String? {
+        guard let invocation = hookInvocation else { return nil }
+        return "\(invocation.interpreter) \(pathPrefix)\(invocation.destination)"
+    }
+
+    /// The interpreter and installed filename this component's hook runs as, or nil when it
+    /// registers no hook.
+    ///
+    /// Sole owner of two rules that must not be restated: which components are eligible to
+    /// register a hook, and which interpreter theirs runs under. Both were previously inlined at
+    /// every consumer, and had already diverged — one site omitted the `type == .hookFile` guard,
+    /// so a component with a `.hook` copy action but another type produced verification for a
+    /// command sync never wrote.
+    var hookInvocation: (interpreter: String, destination: String)? {
+        guard type == .hookFile, let registration = hookRegistration,
+              case let .copyPackFile(source, destination, .hook) = installAction
         else { return nil }
-        return prefix + destination
+        return (
+            HookInterpreter.resolve(
+                explicit: registration.interpreter,
+                destination: destination,
+                source: source.lastPathComponent
+            ),
+            destination
+        )
     }
 }
 

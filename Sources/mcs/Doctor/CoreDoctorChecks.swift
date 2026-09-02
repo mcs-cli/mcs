@@ -500,6 +500,51 @@ struct HookSettingsCheck: DoctorCheck {
     }
 }
 
+/// Verifies the binary a pack's hook commands are invoked with is resolvable.
+///
+/// A hook whose interpreter is missing installs cleanly, registers in settings, and dies the
+/// moment Claude Code runs it — and the symptom is an empty log, which reads as "no problems
+/// found" rather than "never ran". Only the binary is checked, never executed: running an
+/// arbitrary interpreter during doctor risks hangs, and its arguments are the author's business.
+struct HookInterpreterCheck: DoctorCheck {
+    /// Path fragments belonging to per-shell version managers.
+    ///
+    /// A binary found here resolves in the user's terminal but often not in the environment
+    /// Claude Code hands its hooks, which is a warning rather than a failure because mcs cannot
+    /// tell the two environments apart from here.
+    private static let versionManagerFragments = ["/.nvm/", "/.asdf/", "/mise/", "/.pyenv/", "/.rbenv/", "/.volta/", "/.fnm/"]
+
+    let binary: String
+    let packName: String
+    var environment: Environment = .init()
+
+    var name: String {
+        "Hook interpreter: \(binary) (\(packName))"
+    }
+
+    var section: String {
+        "Hooks"
+    }
+
+    func check() -> CheckResult {
+        let shell = ShellRunner(environment: environment)
+        guard let resolved = shell.resolvedPath(of: binary) else {
+            return .fail("not found — hooks using it will not run")
+        }
+        if let fragment = Self.versionManagerFragments.first(where: resolved.contains) {
+            return .warn(
+                "resolves to \(resolved) via \(fragment.trimmingCharacters(in: CharacterSet(charactersIn: "/")))"
+                    + " — Claude Code may not have it on PATH when it runs the hook"
+            )
+        }
+        return .pass("resolves to \(resolved)")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("Install '\(binary)' and make sure it is on PATH for GUI applications")
+    }
+}
+
 /// Verifies that pack-contributed settings keys are still present in the settings file.
 struct SettingsKeysCheck: DoctorCheck {
     let keys: [String]

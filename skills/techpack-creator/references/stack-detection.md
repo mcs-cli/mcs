@@ -91,9 +91,11 @@ Only include servers with clear evidence of need. Do NOT add speculatively.
 
 ### Hook Script Best Practices
 
-- Always start with `set -euo pipefail`
+- Always start with `set -euo pipefail` (bash) or the equivalent fail-open guard in another language
 - Check for required tools: `command -v jq >/dev/null 2>&1 || exit 0`
 - Add `trap 'exit 0' ERR` for hooks that should never block
+- Non-bash hooks: the extension picks the interpreter (`.js` → `node`, `.py` → `python3`); declare
+  `hookInterpreter` for TypeScript or for arguments, and add a brew component for the runtime
 - Keep hooks fast (< 5 seconds for SessionStart)
 - Use `hookAsync: true` for slow, non-blocking checks
 - Set `hookTimeout` to prevent hanging (30s is a good default)

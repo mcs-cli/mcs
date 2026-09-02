@@ -94,6 +94,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `TechPack.swift` — protocol for tech packs (components, templates, hooks, doctor checks, project configuration)
 - `Component.swift` — ComponentDefinition with install actions, ComponentType enum, MCPServerConfig (with scope), CopyFileType (with project-scoped directories)
 - `PromptDefinition.swift` — PromptDefinition, PromptType, PromptOption (prompt types used by TechPack protocol)
+- `HookInterpreter.swift` — hook interpreter resolution (explicit → extension inference → bash), token validation, and the parsing counterpart used to recognize mcs-managed hook commands
 - `TechPackRegistry.swift` — registry of available packs (external only), filtering by installed state
 - `DependencyResolver.swift` — topological sort of component dependencies with cycle detection
 
@@ -154,7 +155,11 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ## Code Style
 
-SwiftFormat and SwiftLint enforce consistent code style. Both are installed via Homebrew.
+SwiftFormat and SwiftLint enforce consistent code style. CI installs both from Homebrew and always
+gets the latest release; a local install may come from a different manager (Mint, for instance) and
+sit earlier on `PATH`, so `brew install` can appear to succeed while the old binary keeps answering.
+If the formatter fails with `error: Unknown rule '<name>'` on every file, that is a stale local
+install rather than a broken config — check `which -a swiftformat` and the version of each copy.
 
 ```bash
 # Format modified files (run before committing)
@@ -185,8 +190,9 @@ swiftlint --fix
 
 ## Git
 
-- **Never amend commits** — always create new commits so the change history stays trackable
-- **Never force-push** — use regular `git push` only
+- **Prefer linear history** — rebase a feature branch onto `main` to resolve conflicts or catch up, rather than merging `main` into it. `git push --force-with-lease` afterwards is expected and fine
+- **Never rewrite shared history** — never force-push `main`, or a branch someone else may be building on. `--force-with-lease` on your own feature branch is fine; a bare `--force` is not
+- **Amend only what has not been pushed under its final hash** — otherwise add a new commit, so the change history stays trackable. Correcting a botched conflict resolution mid-rebase is amending in this sense and is fine; rewriting a reviewed commit is not
 - **Always run `swiftformat` and `swiftlint` on changed files before committing** — CI will reject PRs that fail lint. Run `swiftformat <changed-files>` then `swiftlint` to catch issues locally
 
 ## Key Design Decisions
@@ -199,6 +205,7 @@ swiftlint --fix
 - **External pack protocol**: `TechPack` protocol with `ExternalPackAdapter` bridging YAML manifests (`techpack.yaml`) to the same install/doctor/sync flows
 - **Section markers**: composed files use `<!-- mcs:begin/end -->` HTML comments to separate tool-managed content from user content
 - **Settings composition**: each pack's hook entries compose into `<project>/.claude/settings.local.json` as individual `HookGroup` entries
+- **Hook interpreters**: a registered hook command is `<interpreter> <path>`, composed only in `ComponentDefinition.hookCommand(pathPrefix:)`. `HookInterpreter.resolve` picks the interpreter — explicit `hookInterpreter` → file extension (`.js`→node, `.py`→python3, TypeScript infers nothing) → `bash`. Global-scope cleanup matches its own entries by the **path token**, never an interpreter prefix, so a non-bash hook is stripped on unconfigure instead of orphaning its settings entry
 - **Backup for mixed-ownership files**: timestamped backup before modifying files with user content (CLAUDE.local.md); tool-managed files are not backed up since they can be regenerated
 - **Component-derived doctor checks**: `ComponentDefinition` is the single source of truth — `deriveDoctorCheck()` auto-generates verification from `installAction`, supplementary checks handle extras
 - **Project awareness**: doctor detects project root (walk-up for `.git/`), resolves packs from `.claude/.mcs-project` before falling back to section marker inference, then to global manifest
@@ -206,4 +213,4 @@ swiftlint --fix
 - **Local packs**: `mcs pack add /path` registers a pack read in-place — no git clone, no `mcs pack update`, no directory deletion on remove. Uses `isLocal: Bool?` on `PackEntry` (backward-compatible) and `commitSHA: "local"` sentinel. Trust verification is skipped since scripts change during development
 - **GitHub shorthand**: `mcs pack add user/repo` expands to `https://github.com/user/repo.git`. Filesystem paths are checked before shorthand regex to prevent ambiguity with relative paths like `org/pack`
 - **Cross-project reference counting**: `ProjectIndex` (`~/.mcs/projects.yaml`) tracks which projects use which packs; `ResourceRefCounter` checks all scopes before removing shared brew packages or plugins. Conservative by default — if state is unreadable, assume resource is still needed. MCP servers are project-independent (scoped via `-s local`) and skip ref counting
-- **Conditional copyPackFile namespacing**: `copyPackFile` destinations are installed flat by default. When two+ packs define the same `(destination, fileType)`, the `DestinationCollisionResolver` auto-namespaces: subdirectory prefix (`<pack-id>/`) for hooks/commands/agents/generic, or directory name suffix (`-<pack-id>`) for skills (which require flat one-level directories). First pack keeps the clean name; subsequent packs get namespaced. Skill renames emit a warning
+- **Conditional copyPackFile namespacing**: `copyPackFile` destinations are installed flat by default — except `fileType: hook`, which `DestinationCollisionResolver` phase 0 namespaces unconditionally (whenever a filesystem context is present) so a pack can never overwrite a user's hand-written hook at a flat path. When two+ packs define the same `(destination, fileType)`, the resolver auto-namespaces: subdirectory prefix (`<pack-id>/`) for hooks/commands/agents/generic, or directory name suffix (`-<pack-id>`) for skills (which require flat one-level directories). First pack keeps the clean name; subsequent packs get namespaced. Skill renames emit a warning

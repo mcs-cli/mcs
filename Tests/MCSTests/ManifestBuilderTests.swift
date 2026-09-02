@@ -236,6 +236,47 @@ struct ManifestBuilderTests {
 
     // MARK: - Empty configuration
 
+    @Test("Multi-token hook interpreter survives the YAML round-trip")
+    func hookInterpreterRoundTrip() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let hookURL = tmpDir.appendingPathComponent("gate.ts")
+        try "console.log('gate')".write(to: hookURL, atomically: true, encoding: .utf8)
+
+        let interpreter = "node --experimental-strip-types --disable-warning=ExperimentalWarning"
+        var config = ConfigurationDiscovery.DiscoveredConfiguration()
+        config.hookFiles = [
+            ConfigurationDiscovery.DiscoveredFile(
+                filename: "gate.ts",
+                absolutePath: hookURL,
+                hookRegistration: HookRegistration(event: .preToolUse, interpreter: interpreter)
+            ),
+        ]
+
+        let result = ManifestBuilder().build(
+            from: config,
+            metadata: ManifestBuilder.Metadata(
+                identifier: "ts-pack", displayName: "TS Pack", description: "TypeScript hooks", author: nil
+            ),
+            options: ManifestBuilder.BuildOptions(
+                selectedMCPServers: [], selectedHookFiles: ["gate.ts"], selectedSkillFiles: [],
+                selectedCommandFiles: [], selectedAgentFiles: [], selectedPlugins: [], selectedSections: [],
+                includeUserContent: false, includeGitignore: false, includeSettings: false
+            )
+        )
+
+        #expect(result.manifestYAML.contains("hookInterpreter:"))
+
+        let yamlFile = tmpDir.appendingPathComponent("techpack.yaml")
+        try result.manifestYAML.write(to: yamlFile, atomically: true, encoding: .utf8)
+        let normalized = try ExternalPackManifest.load(from: yamlFile).normalized()
+        try normalized.validate()
+
+        let hook = try #require(normalized.components?.first { $0.type == .hookFile })
+        #expect(hook.hookRegistration?.interpreter == interpreter)
+    }
+
     @Test("Empty configuration produces valid minimal manifest")
     func emptyConfigRoundTrip() throws {
         let tmpDir = try makeTmpDir()
