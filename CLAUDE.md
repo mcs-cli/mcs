@@ -115,6 +115,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `CoreDoctorChecks.swift` — check structs (CommandCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
 - `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition
 - `ProjectDoctorChecks.swift` — project-scoped checks (CLAUDE.local.md freshness, state file)
+- `ScopeDuplicationCheck.swift` — flags a pack configured in both the project and global scope, reporting only artifacts that genuinely exist twice; `--fix` removes the project copy via `Configurator.unconfigurePack`, gated on component subset, prompt-answer parity, and the recorded hash of every file it would delete
 - `SectionValidator.swift` — validation of CLAUDE.local.md section markers
 
 ### Commands (`Sources/mcs/Commands/`)
