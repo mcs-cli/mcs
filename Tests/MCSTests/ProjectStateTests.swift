@@ -92,4 +92,19 @@ struct PackArtifactRecordTests {
         #expect(loadedArtifacts?.plugins == ["pr-review-toolkit"])
         #expect(loadedArtifacts?.mcpServers.count == 1)
     }
+
+    @Test("Throws on malformed JSON so callers can surface an actionable message")
+    func throwsOnMalformedJSON() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-state-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let file = dir.appendingPathComponent("state.json")
+        try "{ not valid json".write(to: file, atomically: true, encoding: .utf8)
+
+        #expect(throws: (any Error).self) {
+            try ProjectState(stateFile: file)
+        }
+    }
 }

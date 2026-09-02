@@ -141,6 +141,22 @@ struct CLIOutput {
         return rows
     }
 
+    /// The "Already installed globally" block, shared by the interactive and fallback
+    /// pickers so a copy edit cannot land on only one of them. Returns `""` when there
+    /// is nothing locked, letting callers append unconditionally.
+    private func lockedSectionString(_ names: [String], indent: String) -> String {
+        guard !names.isEmpty else { return "" }
+
+        var out = "\n" + sectionHeaderString("Already installed globally")
+        for name in names {
+            // ✓ rather than ●/○: those are toggle glyphs and would read as a checkbox.
+            // ✓ states a fact. Same green as "Always included" — both sections mean
+            // "you already have this", and the headers disambiguate.
+            out += "\(indent)\(green)\u{2713}\(reset) \(name)\n"
+        }
+        return out + "\n\(indent)\(dim)Manage these with 'mcs sync --global'\(reset)\n"
+    }
+
     private func sectionHeaderString(_ title: String) -> String {
         let divider = "──────────────────────────────────────────"
         return "  \(bold)\(title)\(reset)\n  \(dim)\(divider)\(reset)\n"
@@ -150,6 +166,12 @@ struct CLIOutput {
 
     func info(_ message: String) {
         write("\(blue)[INFO]\(reset) \(message)\n")
+    }
+
+    /// `[INFO] <bold label>: <value>` — emphasises the label, and keeps that emphasis
+    /// identical across the sync summary lines without callers handling escape codes.
+    func info(label: String, _ value: String) {
+        write("\(blue)[INFO]\(reset) \(bold)\(label):\(reset) \(value)\n")
     }
 
     func success(_ message: String) {
@@ -568,7 +590,9 @@ struct CLIOutput {
         }
     }
 
-    private func buildInteractiveListString(
+    /// Internal rather than private so the rendered layout can be asserted directly;
+    /// it is a pure function of its arguments and touches no terminal state.
+    func buildInteractiveListString(
         groups: [SelectableGroup],
         cursor: Int,
         columns: Int
@@ -595,10 +619,13 @@ struct CLIOutput {
                     : "\(dim)\u{25CB}\(reset)"
                 let pointer = isCursor ? "\(cyan)\u{276F}\(reset)" : " "
                 let nameStyle = isCursor ? "\(bold)\(cyan)\(item.name)\(reset)" : "\(bold)\(item.name)\(reset)"
+                // Badge and tag must stay on the name's line — `visualRowCount`
+                // soft-wrap math counts visible characters per rendered line.
+                let badge = item.globallyInstalled ? "\(dim) (global)\(reset)" : ""
                 let tag = group.showsDelta
                     ? PickerDelta.tagString(state: state, isCursor: isCursor, style: style)
                     : ""
-                output += "  \(pointer) \(marker) \(nameStyle)\(tag)\n"
+                output += "  \(pointer) \(marker) \(nameStyle)\(badge)\(tag)\n"
                 output += "\(dim)\(wordWrap(item.description, indent: "      ", columns: columns))\(reset)\n"
 
                 if group.showsDelta {
@@ -614,6 +641,8 @@ struct CLIOutput {
                 flatIndex += 1
             }
         }
+
+        output += lockedSectionString(groups.flatMap(\.lockedItems), indent: "    ")
 
         let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
@@ -756,10 +785,13 @@ struct CLIOutput {
                     ? "\(green)\u{25CF}\(reset)"
                     : "\(dim)\u{25CB}\(reset)"
                 let numStr = String(format: "%2d", item.number)
-                write("  [\(numStr)]  \(marker) \(bold)\(item.name)\(reset)\n")
+                let badge = item.globallyInstalled ? "\(dim) (global)\(reset)" : ""
+                write("  [\(numStr)]  \(marker) \(bold)\(item.name)\(reset)\(badge)\n")
                 write("         \(dim)\(item.description)\(reset)\n")
             }
         }
+
+        write(lockedSectionString(groups.flatMap(\.lockedItems), indent: "       "))
 
         let allRequired = groups.flatMap(\.requiredItems)
         if !allRequired.isEmpty {
@@ -816,6 +848,11 @@ struct SelectableItem {
     /// Only meaningful when the enclosing `SelectableGroup.showsDelta == true`;
     /// otherwise ignored by the renderer.
     var baselineSelected: Bool = false
+    /// The pack is also installed in the global scope, so its artifacts are
+    /// duplicated here. Only ever true for rows that are *also* installed in this
+    /// project — a global pack absent from the project is not selectable at all and
+    /// is listed in `SelectableGroup.lockedItems` instead.
+    var globallyInstalled: Bool = false
 }
 
 struct RequiredItem {
@@ -830,6 +867,10 @@ struct SelectableGroup {
     /// dynamic footer. Callers must populate `baselineSelected` on every item
     /// or the renderer will treat pre-installed packs as brand-new.
     var showsDelta: Bool = false
+    /// Names shown in a non-navigable "Already installed globally" section. These are
+    /// deliberately not `SelectableItem`s: keeping them out of the cursor's item list
+    /// is what makes them unselectable, rather than guarding every input path.
+    var lockedItems: [String] = []
 }
 
 // MARK: - Multi-Select Parser
