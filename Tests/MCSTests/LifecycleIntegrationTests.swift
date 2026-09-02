@@ -2832,9 +2832,10 @@ struct ScopeDuplicationCheckTests {
 /// `GitignoreManager` resolves one file for the whole machine, so a gitignore entry is a shared
 /// resource like a brew package or a plugin: two scopes hold two claims on one physical line.
 ///
-/// Both entry points are exercised separately — `mcs sync` deselection restores stripped lines on
-/// the next sync of the surviving scope, but `mcs pack remove` calls `unconfigurePack` directly
-/// and runs no step that would add anything back, so a miss there is permanent.
+/// Both entry points are exercised separately because they orchestrate removal differently:
+/// deselection during `mcs sync` runs inside `configure()`, while `mcs pack remove` calls
+/// `unconfigurePack` directly and runs none of its install or ensure steps — so on that path a
+/// ref-counting miss has nothing after it to put the line back.
 @Suite("Gitignore reference counting")
 struct GitignoreRefCountTests {
     private func ignorePack(id: String, entry: String) -> any TechPack {

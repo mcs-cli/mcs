@@ -1201,8 +1201,16 @@ struct Configurator {
         excludingScope: String,
         excludingPack: String
     ) -> RefCountedRemovalResult {
+        let resource = ResourceRefCounter.Resource.gitignoreEntry(entry)
+        // Checked separately from `isStillNeeded` — which guards it too, for every caller — so the
+        // message names the real reason. A core line is retained because mcs owns it, not because
+        // some other claimant exists, and telling the user otherwise sends them looking for one.
+        if resource.isProtected {
+            output.dimmed("  Keeping gitignore entry '\(entry)' — core entry managed by mcs")
+            return .stillNeeded
+        }
         if refCounter.isStillNeeded(
-            .gitignoreEntry(entry),
+            resource,
             excludingScope: excludingScope,
             excludingPack: excludingPack
         ) {
