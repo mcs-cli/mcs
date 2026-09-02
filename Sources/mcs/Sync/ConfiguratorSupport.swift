@@ -4,6 +4,26 @@ import Foundation
 ///
 /// Eliminates duplication of common methods that both configurators need.
 enum ConfiguratorSupport {
+    /// Pack identifiers that may not be installed into a project because they are
+    /// already installed globally.
+    ///
+    /// The block is a rule about *transitions*: a pack already configured here is
+    /// never blocked. Blocking by bare identity would drop both-scope packs from the
+    /// desired set, and `Configurator.configure` removes anything missing from it —
+    /// with `confirmRemovals: false` on the `--all`/`--pack` path, silently.
+    ///
+    /// Shared by the interactive picker (which lists these separately, unselectable)
+    /// and `SyncCommand`'s non-interactive filter, so the rule has one definition.
+    static func globallyBlockedIDs(
+        candidates: [String],
+        globallyInstalled: Set<String>,
+        previouslyConfigured: Set<String>
+    ) -> Set<String> {
+        Set(candidates.filter {
+            globallyInstalled.contains($0) && !previouslyConfigured.contains($0)
+        })
+    }
+
     /// Build a `ComponentExecutor` from the common dependencies.
     static func makeExecutor(
         environment: Environment,

@@ -1993,3 +1993,122 @@ struct PromptValueReuseLifecycleTests {
         #expect(try bed.projectState().resolvedValues?["SETTING"] == "prior-updated")
     }
 }
+
+// MARK: - Global Pack Blocking
+
+/// End-to-end coverage for blocking globally-installed packs from project sync.
+///
+/// These drive `Configurator` directly rather than `SyncCommand.perform()`, which
+/// builds its own `Environment()` and cannot be pointed at a sandboxed home.
+struct GlobalPackBlockingLifecycleTests {
+    @Test("Global-only pack is filtered out and never reaches project state")
+    func globalOnlyPackIsNotInstalledInProject() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let shared = MockTechPack(identifier: "shared-pack", displayName: "Shared Pack")
+        let projectOnly = MockTechPack(identifier: "project-pack", displayName: "Project Pack")
+        let registry = TechPackRegistry(packs: [shared, projectOnly])
+
+        // Install `shared-pack` globally.
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+
+        let globallyInstalled = try ProjectState(stateFile: bed.env.globalStateFile).configuredPacks
+        #expect(globallyInstalled.contains("shared-pack"))
+
+        // `mcs sync --all` in the project: both packs are candidates, `shared-pack`
+        // is blocked because it is global and not yet configured here. Drive the real
+        // filter, not a copy of it — a reimplementation here would keep passing even
+        // if `performProject` stopped calling it.
+        let toSync = try SyncCommand.filterGloballyBlocked(
+            [shared, projectOnly],
+            globallyInstalled: globallyInstalled,
+            previouslyConfigured: bed.projectState().configuredPacks,
+            output: CLIOutput(colorsEnabled: false)
+        )
+        #expect(toSync.map(\.identifier) == ["project-pack"])
+
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: toSync, confirmRemovals: false)
+
+        let projectPacks = try bed.projectState().configuredPacks
+        #expect(!projectPacks.contains("shared-pack"))
+        #expect(projectPacks.contains("project-pack"))
+    }
+
+    @Test("Both-scope pack survives a project sync instead of being silently removed")
+    func bothScopePackSurvivesProjectSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let shared = MockTechPack(identifier: "shared-pack", displayName: "Shared Pack")
+        let registry = TechPackRegistry(packs: [shared])
+
+        // Pre-existing state: installed in the project FIRST, then globally.
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+
+        #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
+
+        // The regression guard: blocking by bare identity here would drop the pack
+        // from the desired set, and `configure(confirmRemovals: false)` would
+        // unconfigure it without a prompt.
+        let toSync = try SyncCommand.filterGloballyBlocked(
+            [shared],
+            globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
+            previouslyConfigured: bed.projectState().configuredPacks,
+            output: CLIOutput(colorsEnabled: false)
+        )
+        #expect(toSync.map(\.identifier) == ["shared-pack"])
+
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: toSync, confirmRemovals: false)
+
+        #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
+    }
+
+    @Test("Missing global state blocks nothing — machines that never ran --global")
+    func missingGlobalStateBlocksNothing() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        #expect(!FileManager.default.fileExists(atPath: bed.env.globalStateFile.path))
+
+        let pack = MockTechPack(identifier: "ios", displayName: "iOS")
+        // `ProjectState.load` returns early for a missing file rather than throwing,
+        // so an untouched global scope yields an empty set and nothing is filtered.
+        let toSync = try SyncCommand.filterGloballyBlocked(
+            [pack],
+            globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
+            previouslyConfigured: [],
+            output: CLIOutput(colorsEnabled: false)
+        )
+        #expect(toSync.map(\.identifier) == ["ios"])
+    }
+
+    @Test("Refuses to sync when every requested pack is globally installed")
+    func refusesWhenEveryPackIsBlocked() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let shared = MockTechPack(identifier: "shared-pack", displayName: "Shared Pack")
+        let registry = TechPackRegistry(packs: [shared])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry)
+            .configure(packs: [shared], confirmRemovals: false)
+
+        // Returning an empty pack list instead of throwing would make `configure`
+        // converge on an empty desired set and unconfigure the whole project.
+        #expect(throws: (any Error).self) {
+            try SyncCommand.filterGloballyBlocked(
+                [shared],
+                globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
+                previouslyConfigured: [],
+                output: CLIOutput(colorsEnabled: false)
+            )
+        }
+    }
+}

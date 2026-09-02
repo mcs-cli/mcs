@@ -84,14 +84,7 @@ struct SyncCommand: LockedCommand {
             strategy: GlobalSyncStrategy(environment: env)
         )
 
-        let persistedExclusions: [String: Set<String>]
-        do {
-            persistedExclusions = try ProjectState(stateFile: env.globalStateFile).allExcludedComponents
-        } catch {
-            output.error("Corrupt global state: \(error.localizedDescription)")
-            output.error("Delete \(env.globalStateFile.path) and re-run 'mcs sync --global'.")
-            throw ExitCode.failure
-        }
+        let persistedExclusions = try loadGlobalState(env: env, output: output).allExcludedComponents
 
         if all || !pack.isEmpty {
             let packs = try resolvePacks(from: registry, output: output)
@@ -105,7 +98,11 @@ struct SyncCommand: LockedCommand {
                 output: output
             )
         } else {
-            try configurator.interactiveConfigure(dryRun: dryRun, customize: customize)
+            try configurator.interactiveConfigure(
+                dryRun: dryRun,
+                customize: customize,
+                globallyInstalledPacks: []
+            )
         }
     }
 
@@ -142,17 +139,26 @@ struct SyncCommand: LockedCommand {
             strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env)
         )
 
-        let persistedExclusions: [String: Set<String>]
+        let projectState: ProjectState
         do {
-            persistedExclusions = try ProjectState(projectRoot: projectPath).allExcludedComponents
+            projectState = try ProjectState(projectRoot: projectPath)
         } catch {
             output.error("Corrupt .mcs-project: \(error.localizedDescription)")
             output.error("Delete .claude/.mcs-project and re-run 'mcs sync'.")
             throw ExitCode.failure
         }
+        let persistedExclusions = projectState.allExcludedComponents
+        let previouslyConfigured = projectState.configuredPacks
+
+        let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
 
         if all || !pack.isEmpty {
-            let packs = try resolvePacks(from: registry, output: output)
+            let packs = try Self.filterGloballyBlocked(
+                resolvePacks(from: registry, output: output),
+                globallyInstalled: globallyInstalledPacks,
+                previouslyConfigured: previouslyConfigured,
+                output: output
+            )
             try runSync(
                 configurator: configurator,
                 packs: packs,
@@ -163,7 +169,11 @@ struct SyncCommand: LockedCommand {
                 output: output
             )
         } else {
-            try configurator.interactiveConfigure(dryRun: dryRun, customize: customize)
+            try configurator.interactiveConfigure(
+                dryRun: dryRun,
+                customize: customize,
+                globallyInstalledPacks: globallyInstalledPacks
+            )
         }
 
         switch Self.lockfileAction(dryRun: dryRun, config: config) {
@@ -191,6 +201,60 @@ struct SyncCommand: LockedCommand {
         if config.isLockfileGenerationEnabled { return .write }
         if config.isLockfileGenerationUnset { return .reportDrift }
         return .skip
+    }
+
+    // MARK: - Global Pack Blocking
+
+    /// Load global state, failing the command with an actionable message if the file is
+    /// corrupt. A *missing* file is not an error — `ProjectState.load` returns early and
+    /// yields an empty state, so machines that never ran `--global` are unaffected.
+    private func loadGlobalState(env: Environment, output: CLIOutput) throws -> ProjectState {
+        do {
+            return try ProjectState(stateFile: env.globalStateFile)
+        } catch {
+            output.error("Corrupt global state: \(error.localizedDescription)")
+            output.error("Delete \(env.globalStateFile.path) and re-run 'mcs sync --global'.")
+            throw ExitCode.failure
+        }
+    }
+
+    /// Drop globally-blocked packs from a non-interactive pack set, reporting what was
+    /// skipped. Skipping is safe precisely because a blocked pack is not configured
+    /// here, so removing it from the desired set cannot unconfigure anything.
+    ///
+    /// `static` so tests can drive the real filter — `SyncCommand` builds its own
+    /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
+    static func filterGloballyBlocked(
+        _ packs: [any TechPack],
+        globallyInstalled: Set<String>,
+        previouslyConfigured: Set<String>,
+        output: CLIOutput
+    ) throws -> [any TechPack] {
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: packs.map(\.identifier),
+            globallyInstalled: globallyInstalled,
+            previouslyConfigured: previouslyConfigured
+        )
+        guard !blocked.isEmpty else { return packs }
+
+        // Display names, matching the picker's "Already installed globally" section.
+        // The same packs must not be named differently depending on the flag used.
+        let blockedNames = packs
+            .filter { blocked.contains($0.identifier) }
+            .map(\.displayName)
+            .sorted()
+        output.warn("Skipping \(blocked.count) pack(s) already installed globally:")
+        output.plain("  \(blockedNames.joined(separator: ", "))")
+        output.plain("  Run 'mcs sync --global' to manage them.")
+
+        let remaining = packs.filter { !blocked.contains($0.identifier) }
+        // `resolvePacks` guarantees a non-empty result, but filtering happens after it.
+        // Syncing an empty desired set would unconfigure every pack in the project.
+        guard !remaining.isEmpty else {
+            output.error("All requested packs are already installed globally. Nothing to sync.")
+            throw ExitCode.failure
+        }
+        return remaining
     }
 
     // MARK: - Shared Helpers
@@ -299,8 +363,8 @@ struct SyncCommand: LockedCommand {
     ) throws {
         output.header("Sync \(scopeLabel)")
         output.plain("")
-        output.info("\(targetLabel): \(targetPath)")
-        output.info("Packs: \(packs.map(\.displayName).joined(separator: ", "))")
+        output.info(label: targetLabel, targetPath)
+        output.info(label: "Packs", packs.map(\.displayName).joined(separator: ", "))
 
         if dryRun {
             try configurator.dryRun(packs: packs)

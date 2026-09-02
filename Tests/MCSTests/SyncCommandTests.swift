@@ -139,6 +139,64 @@ struct SyncCommandTests {
         config.generateLockfile = false
         #expect(SyncCommand.lockfileAction(dryRun: false, config: config) == .skip)
     }
+
+    // MARK: - Global pack blocking
+
+    @Test("Blocks a pack installed globally but not in this project")
+    func blocksGlobalOnlyPack() {
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: ["ios", "android"],
+            globallyInstalled: ["ios"],
+            previouslyConfigured: []
+        )
+        #expect(blocked == ["ios"])
+    }
+
+    @Test("Does NOT block a pack installed in both scopes")
+    func doesNotBlockBothScopePack() {
+        // The critical case: blocking here would drop the pack from the desired set,
+        // and `runSync` passes confirmRemovals: false — `mcs sync --all` would
+        // silently unconfigure it.
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: ["ios", "android"],
+            globallyInstalled: ["ios"],
+            previouslyConfigured: ["ios"]
+        )
+        #expect(blocked.isEmpty)
+    }
+
+    @Test("Ignores project-only packs and packs absent from the candidate set")
+    func ignoresUnrelatedPacks() {
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: ["android"],
+            globallyInstalled: ["ios", "tooling"],
+            previouslyConfigured: ["android"]
+        )
+        #expect(blocked.isEmpty)
+    }
+
+    @Test("Blocking every candidate is detectable so the caller can refuse an empty sync")
+    func blocksEveryCandidate() {
+        let candidates = ["ios", "tooling"]
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: candidates,
+            globallyInstalled: ["ios", "tooling"],
+            previouslyConfigured: []
+        )
+        // Caller must error rather than converge on an empty desired set, which
+        // would unconfigure every pack in the project.
+        #expect(blocked == Set(candidates))
+    }
+
+    @Test("Empty global state blocks nothing — machines that never ran --global")
+    func emptyGlobalStateBlocksNothing() {
+        let blocked = ConfiguratorSupport.globallyBlockedIDs(
+            candidates: ["ios", "android"],
+            globallyInstalled: [],
+            previouslyConfigured: []
+        )
+        #expect(blocked.isEmpty)
+    }
 }
 
 // MARK: - Guard: cwd inside ~/.claude detection

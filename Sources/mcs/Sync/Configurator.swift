@@ -39,7 +39,14 @@ struct Configurator {
     /// Full interactive configure flow — multi-select of registered packs.
     ///
     /// - Parameter customize: When `true`, present per-pack component multi-select after pack selection.
-    func interactiveConfigure(dryRun: Bool = false, customize: Bool = false) throws {
+    /// - Parameter globallyInstalledPacks: Identifiers configured in the global scope.
+    ///   Deliberately has no default: omitting it would silently disable the block, and
+    ///   "I have no global state to report" must be stated, not defaulted into.
+    func interactiveConfigure(
+        dryRun: Bool = false,
+        customize: Bool = false,
+        globallyInstalledPacks: Set<String>
+    ) throws {
         // Piped/closed stdin means the confirmation prompt silently returns its default,
         // which would look like a successful sync while applying nothing. Fail loudly
         // and point at non-interactive flags. Note: `hasInteractiveStdin` (not
@@ -54,9 +61,9 @@ struct Configurator {
         output.header("Sync \(scope.label)")
         output.plain("")
         if scope.isGlobalScope {
-            output.info("Target: \(scope.targetPath.path)")
+            output.info(label: "Target", scope.targetPath.path)
         } else {
-            output.info("Project: \(scope.targetPath.deletingLastPathComponent().path)")
+            output.info(label: "Project", scope.targetPath.deletingLastPathComponent().path)
         }
 
         let packs = registry.availablePacks
@@ -68,14 +75,39 @@ struct Configurator {
         let previousState = try ProjectState(stateFile: scope.stateFile)
         let previousPacks = previousState.configuredPacks
 
-        let items = packs.enumerated().map { index, pack in
+        // Global sync installs *into* the global scope, so nothing there can block it.
+        // Enforced here rather than trusted to callers.
+        let blocked = scope.isGlobalScope ? [] : ConfiguratorSupport.globallyBlockedIDs(
+            candidates: packs.map(\.identifier),
+            globallyInstalled: globallyInstalledPacks,
+            previouslyConfigured: previousPacks
+        )
+        let selectablePacks = packs.filter { !blocked.contains($0.identifier) }
+        let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
+
+        // Every registered pack is global, so the picker would have no selectable rows —
+        // and `interactiveMultiSelect` returns before rendering when it has none, hiding
+        // the locked section entirely. Explain here, where the reason is known.
+        // `previousPacks.isEmpty` keeps stale configured packs converging as before.
+        if selectablePacks.isEmpty, !lockedNames.isEmpty, previousPacks.isEmpty {
+            output.plain("")
+            output.info("All registered packs are already installed globally:")
+            output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
+            output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            return
+        }
+
+        // Numbering follows `selectablePacks`, not `packs`, so the fallback picker's
+        // typed numbers stay contiguous and map back cleanly below.
+        let items = selectablePacks.enumerated().map { index, pack in
             let installed = previousPacks.contains(pack.identifier)
             return SelectableItem(
                 number: index + 1,
                 name: pack.displayName,
                 description: pack.description,
                 isSelected: installed,
-                baselineSelected: installed
+                baselineSelected: installed,
+                globallyInstalled: globallyInstalledPacks.contains(pack.identifier)
             )
         }
 
@@ -86,7 +118,8 @@ struct Configurator {
             title: groupTitle,
             items: items,
             requiredItems: [],
-            showsDelta: true
+            showsDelta: true,
+            lockedItems: lockedNames
         )]
 
         output.plain("")
@@ -94,7 +127,7 @@ struct Configurator {
 
         let selectedNumbers = output.multiSelect(groups: &groups)
 
-        let selectedPacks = packs.enumerated().compactMap { index, pack in
+        let selectedPacks = selectablePacks.enumerated().compactMap { index, pack in
             selectedNumbers.contains(index + 1) ? pack : nil
         }
 
