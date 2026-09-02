@@ -48,16 +48,16 @@ struct DoctorRunner {
         let label: String
         let artifactsByPack: [String: PackArtifactRecord]
 
-        /// Prefix the hook commands in `artifactsByPack` were recorded with.
+        /// Hook directory the commands in `artifactsByPack` were recorded with.
         ///
         /// Relies on an invariant every `CheckScope` construction path upholds: a non-nil
         /// `effectiveProjectRoot` means the records came from project state, which sync wrote
         /// with the project prefix. Global-only packs get their own scope rather than being
         /// folded into a project one, so the two never mix.
-        var hookCommandPrefix: String {
+        var hookPathPrefix: String {
             effectiveProjectRoot != nil
-                ? Constants.HookCommand.projectPrefix
-                : Constants.HookCommand.globalPrefix
+                ? Constants.HookCommand.projectDirectory
+                : Constants.HookCommand.globalDirectory
         }
 
         func makeCollisionContext(environment: Environment) -> (any CollisionFilesystemContext)? {
@@ -505,6 +505,20 @@ struct DoctorRunner {
                     ),
                     isExcluded: false
                 ))
+                let interpreterBinaries = HookInterpreter.distinctCheckableBinaries(
+                    inRegisteredCommands: artifacts.hookCommands,
+                    directory: scope.hookPathPrefix
+                )
+                for binary in interpreterBinaries {
+                    checks.append((
+                        check: HookInterpreterCheck(
+                            binary: binary,
+                            packName: pack.displayName,
+                            environment: env
+                        ),
+                        isExcluded: false
+                    ))
+                }
             }
             if !artifacts.settingsKeys.isEmpty {
                 checks.append((
@@ -546,7 +560,7 @@ struct DoctorRunner {
     /// Pairs each recorded hook command with the `HookRegistration` of the component that declared
     /// it, so the check can verify *how* the hook was registered and not merely that it exists.
     ///
-    /// The join key is the command string, rebuilt with `hookCommand(prefix:)` — the same helper
+    /// The join key is the command string, rebuilt with `hookCommand(pathPrefix:)` — the same helper
     /// sync used to write it. `pack` is already collision-resolved here, so namespaced
     /// destinations match what sync actually installed. Commands with no matching component
     /// (hooks supplied via `settingsFile:`, or state files predating this check) get a nil
@@ -558,10 +572,10 @@ struct DoctorRunner {
     ) -> [ExpectedHook] {
         var registrationsByCommand: [String: HookRegistration] = [:]
         for component in pack.components {
-            // Bind the registration explicitly rather than relying on `hookCommand(prefix:)`
+            // Bind the registration explicitly rather than relying on `hookCommand(pathPrefix:)`
             // already having required one — same shape the sync-side join uses.
             if let registration = component.hookRegistration,
-               let command = component.hookCommand(prefix: scope.hookCommandPrefix) {
+               let command = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                 registrationsByCommand[command] = registration
             }
         }

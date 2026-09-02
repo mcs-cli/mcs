@@ -26,6 +26,9 @@ enum PackHeuristics {
         findings += checkPythonModulePaths(components: components, packPath: packPath)
         findings += checkDoctorCheckScopeUsage(manifest: manifest, components: components)
         findings += checkDoctorCheckMatcherUsage(manifest: manifest, components: components)
+        findings += checkAmbiguousHookExtensions(components: components)
+        findings += checkUninstalledHookRuntimes(components: components)
+        findings += checkHookDoctorCheckInterpreters(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
         // (not for the IO-failure warnings that share the same severity).
@@ -226,15 +229,43 @@ enum PackHeuristics {
         return findings
     }
 
+    /// Formulae the pack installs itself.
+    private static func brewPackages(in components: [ExternalComponentDefinition]) -> Set<String> {
+        var packages = Set<String>()
+        for component in components {
+            if case let .brewInstall(package) = component.installAction {
+                packages.insert(package)
+            }
+        }
+        return packages
+    }
+
+    /// Homebrew formulae that provide a given executable.
+    ///
+    /// The executable and the formula are not always spelled the same: `python3` ships in the
+    /// `python` formula, and `npx` ships with `node`. Without the alias a pack that correctly
+    /// declares `brew: python` still gets warned about its `.py` hook.
+    private static let formulaAliases: [String: [String]] = [
+        "python3": ["python"],
+        "python": ["python3"],
+        "npx": ["node"],
+    ]
+
+    /// Whether an executable is installed by the pack, accepting a versioned formula (`node@22`)
+    /// or a differently-named formula that provides it.
+    private static func installs(_ executable: String, in packages: Set<String>) -> Bool {
+        for formula in [executable] + (formulaAliases[executable] ?? []) {
+            if packages.contains(formula) { return true }
+            let versioned = formula + "@"
+            if packages.contains(where: { $0.hasPrefix(versioned) }) { return true }
+        }
+        return false
+    }
+
     private static func checkMCPDependencyGaps(
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        var brewPackages = Set<String>()
-        for component in components {
-            if case let .brewInstall(package) = component.installAction {
-                brewPackages.insert(package)
-            }
-        }
+        let brewPackages = brewPackages(in: components)
 
         var findings: [Finding] = []
         for component in components {
@@ -242,14 +273,14 @@ enum PackHeuristics {
                let command = config.command {
                 let base = URL(fileURLWithPath: command).lastPathComponent
                 if ["python", "python3"].contains(base),
-                   !brewPackages.contains(where: { $0 == "python" || $0.hasPrefix("python@") }) {
+                   !installs("python", in: brewPackages) {
                     findings.append(Finding(
                         severity: .warning,
                         message: "MCP server '\(config.name)' uses python but no brew component installs python"
                     ))
                 }
                 if ["node", "npx"].contains(base),
-                   !brewPackages.contains("node") {
+                   !installs("node", in: brewPackages) {
                     findings.append(Finding(
                         severity: .warning,
                         message: "MCP server '\(config.name)' uses node but no brew component installs node"
@@ -258,6 +289,103 @@ enum PackHeuristics {
             }
         }
 
+        return findings
+    }
+
+    /// A script language we refuse to guess an interpreter for, left to run under bash.
+    private static func checkAmbiguousHookExtensions(
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        var findings: [Finding] = []
+        for component in components {
+            guard component.hookInvocation != nil,
+                  component.hookRegistration?.interpreter == nil,
+                  case let .copyPackFile(config) = component.installAction,
+                  HookInterpreter.isAmbiguouslyTyped(
+                      destination: config.destination,
+                      source: config.source
+                  )
+            else { continue }
+            findings.append(Finding(
+                severity: .warning,
+                message: "Hook '\(component.id)' installs '\(config.destination)' but declares no"
+                    + " hookInterpreter — it will run under \(Constants.HookCommand.defaultInterpreter)."
+                    + " TypeScript has no single default; declare one (e.g."
+                    + " `hookInterpreter: node --experimental-strip-types`)."
+            ))
+        }
+        return findings
+    }
+
+    /// A runtime the pack's hooks expect but no brew component installs.
+    ///
+    /// Absolute-path interpreters are skipped: a path is not a formula name, so there is nothing
+    /// to match against.
+    private static func checkUninstalledHookRuntimes(
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let brewPackages = brewPackages(in: components)
+        var findings: [Finding] = []
+        var reported = Set<String>()
+        for component in components {
+            guard let invocation = component.hookInvocation else { continue }
+            let binary = HookInterpreter.binary(of: invocation.interpreter)
+            guard HookInterpreter.isCheckable(binary: binary),
+                  !binary.hasPrefix("/"),
+                  !installs(binary, in: brewPackages),
+                  reported.insert(binary).inserted
+            else { continue }
+            findings.append(Finding(
+                severity: .warning,
+                message: "Hook '\(component.id)' uses \(binary) but no brew component installs \(binary)"
+            ))
+        }
+        return findings
+    }
+
+    /// The interpreter a `hookEventExists` assertion demands, or nil when it names none.
+    ///
+    /// The assertion is a substring of the registered command, so it may be just the script path
+    /// (`gate.ts`, asserting nothing about the interpreter) or the whole invocation
+    /// (`bash .claude/hooks/gate.ts`). Only the latter can contradict the component, and comparing
+    /// it against the resolved interpreter catches what a `bash ` prefix test missed: a node hook
+    /// asserting `python3`, and a bash hook asserting `node`.
+    private static func assertedInterpreter(in asserted: String, destination: String) -> String? {
+        let tokens = asserted.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let pathIndex = tokens.lastIndex(where: { $0.contains(destination) }), pathIndex > 0
+        else { return nil }
+        return tokens[0 ..< pathIndex].joined(separator: " ")
+    }
+
+    /// A `hookEventExists` check asserting an interpreter its own component does not use.
+    private static func checkHookDoctorCheckInterpreters(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let supplementary = manifest.supplementaryDoctorChecks ?? []
+        var findings: [Finding] = []
+        for component in components {
+            guard let invocation = component.hookInvocation else { continue }
+            // A pack-level check belongs to this component only if it names this hook's file.
+            // Pairing every supplementary check with every hook would flag a legitimate bash
+            // assertion — meant for the pack's bash hook — against each non-bash one.
+            let correlated = supplementary.filter {
+                $0.command?.contains(invocation.destination) == true
+            }
+            for check in (component.doctorChecks ?? []) + correlated
+                where check.type == .hookEventExists {
+                guard let asserted = check.command,
+                      let demanded = assertedInterpreter(in: asserted, destination: invocation.destination),
+                      demanded != invocation.interpreter
+                else { continue }
+                findings.append(Finding(
+                    severity: .warning,
+                    message: "Doctor check '\(check.name)' asserts command '\(asserted)' but hook"
+                        + " '\(component.id)' is registered with '\(invocation.interpreter)'"
+                        + " — the check will never match"
+                ))
+            }
+        }
         return findings
     }
 

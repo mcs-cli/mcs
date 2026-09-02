@@ -2266,6 +2266,197 @@ struct ExternalPackManifestTests {
         }
     }
 
+    @Test("Loader surfaces a decode guard's own explanation, not Foundation's generic message")
+    func loaderSurfacesDecodingDetail() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        components:
+          - id: hook
+            displayName: Gate
+            description: A hook
+            hookInterpreter: node
+            hook:
+              source: hooks/gate.js
+              destination: gate.js
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try "console.log(1)".write(
+            to: tmpDir.appendingPathComponent("hooks/gate.js"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try yaml.write(to: tmpDir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8)
+
+        let env = Environment(home: tmpDir)
+        let loader = ExternalPackLoader(environment: env, registry: PackRegistryFile(path: env.packsRegistry))
+        do {
+            _ = try loader.validate(at: tmpDir)
+            Issue.record("Expected validation to fail")
+        } catch let error as ExternalPackLoader.LoadError {
+            guard case let .invalidManifest(_, reason) = error else {
+                Issue.record("Expected invalidManifest, got \(error)")
+                return
+            }
+            // The actionable part: which component, which rule, where.
+            #expect(reason.contains("hookInterpreter"))
+            #expect(reason.contains("require hookEvent"))
+            #expect(reason.contains("components[0]"))
+            #expect(!reason.contains("isn't in the correct format"))
+        }
+    }
+
+    @Test("Decodes hookInterpreter with arguments and round-trips it")
+    func decodesHookInterpreter() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        components:
+          - id: hook
+            displayName: Gate
+            description: A TypeScript hook
+            hookEvent: PreToolUse
+            hookInterpreter: node --experimental-strip-types --disable-warning=ExperimentalWarning
+            hook:
+              source: hooks/gate.ts
+              destination: gate.ts
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file).normalized()
+        try manifest.validate()
+
+        let registration = manifest.components?.first?.hookRegistration
+        #expect(registration?.interpreter == "node --experimental-strip-types --disable-warning=ExperimentalWarning")
+
+        // Encode → decode keeps the value (the export path relies on this).
+        let encoded = try JSONEncoder().encode(manifest.components?.first)
+        let decoded = try JSONDecoder().decode(ExternalComponentDefinition.self, from: encoded)
+        #expect(decoded.hookRegistration?.interpreter == registration?.interpreter)
+    }
+
+    @Test("Validate rejects a hookInterpreter carrying shell metacharacters")
+    func validateRejectsUnsafeInterpreter() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        components:
+          - id: hook
+            displayName: Gate
+            description: A hook
+            hookEvent: SessionStart
+            hookInterpreter: "node; rm -rf ~"
+            hook:
+              source: hooks/gate.js
+              destination: gate.js
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file).normalized()
+        #expect(throws: ManifestError.self) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Sanitizer drops an unusable hookInterpreter instead of failing the sync")
+    func sanitizerDropsUnusableInterpreter() throws {
+        let component = ExternalComponentDefinition(
+            id: "ignore-pack.hook",
+            displayName: "Gate",
+            description: "A hook",
+            type: .hookFile,
+            hookRegistration: HookRegistration(event: .sessionStart, interpreter: "node; rm -rf ~"),
+            installAction: .copyPackFile(ExternalCopyPackFileConfig(
+                source: "hooks/gate.js",
+                destination: "gate.js",
+                fileType: .hook
+            ))
+        )
+        let manifest = ignoreManifest(ignore: nil, components: [component])
+
+        let sanitized = manifest.sanitizedHookInterpreters(output: CLIOutput(colorsEnabled: false))
+        let registration = sanitized.components?.first?.hookRegistration
+        #expect(registration?.interpreter == nil)
+        // Everything else about the registration survives.
+        #expect(registration?.event == .sessionStart)
+        #expect(throws: Never.self) { try sanitized.validate() }
+    }
+
+    @Test("Sanitizer leaves a valid hookInterpreter untouched")
+    func sanitizerKeepsValidInterpreter() {
+        let component = ExternalComponentDefinition(
+            id: "ignore-pack.hook",
+            displayName: "Gate",
+            description: "A hook",
+            type: .hookFile,
+            hookRegistration: HookRegistration(event: .sessionStart, interpreter: "uv run"),
+            installAction: .copyPackFile(ExternalCopyPackFileConfig(
+                source: "hooks/gate.py",
+                destination: "gate.py",
+                fileType: .hook
+            ))
+        )
+        let manifest = ignoreManifest(ignore: nil, components: [component])
+
+        let sanitized = manifest.sanitizedHookInterpreters(output: CLIOutput(colorsEnabled: false))
+        #expect(sanitized.components?.first?.hookRegistration?.interpreter == "uv run")
+    }
+
+    @Test("Decode rejects hookInterpreter without hookEvent")
+    func rejectsOrphanedInterpreter() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: my-pack
+        displayName: My Pack
+        description: Test
+        components:
+          - id: hook
+            displayName: Gate
+            description: A hook
+            hookInterpreter: node
+            hook:
+              source: hooks/gate.js
+              destination: gate.js
+        """
+
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        do {
+            _ = try ExternalPackManifest.load(from: file)
+            Issue.record("Expected DecodingError for hookInterpreter without hookEvent")
+        } catch let DecodingError.dataCorrupted(context) {
+            #expect(context.debugDescription.contains("hookInterpreter"))
+        } catch {
+            Issue.record("Expected DecodingError.dataCorrupted, got \(type(of: error)): \(error)")
+        }
+    }
+
     @Test("Decode rejects hook metadata without hookEvent")
     func rejectOrphanedHookMetadata() throws {
         let yaml = """
@@ -2294,7 +2485,8 @@ struct ExternalPackManifestTests {
             _ = try ExternalPackManifest.load(from: file)
             Issue.record("Expected DecodingError for orphaned hook metadata")
         } catch let DecodingError.dataCorrupted(context) {
-            #expect(context.debugDescription.contains("hookTimeout/hookAsync/hookStatusMessage require hookEvent"))
+            #expect(context.debugDescription.contains("hookStatusMessage/hookInterpreter"))
+            #expect(context.debugDescription.contains("require hookEvent to be set"))
         } catch {
             Issue.record("Expected DecodingError.dataCorrupted, got \(type(of: error)): \(error)")
         }

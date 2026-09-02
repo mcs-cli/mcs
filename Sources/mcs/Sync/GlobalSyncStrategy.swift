@@ -116,7 +116,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     let relativePath = fileRelativePath(destination: destination, fileType: fileType)
                     artifacts.files.append(relativePath)
                     artifacts.fileHashes.merge(result.hashes) { _, new in new }
-                    if let hookCommand = component.hookCommand(prefix: scope.hookCommandPrefix) {
+                    if let hookCommand = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                         artifacts.hookCommands.append(hookCommand)
                     }
                     output.success("  \(component.displayName) installed")
@@ -190,8 +190,13 @@ struct GlobalSyncStrategy: SyncStrategy {
             for (event, groups) in hooks {
                 hooks[event] = groups.filter { group in
                     guard let cmd = group.hooks?.first?.command else { return true }
-                    // Strip pack-managed hooks and the first-party update check hook
-                    if cmd.hasPrefix(scope.hookCommandPrefix) { return false }
+                    // Strip pack-managed hooks and the first-party update check hook.
+                    // Matched on the path token, not an interpreter prefix: a hook registered as
+                    // `node ~/.claude/hooks/p/x.js` must be stripped as readily as a bash one, or
+                    // unconfiguring the pack deletes the script and leaves the entry behind.
+                    if HookInterpreter.managedHookPath(in: cmd, directory: scope.hookPathPrefix) != nil {
+                        return false
+                    }
                     if cmd == UpdateChecker.hookCommand { return false }
                     return true
                 }
@@ -216,7 +221,7 @@ struct GlobalSyncStrategy: SyncStrategy {
             packs: packs,
             excludedComponents: excludedComponents,
             settings: &settings,
-            hookCommandPrefix: scope.hookCommandPrefix,
+            hookPathPrefix: scope.hookPathPrefix,
             resolvedValues: resolvedValues,
             output: output
         )

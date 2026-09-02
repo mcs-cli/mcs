@@ -473,6 +473,9 @@ struct ManifestBuilder {
             if let statusMessage = reg.statusMessage {
                 yaml.line("    hookStatusMessage: \(yamlQuote(statusMessage))")
             }
+            if let interpreter = reg.interpreter {
+                yaml.line("    hookInterpreter: \(yamlQuote(interpreter))")
+            }
         } else if comp.type == .hookFile {
             yaml.comment("    TODO: Add hookEvent (e.g. SessionStart, PreToolUse, Stop)", indent: 4)
         }

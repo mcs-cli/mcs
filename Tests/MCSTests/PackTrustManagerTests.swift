@@ -29,6 +29,222 @@ struct PackTrustManagerTests {
         return try ExternalPackManifest.load(from: file)
     }
 
+    // MARK: - Hook interpreter trust
+
+    /// A pack with one hook whose interpreter is `interpreterLine` (omitted when nil).
+    private func hookPackYAML(interpreterLine: String?) -> String {
+        let interpreter = interpreterLine.map { "    hookInterpreter: \($0)\n" } ?? ""
+        return """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: test.gate
+            displayName: Gate Hook
+            description: A hook
+            hookEvent: PreToolUse
+        \(interpreter)    hook:
+              source: hooks/gate.sh
+              destination: gate.sh
+        """
+    }
+
+    @Test("A non-default hook interpreter is a trustable item of its own")
+    func hookInterpreterIsTrustable() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("echo gate", at: tmpDir.appendingPathComponent("hooks/gate.sh"))
+
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: "sh -c"), in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+
+        let interpreterItem = try #require(items.first { $0.type == .hookInterpreter })
+        // What actually executes must be reviewable, not just the script's contents.
+        #expect(interpreterItem.content == "sh -c gate.sh")
+        #expect(interpreterItem.relativePath == nil)
+    }
+
+    @Test("A plain bash hook's interpreter item is marked as pre-existing behaviour")
+    func defaultInterpreterIsMarkedAsDefault() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("echo gate", at: tmpDir.appendingPathComponent("hooks/gate.sh"))
+
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+
+        // Emitted (so that losing an interpreter later is detectable) but flagged, so first-time
+        // trust is waived and packs predating interpreter tracking are not re-prompted.
+        let item = try #require(items.first { $0.type == .hookInterpreter })
+        #expect(item.representsDefaultBehavior)
+        #expect(item.content == "bash gate.sh")
+        #expect(items.contains { $0.type == .hookFragment })
+    }
+
+    @Test("A legacy pack with a bash hook is not flagged on its first update")
+    func legacyBashPackIsNotFlagged() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("echo gate", at: tmpDir.appendingPathComponent("hooks/gate.sh"))
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+
+        // Trusted before interpreter items existed: only the script file has a hash.
+        let legacyHashes = try ["hooks/gate.sh": sha256(of: tmpDir.appendingPathComponent("hooks/gate.sh"))]
+        let changed = try manager.detectNewScripts(
+            currentHashes: legacyHashes,
+            updatedPackPath: tmpDir,
+            manifest: manifest
+        )
+        #expect(changed.isEmpty)
+        #expect(items.contains { $0.type == .hookInterpreter })
+    }
+
+    @Test("Dropping a trusted interpreter back to bash forces renewed trust")
+    func interpreterDowngradeIsDetected() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("echo gate", at: tmpDir.appendingPathComponent("hooks/gate.sh"))
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+
+        // Trusted running under node.
+        let before = try loadManifest(yaml: hookPackYAML(interpreterLine: "node"), in: tmpDir)
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: before, packPath: tmpDir),
+            packPath: tmpDir
+        )
+
+        // The update drops the interpreter, so the same bytes now run under bash. A polyglot
+        // script reviewed as JS would begin executing its shell branch unreviewed.
+        let after = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
+        let changed = try manager.detectNewScripts(
+            currentHashes: trusted,
+            updatedPackPath: tmpDir,
+            manifest: after
+        )
+        #expect(changed.contains { $0.type == .hookInterpreter })
+    }
+
+    @Test("Two hooks sharing a display name get distinct trust keys")
+    func sameDisplayNameDoesNotCollide() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("console.log(1)", at: tmpDir.appendingPathComponent("hooks/one.js"))
+        try writeFile("console.log(2)", at: tmpDir.appendingPathComponent("hooks/two.js"))
+
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: test.one
+            displayName: Gate Hook
+            description: First hook
+            hookEvent: PreToolUse
+            hook:
+              source: hooks/one.js
+              destination: one.js
+          - id: test.two
+            displayName: Gate Hook
+            description: Second hook
+            hookEvent: PostToolUse
+            hook:
+              source: hooks/two.js
+              destination: two.js
+        """
+        let manifest = try loadManifest(yaml: yaml, in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+        let hashes = try manager.computeScriptHashes(items: items, packPath: tmpDir)
+
+        // Both interpreter items must survive hashing; a description-only key would collapse them.
+        let interpreterItems = items.filter { $0.type == .hookInterpreter }
+        #expect(interpreterItems.count == 2)
+        #expect(Set(interpreterItems.map(\.description)).count == 2)
+        // Two file hashes plus two distinct interpreter hashes.
+        #expect(hashes.count == 4)
+    }
+
+    @Test("Changing only the interpreter forces renewed trust on update")
+    func interpreterChangeIsDetectedAsNewScript() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let hooksDir = tmpDir.appendingPathComponent("hooks")
+        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
+        let script = hooksDir.appendingPathComponent("gate.sh")
+        try writeFile("echo gate", at: script)
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+
+        // Trust the pack as it was: node, with the script hashed.
+        let before = try loadManifest(yaml: hookPackYAML(interpreterLine: "node"), in: tmpDir)
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: before, packPath: tmpDir),
+            packPath: tmpDir
+        )
+
+        // The update leaves the script byte-identical and swaps only the interpreter.
+        let after = try loadManifest(yaml: hookPackYAML(interpreterLine: "sh -c"), in: tmpDir)
+        let changed = try manager.detectNewScripts(
+            currentHashes: trusted,
+            updatedPackPath: tmpDir,
+            manifest: after
+        )
+
+        // Without the interpreter in the trust surface this returns empty: same file hash, no
+        // prompt, and `sh -c` runs on the next session unreviewed.
+        #expect(changed.contains { $0.type == .hookInterpreter })
+    }
+
+    @Test("An unchanged interpreter does not re-prompt")
+    func unchangedInterpreterIsNotFlagged() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let hooksDir = tmpDir.appendingPathComponent("hooks")
+        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
+        try writeFile("echo gate", at: hooksDir.appendingPathComponent("gate.sh"))
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: "node"), in: tmpDir)
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            packPath: tmpDir
+        )
+        let changed = try manager.detectNewScripts(
+            currentHashes: trusted,
+            updatedPackPath: tmpDir,
+            manifest: manifest
+        )
+        #expect(changed.isEmpty)
+    }
+
     // MARK: - analyzeScripts
 
     @Test("analyzeScripts surfaces shellCommand install actions")

@@ -81,6 +81,13 @@ extension ExternalPackManifest {
                             reason: "hookTimeout must be positive (got \(timeout))"
                         )
                     }
+                    if let interpreter = reg.interpreter,
+                       let reason = HookInterpreter.rejectionReason(for: interpreter) {
+                        throw ManifestError.invalidHookMetadata(
+                            componentID: component.id,
+                            reason: reason
+                        )
+                    }
                 }
             }
 
@@ -346,6 +353,82 @@ extension ExternalPackManifest {
     }
 }
 
+// MARK: - Hook eligibility
+
+extension ExternalComponentDefinition {
+    /// The interpreter and installed filename this component's hook runs as, or nil when it
+    /// registers no hook.
+    ///
+    /// The manifest-model counterpart of `ComponentDefinition.hookInvocation`, and it must apply
+    /// the same three conditions — `type`, a registration, and `fileType` — because the adapter
+    /// drops any component failing them. A copy of this rule that omits one reports findings for
+    /// hooks sync never registers, which is how the two sides drifted before.
+    var hookInvocation: (interpreter: String, destination: String)? {
+        guard type == .hookFile, let registration = hookRegistration,
+              case let .copyPackFile(config) = installAction,
+              config.fileType == .hook
+        else { return nil }
+        let interpreter = HookInterpreter.resolve(
+            explicit: registration.interpreter,
+            destination: config.destination,
+            source: config.source
+        )
+        return (interpreter, config.destination)
+    }
+}
+
+// MARK: - Hook interpreter sanitization (runtime safety guard)
+
+extension ExternalPackManifest {
+    /// Return a copy with unusable `hookInterpreter` values dropped, warning for each.
+    ///
+    /// Same publish-strict / runtime-lenient split as `sanitizedIgnoreEntries(output:)`:
+    /// `mcs pack validate` fails hard on the same value, while a user's sync keeps working — the
+    /// hook falls back to extension inference, then bash.
+    func sanitizedHookInterpreters(output: CLIOutput) -> ExternalPackManifest {
+        guard let components else { return self }
+
+        var strippedAny = false
+        let cleaned = components.map { component -> ExternalComponentDefinition in
+            guard let registration = component.hookRegistration,
+                  let interpreter = registration.interpreter,
+                  let reason = HookInterpreter.rejectionReason(for: interpreter)
+            else { return component }
+            output.warn(
+                "Pack '\(identifier)': dropping `hookInterpreter` '\(interpreter)' from"
+                    + " '\(component.id)' — \(reason)"
+            )
+            strippedAny = true
+            var sanitized = component
+            sanitized.hookRegistration = HookRegistration(
+                event: registration.event,
+                matcher: registration.matcher,
+                timeout: registration.timeout,
+                isAsync: registration.isAsync,
+                statusMessage: registration.statusMessage,
+                interpreter: nil
+            )
+            return sanitized
+        }
+        guard strippedAny else { return self }
+
+        return ExternalPackManifest(
+            schemaVersion: schemaVersion,
+            identifier: identifier,
+            displayName: displayName,
+            description: description,
+            author: author,
+            minMCSVersion: minMCSVersion,
+            components: cleaned,
+            templates: templates,
+            prompts: prompts,
+            configureProject: configureProject,
+            supplementaryDoctorChecks: supplementaryDoctorChecks,
+            ignore: ignore
+        )
+    }
+}
+
 // MARK: - Normalization
 
 extension ExternalPackManifest {
@@ -487,7 +570,10 @@ struct ExternalComponentDefinition: Codable, Equatable {
     /// in `settings.local.json` with the specified handler fields.
     /// YAML keys remain flat (`hookEvent`, `hookTimeout`, `hookAsync`, `hookStatusMessage`)
     /// for pack author ergonomics; the custom Codable implementation maps them to this struct.
-    let hookRegistration: HookRegistration?
+    ///
+    /// `var` like `id` and `dependencies`, so a sanitizing copy can rewrite one field without
+    /// respelling every other — a respelling silently drops any field added later.
+    var hookRegistration: HookRegistration?
     let installAction: ExternalInstallAction
     let doctorChecks: [ExternalDoctorCheckDefinition]?
 
@@ -496,7 +582,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
     /// Standard keys matching stored properties (used by encode).
     enum CodingKeys: String, CodingKey {
         case id, displayName, description, type, dependencies, isRequired
-        case hookEvent, hookMatcher, hookTimeout, hookAsync, hookStatusMessage
+        case hookEvent, hookMatcher, hookTimeout, hookAsync, hookStatusMessage, hookInterpreter
         case installAction, doctorChecks
     }
 
@@ -554,6 +640,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
         let hookTimeout = try container.decodeIfPresent(Int.self, forKey: .hookTimeout)
         let hookAsync = try container.decodeIfPresent(Bool.self, forKey: .hookAsync)
         let hookStatusMessage = try container.decodeIfPresent(String.self, forKey: .hookStatusMessage)
+        let hookInterpreter = try container.decodeIfPresent(String.self, forKey: .hookInterpreter)
         if let hookEventRaw {
             guard let hookEvent = Constants.HookEvent(rawValue: hookEventRaw) else {
                 throw DecodingError.dataCorrupted(
@@ -564,17 +651,22 @@ struct ExternalComponentDefinition: Codable, Equatable {
                 )
             }
             hookRegistration = HookRegistration(
-                event: hookEvent, matcher: hookMatcher, timeout: hookTimeout, isAsync: hookAsync, statusMessage: hookStatusMessage
+                event: hookEvent, matcher: hookMatcher, timeout: hookTimeout, isAsync: hookAsync,
+                statusMessage: hookStatusMessage, interpreter: hookInterpreter
             )
         } else {
             hookRegistration = nil
-            // Reject orphaned hook metadata (matcher/timeout/async/statusMessage without hookEvent)
-            if hookMatcher != nil || hookTimeout != nil || hookAsync != nil || hookStatusMessage != nil {
+            // Reject orphaned hook metadata (matcher/timeout/async/statusMessage/interpreter
+            // without hookEvent)
+            let orphanedMetadata = [hookMatcher, hookStatusMessage, hookInterpreter].contains { $0 != nil }
+                || hookTimeout != nil || hookAsync != nil
+            if orphanedMetadata {
                 throw DecodingError.dataCorrupted(
                     DecodingError.Context(
                         codingPath: container.codingPath,
                         debugDescription:
-                        "Component '\(id)': hookMatcher/hookTimeout/hookAsync/hookStatusMessage require hookEvent to be set"
+                        "Component '\(id)': hookMatcher/hookTimeout/hookAsync/hookStatusMessage/hookInterpreter"
+                            + " require hookEvent to be set"
                     )
                 )
             }
@@ -607,6 +699,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
         try container.encodeIfPresent(hookRegistration?.timeout, forKey: .hookTimeout)
         try container.encodeIfPresent(hookRegistration?.isAsync, forKey: .hookAsync)
         try container.encodeIfPresent(hookRegistration?.statusMessage, forKey: .hookStatusMessage)
+        try container.encodeIfPresent(hookRegistration?.interpreter, forKey: .hookInterpreter)
         try container.encode(installAction, forKey: .installAction)
         try container.encodeIfPresent(doctorChecks, forKey: .doctorChecks)
     }

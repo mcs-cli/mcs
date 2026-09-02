@@ -54,6 +54,18 @@ components:
       source: hooks/session_start.sh
       destination: session_start.sh
 
+  # `.js` infers `node` — no hookInterpreter needed. Depends on the brew
+  # component that installs the runtime.
+  - id: hook-format-check
+    description: Formats staged files after an edit
+    dependencies: [node]
+    hookEvent: PostToolUse
+    hookMatcher: "Edit|Write"
+    hookAsync: true
+    hook:
+      source: hooks/format_check.js
+      destination: format_check.js
+
   # ── Commands ──────────────────────────────────────────────
   - id: command-commit
     description: /commit command for structured commits

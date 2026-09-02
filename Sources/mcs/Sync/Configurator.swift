@@ -611,7 +611,7 @@ struct Configurator {
                     } else {
                         output.warn("  Could not remove '\(relativePath)' — will retry on next sync")
                     }
-                    if let hookCmd = component.hookCommand(prefix: scope.hookCommandPrefix) {
+                    if let hookCmd = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                         artifacts.hookCommands.removeAll { $0 == hookCmd }
                     }
 
