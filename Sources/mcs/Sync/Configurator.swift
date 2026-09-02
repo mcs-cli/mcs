@@ -538,14 +538,23 @@ struct Configurator {
             }
         }
 
-        // Remove gitignore entries
+        // Remove gitignore entries (with reference counting)
         if !artifacts.gitignoreEntries.isEmpty {
             let gitignoreManager = GitignoreManager(shell: shell)
             var removedEntries: Set<String> = []
-            for entry in artifacts.gitignoreEntries
-                where removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
-                removedEntries.insert(entry)
-                output.dimmed("  Removed gitignore entry: \(entry)")
+            for entry in artifacts.gitignoreEntries {
+                let result = removeGitignoreArtifact(
+                    entry, gitignoreManager: gitignoreManager, refCounter: refCounter,
+                    excludingScope: excludeScope, excludingPack: packID
+                )
+                switch result {
+                case .removed, .stillNeeded:
+                    removedEntries.insert(entry)
+                    if case .removed = result { output.dimmed("  Removed gitignore entry: \(entry)") }
+                case .failed:
+                    // Helper already warned — leave the claim in `remaining` so sync retries.
+                    break
+                }
             }
             remaining.gitignoreEntries.removeAll { removedEntries.contains($0) }
         }
@@ -674,10 +683,21 @@ struct Configurator {
 
                 case let .gitignoreEntries(entries):
                     let gitignoreManager = GitignoreManager(shell: shell)
-                    for entry in entries
-                        where removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
-                        artifacts.gitignoreEntries.removeAll { $0 == entry }
-                        output.dimmed("  Removed gitignore entry: \(entry)")
+                    for entry in entries {
+                        let result = removeGitignoreArtifact(
+                            entry, gitignoreManager: gitignoreManager, refCounter: refCounter,
+                            excludingScope: scope.scopeIdentifier,
+                            excludingPack: pack.identifier
+                        )
+                        switch result {
+                        case .removed:
+                            artifacts.gitignoreEntries.removeAll { $0 == entry }
+                            output.dimmed("  Removed gitignore entry: \(entry)")
+                        case .stillNeeded, .failed:
+                            // Kept by another scope, or the helper already warned — either way
+                            // the claim stays on the record, as brew and plugins do here.
+                            break
+                        }
                     }
 
                 case .shellCommand, .settingsMerge:
@@ -974,14 +994,27 @@ struct Configurator {
             }
         }
 
-        // Gitignore entries
+        // Gitignore entries, brew packages and plugins are all ref-counted, so one counter serves
+        // all three. Building it is free — three stored properties, no I/O until it is queried.
+        let refCounter = ResourceRefCounter(
+            environment: environment, output: output, registry: registry
+        )
+
+        // Gitignore entries (ref-counted)
         let staleGitignore = Set(previous.gitignoreEntries).subtracting(currentArtifacts.gitignoreEntries)
         if !staleGitignore.isEmpty {
             let gitignoreManager = GitignoreManager(shell: shell)
             for entry in staleGitignore {
-                if removeGitignoreArtifact(entry, gitignoreManager: gitignoreManager) {
+                let result = removeGitignoreArtifact(
+                    entry, gitignoreManager: gitignoreManager, refCounter: refCounter,
+                    excludingScope: scope.scopeIdentifier, excludingPack: packID
+                )
+                switch result {
+                case .removed:
                     output.dimmed("  Removed stale gitignore entry: \(entry)")
-                } else {
+                case .stillNeeded:
+                    break
+                case .failed:
                     // Helper already warned — re-add for retry on next sync
                     currentArtifacts.gitignoreEntries.append(entry)
                 }
@@ -992,9 +1025,6 @@ struct Configurator {
         let staleBrew = Set(previous.brewPackages).subtracting(currentArtifacts.brewPackages)
         let stalePlugins = Set(previous.plugins).subtracting(currentArtifacts.plugins)
         if !staleBrew.isEmpty || !stalePlugins.isEmpty {
-            let refCounter = ResourceRefCounter(
-                environment: environment, output: output, registry: registry
-            )
             for package in staleBrew {
                 let result = removeBrewArtifact(
                     package, exec: exec, refCounter: refCounter,
@@ -1156,20 +1186,35 @@ struct Configurator {
         return .failed
     }
 
-    /// Remove a single gitignore entry, absorbing the do/catch.
+    /// Remove a single gitignore entry with reference counting, absorbing the do/catch.
     ///
-    /// Logs a warning on failure. Callers handle success logging with their own context.
-    /// - Returns: `true` if the entry was successfully removed.
+    /// `GitignoreManager` resolves one file for the whole machine, so an entry is a shared
+    /// resource exactly like a brew package or a plugin — another scope can still claim the
+    /// same physical line.
+    ///
+    /// Logs the "Keeping" message when the entry is still needed, and the underlying error on
+    /// failure. Callers provide their own success context messages and must not warn again.
     private func removeGitignoreArtifact(
         _ entry: String,
-        gitignoreManager: GitignoreManager
-    ) -> Bool {
+        gitignoreManager: GitignoreManager,
+        refCounter: ResourceRefCounter,
+        excludingScope: String,
+        excludingPack: String
+    ) -> RefCountedRemovalResult {
+        if refCounter.isStillNeeded(
+            .gitignoreEntry(entry),
+            excludingScope: excludingScope,
+            excludingPack: excludingPack
+        ) {
+            output.dimmed("  Keeping gitignore entry '\(entry)' — still needed by another scope")
+            return .stillNeeded
+        }
         do {
             try gitignoreManager.removeEntry(entry)
-            return true
+            return .removed
         } catch {
             output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
-            return false
+            return .failed
         }
     }
 
