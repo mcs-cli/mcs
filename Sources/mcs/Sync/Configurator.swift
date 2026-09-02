@@ -85,6 +85,18 @@ struct Configurator {
         let selectablePacks = packs.filter { !blocked.contains($0.identifier) }
         let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
 
+        // Every registered pack is global, so the picker would have no selectable rows —
+        // and `interactiveMultiSelect` returns before rendering when it has none, hiding
+        // the locked section entirely. Explain here, where the reason is known.
+        // `previousPacks.isEmpty` keeps stale configured packs converging as before.
+        if selectablePacks.isEmpty, !lockedNames.isEmpty, previousPacks.isEmpty {
+            output.plain("")
+            output.info("All registered packs are already installed globally:")
+            output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
+            output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            return
+        }
+
         // Numbering follows `selectablePacks`, not `packs`, so the fallback picker's
         // typed numbers stay contiguous and map back cleanly below.
         let items = selectablePacks.enumerated().map { index, pack in
