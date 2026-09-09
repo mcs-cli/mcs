@@ -547,8 +547,7 @@ struct PackTrustManagerTests {
         )
         #expect(trusted["scripts/doctor.sh"] != nil)
 
-        // Deleting the file makes `analyzeScripts` reclassify the declared path as an inline
-        // command, which would otherwise slip past the inline exemption unverified.
+        // Deleting the file reclassifies the declared path as an inline command.
         try FileManager.default.removeItem(at: scriptFile)
 
         let modified = try manager.verifyTrust(
@@ -563,8 +562,7 @@ struct PackTrustManagerTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        // `command` here is a real shell command, not a path — it has no file and never had one,
-        // so it must stay exempt rather than being reported as a deleted script.
+        // A real shell command, not a path: it never had a file, so it stays exempt.
         let manifest = try loadManifest(yaml: """
         schemaVersion: 1
         identifier: test

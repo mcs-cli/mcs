@@ -452,10 +452,8 @@ struct SyncCommandGuardTests {
 
 // MARK: - Unloadable-pack guard
 
-/// The sync guard's decision. `SyncCommand.perform()` builds its own `Environment()`, so the
-/// surrounding command cannot be driven from a sandboxed bed; the destructive half of this
-/// behaviour — what convergence does to a pack left out of the desired state — is covered
-/// end-to-end by `UpdateReapplyLifecycleTests`.
+/// The guard's decision only — the command around it builds its own `Environment()`. What
+/// convergence destroys when a pack is left out is covered by `UpdateReapplyLifecycleTests`.
 struct SyncUnloadablePackGuardTests {
     private func silentOutput() -> CLIOutput {
         CLIOutput(colorsEnabled: false)
@@ -475,8 +473,7 @@ struct SyncUnloadablePackGuardTests {
 
     @Test("A configured pack with no registry entry does not block the scope")
     func doesNotBlockOnUnregisteredPack() {
-        // Absent rather than broken: sync may legitimately be deselecting it, and retaining it
-        // would be unremovable since `mcs pack remove` refuses an unknown identifier.
+        // Absent rather than broken: sync may legitimately be deselecting it.
         let registry = TechPackRegistry(
             packs: [MockTechPack(identifier: "pack-a", displayName: "Pack A")],
             registeredPackIDs: ["pack-a"]

@@ -2319,8 +2319,7 @@ struct UpdateReapplyLifecycleTests {
                 output: CLIOutput(colorsEnabled: false),
                 claudeCLI: bed.mockCLI
             )
-            // Nothing is skipped or unloadable here, so every scope must actually converge —
-            // a blocked scope would satisfy the state assertions below without doing anything.
+            // A blocked scope would satisfy the assertions below without doing anything.
             #expect(!blocked)
         }
 
@@ -2436,10 +2435,8 @@ struct UpdateReapplyLifecycleTests {
         let hookB = bed.project.appendingPathComponent(".claude/hooks/pack-b/b.sh")
         #expect(FileManager.default.fileExists(atPath: hookB.path))
 
-        // B is still recorded in project state but has no registry entry at all — a half-finished
-        // `mcs pack add` on a fresh checkout, say. It never reaches `skippedPackIDs` (the update
-        // phase only iterates registry entries) and `unloadableConfiguredPacks` excludes it, so
-        // resolving the pack list used to drop it and delete its artifacts.
+        // B is in state with no registry entry, so it reaches neither `skippedPackIDs` (the
+        // update phase only iterates registry entries) nor `unloadableConfiguredPacks`.
         let registryWithoutB = TechPackRegistry(packs: [packA], registeredPackIDs: ["pack-a"])
 
         let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))

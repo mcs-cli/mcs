@@ -306,8 +306,8 @@ struct UpdateCommand: LockedCommand {
         let attempted: Int
     }
 
-    /// Converge every scope, returning the project paths that were left untouched so the lockfile
-    /// phase does not record commits whose artifacts were never applied.
+    /// Converge every scope, returning the project paths left untouched so the lockfile phase
+    /// does not record commits whose artifacts were never applied.
     private func runReapplyPhase(
         runs: [UpdateScopeResolver.ScopeRun],
         skippedPackIDs: Set<String>,
@@ -335,8 +335,7 @@ struct UpdateCommand: LockedCommand {
     }
 
     /// Print one scope's header, resolve its configured packs, and converge the scope onto them.
-    /// Returns `true` when the scope was left untouched, so the caller can keep the lockfile in
-    /// step with what was actually applied.
+    /// Returns `true` when the scope was left untouched.
     ///
     /// `static` so tests can drive the real re-apply — `UpdateCommand` builds its own
     /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
@@ -354,13 +353,9 @@ struct UpdateCommand: LockedCommand {
     ) throws -> Bool {
         output.header(run.label)
 
-        // Any configured pack this run cannot produce blocks the *whole* scope: `configure` treats
-        // its pack list as the complete desired state, so resolving a shorter list silently
-        // unconfigures the remainder (#382).
-        //
-        // Unlike `mcs sync`, nothing here is a deselection — the desired state *is* the recorded
-        // state — so a pack missing from `registry.yaml` blocks too rather than being converged
-        // away. Reporting is per cause because the remedies differ.
+        // Any pack this run cannot produce blocks the *whole* scope: `configure` treats its list
+        // as the complete desired state, so a shorter one silently unconfigures the rest (#382).
+        // Nothing here is a deselection — unlike `mcs sync` — so an unregistered pack blocks too.
         let notUpdated = run.configuredPackIDs.intersection(skippedPackIDs)
         let unloadable = Set(registry.unloadableConfiguredPacks(configured: run.configuredPackIDs))
             .subtracting(notUpdated)
@@ -428,15 +423,14 @@ struct UpdateCommand: LockedCommand {
             guard let projectPath = run.projectPath else { continue }
 
             if config.isLockfileGenerationEnabled {
-                // The registry already holds the new SHAs, so writing a lockfile for a scope that
-                // never converged would describe a configuration that is not on disk.
+                // The registry already holds the new SHAs, so a lockfile for a scope that never
+                // converged would describe a configuration that is not on disk.
                 if blockedProjects.contains(projectPath) {
                     output.warn("Skipped mcs.lock.yaml for \(run.label) — the scope did not converge.")
                 } else {
                     try lockOps.writeLockfile(at: projectPath)
                 }
             } else if config.isLockfileGenerationUnset {
-                // Read-only, and its drift warning is accurate either way.
                 try lockOps.reportDrift(at: projectPath)
             }
         }
