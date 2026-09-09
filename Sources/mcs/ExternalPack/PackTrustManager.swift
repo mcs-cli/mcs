@@ -346,7 +346,9 @@ struct PackTrustManager {
         }
 
         if check.type == .shellScript, let command = check.command {
-            // The command field may be a script file path or inline command
+            // `shellScript` always resolves `command` as a pack-relative path — inline commands
+            // belong in `commandExists`/`fixCommand` — so an absent file means a broken pack, not
+            // an inline form. It is still tracked below so the declared string gets reviewed.
             let scriptFile = packPath.appendingPathComponent(command)
             if FileManager.default.fileExists(atPath: scriptFile.path) {
                 let fileContent = try String(contentsOf: scriptFile, encoding: .utf8)

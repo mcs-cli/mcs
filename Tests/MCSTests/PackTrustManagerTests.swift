@@ -557,12 +557,13 @@ struct PackTrustManagerTests {
         #expect(modified == ["scripts/doctor.sh": .mismatched])
     }
 
-    @Test("verifyTrust leaves a genuine inline doctor command exempt")
-    func verifyTrustExemptsInlineDoctorCommand() throws {
+    @Test("verifyTrust does not report a doctor script path that was never trusted as a file")
+    func verifyTrustIgnoresNeverTrustedDoctorPath() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        // A real shell command, not a path: it never had a file, so it stays exempt.
+        // A declared path with no file is a broken pack, which doctor reports at run time. It was
+        // never trusted as a file, so it must not be reported here as a deleted script.
         let manifest = try loadManifest(yaml: """
         schemaVersion: 1
         identifier: test
@@ -571,7 +572,7 @@ struct PackTrustManagerTests {
         supplementaryDoctorChecks:
           - type: shellScript
             name: Check Env
-            command: swift build
+            command: scripts/absent.sh
         """, in: tmpDir)
 
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
