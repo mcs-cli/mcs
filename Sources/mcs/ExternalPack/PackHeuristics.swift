@@ -315,13 +315,17 @@ enum PackHeuristics {
         return findings
     }
 
-    /// The `owner/tap` prefix of an `owner/tap/formula` name. Nil for a bare core formula, and
-    /// for a URL or path form — both of which also split into three parts, so they are rejected
-    /// before the count is consulted rather than reported as a tap called `https:/example.com`.
+    /// The `owner/tap` prefix of an `owner/tap/formula` name, when that tap is third-party.
+    ///
+    /// Nil for a bare core formula, for Homebrew's own taps (`homebrew/core`, `homebrew/cask`
+    /// and friends are first-party, and naming one explicitly is legal), and for URL and
+    /// path forms — those split into three parts too, so they are rejected up front rather
+    /// than reported as a tap called `https:/example.com` or `./Formula`.
     private static func tapReference(in package: String) -> String? {
-        guard !package.contains(":"), !package.hasPrefix("/") else { return nil }
+        guard !package.contains(":"), !package.hasPrefix("/"), !package.hasPrefix(".")
+        else { return nil }
         let parts = package.split(separator: "/")
-        guard parts.count == 3 else { return nil }
+        guard parts.count == 3, parts[0].lowercased() != "homebrew" else { return nil }
         return "\(parts[0])/\(parts[1])"
     }
 

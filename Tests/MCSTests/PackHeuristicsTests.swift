@@ -149,6 +149,21 @@ struct PackHeuristicsTests {
         })
     }
 
+    @Test("First-party and non-tap package forms are not reported as third-party taps", arguments: [
+        "homebrew/core/node",
+        "homebrew/cask/font-fira-code",
+        "./Formula/local.rb",
+        "https://example.com/formula.rb",
+    ])
+    func nonThirdPartyPackageFormsDoNotWarn(package: String) throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = brewComponent(package: package)
+        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("third-party tap") })
+    }
+
     @Test("A core formula is not reported as a third-party tap")
     func coreFormulaDoesNotWarnAboutTaps() throws {
         let tmpDir = try makeTmpDir(label: "heuristics")
