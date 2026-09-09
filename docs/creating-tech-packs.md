@@ -120,7 +120,9 @@ components:
     brew: gh
 ```
 
-When a user runs `mcs sync`, these get installed via `brew install`. The engine auto-verifies them with `mcs doctor` (checks if the command is on PATH).
+When a user runs `mcs sync`, these get installed via `brew install`. The engine auto-verifies them with `mcs doctor`, which looks for the command on `PATH` and falls back to `brew list` — so a cask, a versioned formula like `node@22`, or a formula whose command is spelled differently (`ripgrep` installs `rg`) still verifies correctly.
+
+A tap-qualified package (`owner/tap/formula`) works too, but note that installing one taps a third-party repository without asking anyone; `mcs pack validate` warns when your pack declares one.
 
 Need to depend on Homebrew itself? That's a special case — Homebrew can't install itself, so use `shell:` with an explicit doctor check:
 
@@ -494,7 +496,7 @@ prompts:
 
 | Install action | Auto-derived check |
 |---|---|
-| `brew: node` | Is `node` on PATH? |
+| `brew: node` | Is `node` on PATH, or known to `brew list`? |
 | `mcp: {command: npx, ...}` | Is the MCP server registered? |
 | `plugin: "name@org"` | Is the plugin enabled? |
 | `hook: {source, destination}` | Does the hook file exist, and does its interpreter resolve? |

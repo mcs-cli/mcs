@@ -62,6 +62,17 @@ Use one of these keys to define a component's install action. Each key infers th
 
 Infers: `type: brewPackage`, `installAction: brewInstall`
 
+Tap-qualified (`owner/tap/formula`) and versioned (`node@22`) names work, as do casks. The name is
+passed to `brew` verbatim; only the PATH probe behind the auto-derived check uses the last path
+component.
+
+> **Tapped formulae install from an unaudited source.** `brew install owner/tap/formula` clones the
+> tap's repository and evaluates its formula. Homebrew taps it without asking, and `mcs` runs `brew`
+> without a terminal, so Homebrew's own plan prompt cannot appear either. Nothing in `mcs` gates
+> this — `brew:` is outside the pack trust review. `mcs pack validate` warns about it at authoring
+> time, and users or organisations can restrict it with Homebrew's own `HOMEBREW_ALLOWED_TAPS` /
+> `HOMEBREW_FORBIDDEN_TAPS`, which are unset by default.
+
 ---
 
 #### `mcp:` — MCP Server
@@ -567,7 +578,7 @@ Most components get free doctor checks from their install action — no need to 
 
 | Shorthand | Auto-derived check |
 |-----------|-------------------|
-| `brew: node` | `commandExists` for `node` |
+| `brew: node` | Command on `PATH`, else `brew list` for the package. The `PATH` probe uses the last path component, so `owner/tap/formula` looks for `formula` |
 | `mcp: {command: npx, ...}` | MCP server registered in `~/.claude.json` |
 | `plugin: "name@org"` | Plugin enabled in settings |
 | `hook: {source, dest}` | File exists at destination, plus the interpreter binary resolves (skipped for `bash`/`sh`/`zsh`) |

@@ -27,6 +27,20 @@ struct PackHeuristicsTests {
 
     // MARK: - Hook Interpreters
 
+    private func brewComponent(
+        id: String = "test-pack.brew",
+        displayName: String = "Brew",
+        package: String
+    ) -> ExternalComponentDefinition {
+        ExternalComponentDefinition(
+            id: id,
+            displayName: displayName,
+            description: "Brew \(displayName)",
+            type: .brewPackage,
+            installAction: .brewInstall(package: package)
+        )
+    }
+
     private func hookComponent(
         id: String = "test-pack.hook",
         source: String,
@@ -102,6 +116,62 @@ struct PackHeuristicsTests {
         ])
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
         #expect(!findings.contains { $0.message.contains("installs python") })
+    }
+
+    @Test("A tap-qualified formula satisfies the runtime requirement")
+    func tapQualifiedFormulaSatisfies() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = brewComponent(id: "test-pack.node", displayName: "Node", package: "acme/tools/node")
+        let manifest = minimalManifest(components: [
+            brew,
+            hookComponent(source: "hooks/fmt.js", destination: "fmt.js"),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("installs node") })
+    }
+
+    @Test("A tap-qualified brew package is reported as a third-party tap")
+    func tapQualifiedPackageWarns() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = brewComponent(
+            id: "test-pack.xcodebuildmcp",
+            displayName: "XcodeBuildMCP",
+            package: "getsentry/xcodebuildmcp/xcodebuildmcp"
+        )
+        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
+        #expect(findings.contains {
+            $0.severity == .warning
+                && $0.message.contains("third-party tap 'getsentry/xcodebuildmcp'")
+        })
+    }
+
+    @Test("First-party and non-tap package forms are not reported as third-party taps", arguments: [
+        "homebrew/core/node",
+        "homebrew/cask/font-fira-code",
+        "./Formula/local.rb",
+        "https://example.com/formula.rb",
+    ])
+    func nonThirdPartyPackageFormsDoNotWarn(package: String) throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = brewComponent(package: package)
+        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("third-party tap") })
+    }
+
+    @Test("A core formula is not reported as a third-party tap")
+    func coreFormulaDoesNotWarnAboutTaps() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let brew = brewComponent(id: "test-pack.node", displayName: "Node", package: "node")
+        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("third-party tap") })
     }
 
     @Test("A versioned formula satisfies the runtime requirement")

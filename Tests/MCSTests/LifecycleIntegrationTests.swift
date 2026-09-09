@@ -166,6 +166,21 @@ private struct LifecycleTestBed {
         return file
     }
 
+    func brewComponent(
+        pack: String, id: String, package: String, isRequired: Bool = true
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Brew \(id)",
+            type: .brewPackage,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: isRequired,
+            installAction: .brewInstall(package: package)
+        )
+    }
+
     func settingsComponent(pack: String, id: String, source: URL) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -3072,5 +3087,36 @@ struct GitignoreRefCountTests {
 
         let after = try String(contentsOf: gitignore, encoding: .utf8)
         #expect(!after.contains(".solo-ignore"), "Nothing else claims it — ref counting must not over-keep")
+    }
+}
+
+@Suite("Brew package doctor checks")
+struct BrewPackageDoctorTests {
+    /// The ISSUE-388 regression: a tap-qualified package is on PATH only under its last
+    /// component, so a check testing the declared string reports a healthy install as missing.
+    ///
+    /// `git` stands in for a satisfied declaration rather than for a real tap install — the PATH
+    /// probe is provenance-blind by design, so the system `git` satisfies `acme/tools/git`. That
+    /// PATH hit is also what keeps the test hermetic: `configure` runs
+    /// `autoInstallGlobalDependencies` at *project* scope (global installs inline instead), so a
+    /// declaration it cannot satisfy would reach a real `brew install` and tap a real repository.
+    @Test("A tap-qualified brew package that is installed does not warn")
+    func tapQualifiedBrewPackagePassesDoctor() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "brew-pack",
+            displayName: "Brew Pack",
+            components: [bed.brewComponent(pack: "brew-pack", id: "tool", package: "acme/tools/git")]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        var runner = bed.makeDoctorRunner(registry: registry)
+        let summary = try runner.run()
+        #expect(summary.warnings == 0)
+        #expect(summary.issues == 0)
     }
 }

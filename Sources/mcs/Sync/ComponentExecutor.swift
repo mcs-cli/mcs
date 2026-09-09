@@ -12,13 +12,12 @@ struct ComponentExecutor {
 
     /// Install a Homebrew package, or confirm it's already available.
     func installBrewPackage(_ package: String) -> Bool {
-        if shell.commandExists(package) { return true }
         let brew = Homebrew(shell: shell, environment: environment)
+        if brew.provides(package) { return true }
         guard brew.isInstalled else {
             output.warn("Homebrew not found, cannot install \(package)")
             return false
         }
-        if brew.isPackageInstalled(package) { return true }
         let result = brew.install(package)
         if !result.succeeded {
             output.warn(String(result.stderr.prefix(200)))
