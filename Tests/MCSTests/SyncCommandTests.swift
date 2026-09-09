@@ -449,3 +449,60 @@ struct SyncCommandGuardTests {
         }
     }
 }
+
+// MARK: - Unloadable-pack guard
+
+/// The sync guard's decision. `SyncCommand.perform()` builds its own `Environment()`, so the
+/// surrounding command cannot be driven from a sandboxed bed; the destructive half of this
+/// behaviour — what convergence does to a pack left out of the desired state — is covered
+/// end-to-end by `UpdateReapplyLifecycleTests`.
+struct SyncUnloadablePackGuardTests {
+    private func silentOutput() -> CLIOutput {
+        CLIOutput(colorsEnabled: false)
+    }
+
+    @Test("A registered pack that failed to load blocks the scope")
+    func blocksOnUnloadablePack() {
+        let registry = TechPackRegistry(
+            packs: [MockTechPack(identifier: "pack-a", displayName: "Pack A")],
+            registeredPackIDs: ["pack-a", "pack-b"]
+        )
+
+        #expect(SyncCommand.scopeIsBlockedByUnloadablePack(
+            configured: ["pack-a", "pack-b"], registry: registry, output: silentOutput()
+        ))
+    }
+
+    @Test("A configured pack with no registry entry does not block the scope")
+    func doesNotBlockOnUnregisteredPack() {
+        // Absent rather than broken: sync may legitimately be deselecting it, and retaining it
+        // would be unremovable since `mcs pack remove` refuses an unknown identifier.
+        let registry = TechPackRegistry(
+            packs: [MockTechPack(identifier: "pack-a", displayName: "Pack A")],
+            registeredPackIDs: ["pack-a"]
+        )
+
+        #expect(!SyncCommand.scopeIsBlockedByUnloadablePack(
+            configured: ["pack-a", "ghost-pack"], registry: registry, output: silentOutput()
+        ))
+    }
+
+    @Test("Everything loading cleanly does not block the scope")
+    func doesNotBlockWhenAllLoaded() {
+        let registry = TechPackRegistry(
+            packs: [MockTechPack(identifier: "pack-a", displayName: "Pack A")],
+            registeredPackIDs: ["pack-a"]
+        )
+
+        #expect(!SyncCommand.scopeIsBlockedByUnloadablePack(
+            configured: ["pack-a"], registry: registry, output: silentOutput()
+        ))
+    }
+
+    @Test("An empty configured set never blocks")
+    func doesNotBlockOnEmptyScope() {
+        #expect(!SyncCommand.scopeIsBlockedByUnloadablePack(
+            configured: [], registry: TechPackRegistry(), output: silentOutput()
+        ))
+    }
+}

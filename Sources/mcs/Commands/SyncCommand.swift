@@ -87,7 +87,7 @@ struct SyncCommand: LockedCommand {
         let globalState = try loadGlobalState(env: env, output: output)
         let persistedExclusions = globalState.allExcludedComponents
 
-        if scopeIsBlockedByUnloadablePack(
+        if Self.scopeIsBlockedByUnloadablePack(
             configured: globalState.configuredPacks, registry: registry, output: output
         ) {
             return
@@ -119,7 +119,7 @@ struct SyncCommand: LockedCommand {
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
-        registry: TechPackRegistry,
+        registry loadedRegistry: TechPackRegistry,
         config: MCSConfig
     ) throws {
         let projectPath = effectiveTargetURL
@@ -133,9 +133,19 @@ struct SyncCommand: LockedCommand {
 
         let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
 
-        // Handle --lock: checkout locked commits before loading packs
+        // Handle --lock: checkout locked commits, then re-read the packs.
+        //
+        // The caller loaded its registry before this checkout, so it describes the *previous*
+        // commits. A pack that failed to load at the old revision can be perfectly fine at the
+        // locked one — and since `--lock` is the command someone reaches for to restore a known
+        // good state, a stale registry would have the unloadable-pack guard below refuse the very
+        // sync that repairs it.
+        let registry: TechPackRegistry
         if lock {
             try lockOps.checkoutLockedCommits(at: projectPath)
+            registry = TechPackRegistry.loadWithExternalPacks(environment: env, output: output)
+        } else {
+            registry = loadedRegistry
         }
 
         let configurator = Configurator(
@@ -161,7 +171,7 @@ struct SyncCommand: LockedCommand {
 
         // Before any branch, including --dry-run. Returning here also skips the lockfile work
         // below, which would otherwise record a state the project was never converged onto.
-        if scopeIsBlockedByUnloadablePack(
+        if Self.scopeIsBlockedByUnloadablePack(
             configured: previouslyConfigured, registry: registry, output: output
         ) {
             return
@@ -203,7 +213,12 @@ struct SyncCommand: LockedCommand {
 
     /// Whether this scope must skip convergence because a pack it has configured failed to load.
     /// Warns for each one — see `unloadableConfiguredPacks` for why the whole scope goes.
-    private func scopeIsBlockedByUnloadablePack(
+    ///
+    /// `static` so tests can drive the real predicate: `perform()` builds its own `Environment()`,
+    /// so the surrounding command is not reachable from a sandboxed test bed and the decision
+    /// cannot be exercised end-to-end. `UpdateReapplyLifecycleTests` covers what convergence would
+    /// have destroyed had the decision gone the other way.
+    static func scopeIsBlockedByUnloadablePack(
         configured: Set<String>,
         registry: TechPackRegistry,
         output: CLIOutput
