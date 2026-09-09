@@ -2309,7 +2309,7 @@ struct UpdateReapplyLifecycleTests {
         #expect(runs.count == (filter == .all ? 2 : 1))
 
         for run in runs {
-            try UpdateCommand.reapplyScope(
+            let blocked = try UpdateCommand.reapplyScope(
                 run,
                 skippedPackIDs: [],
                 registry: registry,
@@ -2319,6 +2319,9 @@ struct UpdateReapplyLifecycleTests {
                 output: CLIOutput(colorsEnabled: false),
                 claudeCLI: bed.mockCLI
             )
+            // Nothing is skipped or unloadable here, so every scope must actually converge —
+            // a blocked scope would satisfy the state assertions below without doing anything.
+            #expect(!blocked)
         }
 
         // The regression guard: an identity-based filter, or a list sourced from anywhere but
@@ -2374,7 +2377,7 @@ struct UpdateReapplyLifecycleTests {
         #expect(runs.count == 1)
 
         for run in runs {
-            try UpdateCommand.reapplyScope(
+            let blocked = try UpdateCommand.reapplyScope(
                 run,
                 skippedPackIDs: ["pack-b"],
                 registry: registry,
@@ -2384,6 +2387,7 @@ struct UpdateReapplyLifecycleTests {
                 output: CLIOutput(colorsEnabled: false),
                 claudeCLI: bed.mockCLI
             )
+            #expect(blocked)
         }
 
         // Subtracting B from the desired state used to unconfigure it with no prompt, so a
@@ -2400,6 +2404,69 @@ struct UpdateReapplyLifecycleTests {
 
         // The accepted cost of skipping the scope: A is not refreshed this run.
         #expect(!FileManager.default.fileExists(atPath: hookA.path))
+    }
+
+    @Test("A configured pack missing from the registry blocks the scope instead of being removed")
+    func unresolvedPackIsNotUnconfigured() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let sourceA = try bed.makeHookSource(name: "a.sh")
+        let sourceB = try bed.makeHookSource(name: "b.sh")
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [bed.hookComponent(
+                pack: "pack-a", id: "a", source: sourceA, destination: "a.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [bed.hookComponent(
+                pack: "pack-b", id: "b", source: sourceB, destination: "b.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+
+        let hookB = bed.project.appendingPathComponent(".claude/hooks/pack-b/b.sh")
+        #expect(FileManager.default.fileExists(atPath: hookB.path))
+
+        // B is still recorded in project state but has no registry entry at all — a half-finished
+        // `mcs pack add` on a fresh checkout, say. It never reaches `skippedPackIDs` (the update
+        // phase only iterates registry entries) and `unloadableConfiguredPacks` excludes it, so
+        // resolving the pack list used to drop it and delete its artifacts.
+        let registryWithoutB = TechPackRegistry(packs: [packA], registeredPackIDs: ["pack-a"])
+
+        let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))
+            .resolve(filter: .projectOnly, projectRoot: bed.project)
+        #expect(runs.count == 1)
+
+        for run in runs {
+            let blocked = try UpdateCommand.reapplyScope(
+                run,
+                skippedPackIDs: [],
+                registry: registryWithoutB,
+                dryRun: false,
+                env: bed.env,
+                shell: ShellRunner(environment: bed.env),
+                output: CLIOutput(colorsEnabled: false),
+                claudeCLI: bed.mockCLI
+            )
+            #expect(blocked)
+        }
+
+        #expect(try bed.projectState().configuredPacks.contains("pack-b"))
+        #expect(FileManager.default.fileExists(atPath: hookB.path))
+
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let hookCommands = (settings.hooks ?? [:]).values
+            .flatMap(\.self).flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-b/b.sh")))
     }
 }
 

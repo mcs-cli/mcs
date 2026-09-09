@@ -83,7 +83,7 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
-        try runReapplyPhase(
+        let blockedProjects = try runReapplyPhase(
             runs: runs,
             skippedPackIDs: updatePhase.skipped,
             registry: techPackRegistry,
@@ -92,7 +92,9 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
-        try runLockfilePhase(runs: runs, env: env, shell: shell, output: output)
+        try runLockfilePhase(
+            runs: runs, blockedProjects: blockedProjects, env: env, shell: shell, output: output
+        )
 
         if !dryRun {
             UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
@@ -304,6 +306,8 @@ struct UpdateCommand: LockedCommand {
         let attempted: Int
     }
 
+    /// Converge every scope, returning the project paths that were left untouched so the lockfile
+    /// phase does not record commits whose artifacts were never applied.
     private func runReapplyPhase(
         runs: [UpdateScopeResolver.ScopeRun],
         skippedPackIDs: Set<String>,
@@ -311,9 +315,10 @@ struct UpdateCommand: LockedCommand {
         env: Environment,
         shell: ShellRunner,
         output: CLIOutput
-    ) throws {
+    ) throws -> Set<URL> {
+        var blockedProjects: Set<URL> = []
         for run in runs {
-            try Self.reapplyScope(
+            let blocked = try Self.reapplyScope(
                 run,
                 skippedPackIDs: skippedPackIDs,
                 registry: registry,
@@ -322,10 +327,16 @@ struct UpdateCommand: LockedCommand {
                 shell: shell,
                 output: output
             )
+            if blocked, let projectPath = run.projectPath {
+                blockedProjects.insert(projectPath)
+            }
         }
+        return blockedProjects
     }
 
     /// Print one scope's header, resolve its configured packs, and converge the scope onto them.
+    /// Returns `true` when the scope was left untouched, so the caller can keep the lockfile in
+    /// step with what was actually applied.
     ///
     /// `static` so tests can drive the real re-apply — `UpdateCommand` builds its own
     /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
@@ -340,37 +351,43 @@ struct UpdateCommand: LockedCommand {
         shell: any ShellRunning,
         output: CLIOutput,
         claudeCLI: (any ClaudeCLI)? = nil
-    ) throws {
+    ) throws -> Bool {
         output.header(run.label)
 
-        // A pack that was skipped or failed to load makes the *whole* scope skip: `configure`
-        // treats its pack list as the complete desired state, so subtracting one silently
-        // unconfigures it (#382).
-        let notUpdated = run.configuredPackIDs.intersection(skippedPackIDs).sorted()
-        let unloadable = registry.unloadableConfiguredPacks(configured: run.configuredPackIDs)
-        if !notUpdated.isEmpty || !unloadable.isEmpty {
-            for identifier in notUpdated {
+        // Any configured pack this run cannot produce blocks the *whole* scope: `configure` treats
+        // its pack list as the complete desired state, so resolving a shorter list silently
+        // unconfigures the remainder (#382).
+        //
+        // Unlike `mcs sync`, nothing here is a deselection — the desired state *is* the recorded
+        // state — so a pack missing from `registry.yaml` blocks too rather than being converged
+        // away. Reporting is per cause because the remedies differ.
+        let notUpdated = run.configuredPackIDs.intersection(skippedPackIDs)
+        let unloadable = Set(registry.unloadableConfiguredPacks(configured: run.configuredPackIDs))
+            .subtracting(notUpdated)
+        let unregistered = run.configuredPackIDs
+            .subtracting(registry.availablePackIDs)
+            .subtracting(notUpdated)
+            .subtracting(unloadable)
+
+        if !notUpdated.isEmpty || !unloadable.isEmpty || !unregistered.isEmpty {
+            for identifier in notUpdated.sorted() {
                 output.warn("  \(identifier): update did not complete — re-run 'mcs update'.")
             }
-            for identifier in unloadable {
+            for identifier in unloadable.sorted() {
                 output.warn("  \(identifier): failed to load — run 'mcs pack update \(identifier)'.")
             }
+            for identifier in unregistered.sorted() {
+                output.warn("  \(identifier): tracked in state but missing from the pack registry — run 'mcs pack add' to restore it.")
+            }
             output.warn("  Skipping re-apply for this scope so no artifacts are removed.")
-            return
+            return true
         }
 
-        var packs: [any TechPack] = []
-        for packID in run.configuredPackIDs.sorted() {
-            guard let pack = registry.pack(for: packID) else {
-                output.warn("  \(packID): tracked in state but missing from pack registry — skipping. Run 'mcs pack add' to restore it.")
-                continue
-            }
-            packs.append(pack)
-        }
+        let packs = run.configuredPackIDs.sorted().compactMap { registry.pack(for: $0) }
 
         guard !packs.isEmpty else {
             output.info("No packs to refresh in this scope.")
-            return
+            return true
         }
 
         let configurator = Configurator(
@@ -392,10 +409,12 @@ struct UpdateCommand: LockedCommand {
                 reusePriorValuesSilently: true
             )
         }
+        return false
     }
 
     private func runLockfilePhase(
         runs: [UpdateScopeResolver.ScopeRun],
+        blockedProjects: Set<URL>,
         env: Environment,
         shell: ShellRunner,
         output: CLIOutput
@@ -409,8 +428,15 @@ struct UpdateCommand: LockedCommand {
             guard let projectPath = run.projectPath else { continue }
 
             if config.isLockfileGenerationEnabled {
-                try lockOps.writeLockfile(at: projectPath)
+                // The registry already holds the new SHAs, so writing a lockfile for a scope that
+                // never converged would describe a configuration that is not on disk.
+                if blockedProjects.contains(projectPath) {
+                    output.warn("Skipped mcs.lock.yaml for \(run.label) — the scope did not converge.")
+                } else {
+                    try lockOps.writeLockfile(at: projectPath)
+                }
             } else if config.isLockfileGenerationUnset {
+                // Read-only, and its drift warning is accurate either way.
                 try lockOps.reportDrift(at: projectPath)
             }
         }
