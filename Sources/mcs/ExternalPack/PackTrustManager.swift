@@ -247,8 +247,19 @@ struct PackTrustManager {
         var offenders: [String: TrustMismatch] = [:]
 
         for item in try analyzeScripts(manifest: manifest, packPath: packPath) {
-            guard let relativePath = item.relativePath,
-                  let reason = mismatch(for: item, against: trustedHashes, packPath: packPath)
+            guard let relativePath = item.relativePath else {
+                // A doctor check's `command`/`fixScript` is overloaded — a script path or an
+                // inline command — and analysis can only tell them apart by whether the file
+                // exists, so deleting a trusted script silently reclassifies it as inline and it
+                // would slip past the exemption above. A stored hash under the declared value
+                // itself proves it was trusted as a file, since inline items are keyed
+                // `inline:<hash>`: the file is gone, which is a mismatch, not an exemption.
+                if trustedHashes[item.content] != nil {
+                    offenders[item.content] = .mismatched
+                }
+                continue
+            }
+            guard let reason = mismatch(for: item, against: trustedHashes, packPath: packPath)
             else { continue }
             offenders[relativePath] = reason
         }

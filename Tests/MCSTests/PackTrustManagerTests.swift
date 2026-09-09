@@ -514,6 +514,81 @@ struct PackTrustManagerTests {
         #expect(modified == ["hooks/gate.sh": .neverTrusted])
     }
 
+    /// A pack whose only trustable content is one doctor `shellScript` check.
+    private func doctorScriptPackYAML() -> String {
+        """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        supplementaryDoctorChecks:
+          - type: shellScript
+            name: Check Env
+            command: scripts/doctor.sh
+        """
+    }
+
+    @Test("verifyTrust flags a trusted doctor script that was deleted")
+    func verifyTrustFlagsDeletedDoctorScript() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let scriptFile = tmpDir.appendingPathComponent("scripts/doctor.sh")
+        try FileManager.default.createDirectory(
+            at: scriptFile.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try writeFile("#!/bin/bash\necho ok", at: scriptFile)
+
+        let manifest = try loadManifest(yaml: doctorScriptPackYAML(), in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            packPath: tmpDir
+        )
+        #expect(trusted["scripts/doctor.sh"] != nil)
+
+        // Deleting the file makes `analyzeScripts` reclassify the declared path as an inline
+        // command, which would otherwise slip past the inline exemption unverified.
+        try FileManager.default.removeItem(at: scriptFile)
+
+        let modified = try manager.verifyTrust(
+            trustedHashes: trusted, packPath: tmpDir, manifest: manifest
+        )
+
+        #expect(modified == ["scripts/doctor.sh": .mismatched])
+    }
+
+    @Test("verifyTrust leaves a genuine inline doctor command exempt")
+    func verifyTrustExemptsInlineDoctorCommand() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // `command` here is a real shell command, not a path — it has no file and never had one,
+        // so it must stay exempt rather than being reported as a deleted script.
+        let manifest = try loadManifest(yaml: """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        supplementaryDoctorChecks:
+          - type: shellScript
+            name: Check Env
+            command: swift build
+        """, in: tmpDir)
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            packPath: tmpDir
+        )
+
+        let modified = try manager.verifyTrust(
+            trustedHashes: trusted, packPath: tmpDir, manifest: manifest
+        )
+
+        #expect(modified.isEmpty)
+    }
+
     @Test("verifyTrust skips inline synthetic keys")
     func verifyTrustSkipsInlineKeys() throws {
         let tmpDir = try makeTmpDir()
