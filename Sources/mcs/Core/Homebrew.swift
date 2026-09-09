@@ -22,6 +22,28 @@ struct Homebrew {
         return result.succeeded
     }
 
+    /// A declared name with any tap qualifier stripped: `owner/tap/formula` → `formula`.
+    ///
+    /// Purely lexical — deliberately not named for the command a formula provides, because no
+    /// such function can exist (see `provides`).
+    static func bareName(of package: String) -> String {
+        URL(fileURLWithPath: package).lastPathComponent
+    }
+
+    /// Whether `package` is available on this machine.
+    ///
+    /// A package name is not reliably a command name, so a PATH miss proves nothing and has to
+    /// be settled by asking brew: `ripgrep` installs `rg`, `node@22` and casks install nothing
+    /// matching at all. PATH stays the fast path because it costs no subprocess.
+    ///
+    /// The PATH probe is provenance-blind on purpose — the question is whether the tool is
+    /// usable, not whether brew is what put it there. A version manager's `node` satisfies
+    /// `brew: node`, and the system `git` satisfies `brew: acme/tools/git`.
+    func provides(_ package: String) -> Bool {
+        if shell.commandExists(Self.bareName(of: package)) { return true }
+        return isPackageInstalled(package)
+    }
+
     /// Install a Homebrew package.
     @discardableResult
     func install(_ name: String) -> ShellResult {
@@ -43,7 +65,7 @@ struct Homebrew {
     /// target leaves the Cellar path (e.g. npx → Cellar/node/.../npx → lib/node_modules/...).
     static func detectFormula(for command: String) -> String? {
         let fm = FileManager.default
-        let basename = URL(fileURLWithPath: command).lastPathComponent
+        let basename = bareName(of: command)
         for prefix in allPrefixes {
             let binPath = "\(prefix)/bin/\(basename)"
             guard let dest = try? fm.destinationOfSymbolicLink(atPath: binPath) else { continue }

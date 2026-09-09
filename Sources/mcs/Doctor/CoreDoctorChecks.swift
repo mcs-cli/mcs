@@ -22,16 +22,18 @@ import Foundation
 //
 // This separation keeps `doctor --fix` predictable, and destructive only where it can show its work.
 
-struct CommandCheck: DoctorCheck {
+/// Reports on a `brew:` component, using the same availability test `installBrewPackage` uses
+/// so doctor and sync cannot disagree about what is installed.
+struct BrewPackageCheck: DoctorCheck {
     let name: String
     let section: String
-    let command: String
+    let package: String
     var isOptional: Bool = false
     var environment: Environment = .init()
 
     func check() -> CheckResult {
         let shell = ShellRunner(environment: environment)
-        if shell.commandExists(command) {
+        if Homebrew(shell: shell, environment: environment).provides(package) {
             return .pass("installed")
         }
         if isOptional {

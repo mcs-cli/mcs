@@ -15,10 +15,10 @@ extension ComponentDefinition {
             return PluginCheck(pluginRef: PluginRef(pluginName), projectRoot: projectRoot, environment: environment)
 
         case let .brewInstall(package):
-            return CommandCheck(
+            return BrewPackageCheck(
                 name: displayName,
                 section: type.doctorSection,
-                command: package,
+                package: package,
                 isOptional: !isRequired,
                 environment: environment
             )

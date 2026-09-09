@@ -101,7 +101,7 @@ struct TechPackRegistryTests {
 
     @Test("supplementaryDoctorChecks returns checks for registered pack")
     func supplementaryDoctorChecksWithPack() {
-        let check = CommandCheck(name: "test-check", section: "Dependencies", command: "test")
+        let check = BrewPackageCheck(name: "test-check", section: "Dependencies", package: "test")
         let fakePack = FakeTechPack(
             identifier: "test-pack",
             supplementaryDoctorChecks: [check]

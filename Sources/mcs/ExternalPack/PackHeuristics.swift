@@ -23,6 +23,7 @@ enum PackHeuristics {
             + checkRootLevelContentFiles(manifest: manifest, packPath: packPath)
         findings += unreferenced
         findings += checkMCPDependencyGaps(components: components)
+        findings += checkThirdPartyTaps(components: components)
         findings += checkPythonModulePaths(components: components, packPath: packPath)
         findings += checkDoctorCheckScopeUsage(manifest: manifest, components: components)
         findings += checkDoctorCheckMatcherUsage(manifest: manifest, components: components)
@@ -229,12 +230,14 @@ enum PackHeuristics {
         return findings
     }
 
-    /// Formulae the pack installs itself.
+    /// Formulae the pack installs itself, under every name they can be matched by — the bare
+    /// name too, or `brew: owner/tap/node` reads as "node is not installed by this pack".
     private static func brewPackages(in components: [ExternalComponentDefinition]) -> Set<String> {
         var packages = Set<String>()
         for component in components {
             if case let .brewInstall(package) = component.installAction {
                 packages.insert(package)
+                packages.insert(Homebrew.bareName(of: package))
             }
         }
         return packages
@@ -290,6 +293,36 @@ enum PackHeuristics {
         }
 
         return findings
+    }
+
+    /// A tap-qualified `brew:` package makes `brew install` clone and evaluate a third-party
+    /// repository. Homebrew auto-taps without asking, and mcs runs brew without a TTY so even
+    /// Homebrew's own plan prompt cannot fire — so the author is the last person able to weigh it.
+    private static func checkThirdPartyTaps(
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        var findings: [Finding] = []
+        for component in components {
+            guard case let .brewInstall(package) = component.installAction,
+                  let tap = tapReference(in: package)
+            else { continue }
+            findings.append(Finding(
+                severity: .warning,
+                message: "Component '\(component.id)' installs '\(package)' from third-party tap"
+                    + " '\(tap)' — 'mcs sync' taps it without confirmation from Homebrew or mcs."
+            ))
+        }
+        return findings
+    }
+
+    /// The `owner/tap` prefix of an `owner/tap/formula` name. Nil for a bare core formula, and
+    /// for a URL or path form — both of which also split into three parts, so they are rejected
+    /// before the count is consulted rather than reported as a tap called `https:/example.com`.
+    private static func tapReference(in package: String) -> String? {
+        guard !package.contains(":"), !package.hasPrefix("/") else { return nil }
+        let parts = package.split(separator: "/")
+        guard parts.count == 3 else { return nil }
+        return "\(parts[0])/\(parts[1])"
     }
 
     /// A script language we refuse to guess an interpreter for, left to run under bash.

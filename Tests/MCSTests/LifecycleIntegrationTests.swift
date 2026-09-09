@@ -166,6 +166,21 @@ private struct LifecycleTestBed {
         return file
     }
 
+    func brewComponent(
+        pack: String, id: String, package: String, isRequired: Bool = true
+    ) -> ComponentDefinition {
+        ComponentDefinition(
+            id: "\(pack).\(id)",
+            displayName: id,
+            description: "Brew \(id)",
+            type: .brewPackage,
+            packIdentifier: pack,
+            dependencies: [],
+            isRequired: isRequired,
+            installAction: .brewInstall(package: package)
+        )
+    }
+
     func settingsComponent(pack: String, id: String, source: URL) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -3072,5 +3087,57 @@ struct GitignoreRefCountTests {
 
         let after = try String(contentsOf: gitignore, encoding: .utf8)
         #expect(!after.contains(".solo-ignore"), "Nothing else claims it — ref counting must not over-keep")
+    }
+}
+
+@Suite("Brew package doctor checks")
+struct BrewPackageDoctorTests {
+    /// The ISSUE-388 regression: a tap-qualified package is on PATH only under its last
+    /// component, so a check testing the declared string reports a healthy install as missing.
+    ///
+    /// `git` stands in for a satisfied declaration rather than for a real tap install — the PATH
+    /// probe is provenance-blind by design, so the system `git` satisfies `acme/tools/git`. That
+    /// is what makes the test hermetic: it asserts the probe looks at the right *name*.
+    @Test("A tap-qualified brew package that is installed does not warn")
+    func tapQualifiedBrewPackagePassesDoctor() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "brew-pack",
+            displayName: "Brew Pack",
+            components: [bed.brewComponent(pack: "brew-pack", id: "tool", package: "acme/tools/git")]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        var runner = bed.makeDoctorRunner(registry: registry)
+        let summary = try runner.run()
+        #expect(summary.warnings == 0)
+        #expect(summary.issues == 0)
+    }
+
+    /// Unlike its sibling this one does reach Homebrew: the PATH probe misses, so `provides`
+    /// falls through to a real `brew list`. That is read-only and returns the same answer with
+    /// or without Homebrew installed, but it is not free — roughly half a second.
+    @Test("An absent brew package is still reported")
+    func absentBrewPackageFailsDoctor() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "brew-pack",
+            displayName: "Brew Pack",
+            components: [bed.brewComponent(
+                pack: "brew-pack", id: "tool", package: "acme/tools/mcs-not-a-real-formula"
+            )]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        var runner = bed.makeDoctorRunner(registry: registry)
+        #expect(try runner.run().issues > 0)
     }
 }

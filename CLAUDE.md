@@ -76,7 +76,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `GitignoreManager.swift` — global gitignore management, core entry list
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/remove`
 - `ClaudePrerequisite.swift` — Claude Code CLI availability check with optional Homebrew auto-install
-- `Homebrew.swift` — brew detection, package install/uninstall
+- `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
 - `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
 - `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
 - `Lockfile.swift` — `mcs.lock.yaml` model for pinning pack commits
@@ -109,11 +109,11 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PromptExecutor.swift` — executes pack prompts (interactive value resolution during sync)
 - `ScriptRunner.swift` — sandboxed script execution for pack scripts
 - `ExternalDoctorCheck.swift` — factory for converting YAML doctor check definitions to `DoctorCheck` instances
-- `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths, `scope` declared on doctor check types that ignore it)
+- `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths, third-party brew taps, `scope` declared on doctor check types that ignore it)
 
 ### Doctor (`Sources/mcs/Doctor/`)
 - `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution
-- `CoreDoctorChecks.swift` — check structs (CommandCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
+- `CoreDoctorChecks.swift` — check structs (BrewPackageCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
 - `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition
 - `ProjectDoctorChecks.swift` — project-scoped checks (CLAUDE.local.md freshness, state file)
 - `ScopeDuplicationCheck.swift` — flags a pack configured in both the project and global scope, reporting only artifacts that genuinely exist twice; `--fix` removes the project copy via `Configurator.unconfigurePack`, gated on component subset, prompt-answer parity, and the recorded hash of every file it would delete

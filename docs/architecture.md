@@ -361,6 +361,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
 | **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. Modified scripts are detected and the user is prompted to re-trust before proceeding. Local packs skip verification since scripts change during development. |
+| **Trust Boundary** | `brew:` and `plugin:` install actions are outside trust review — they contribute no hashed item, so a pack declaring only those installs without a prompt, and changing one does not ask for renewed trust on `mcs pack update`. A tap-qualified `brew:` package is the case to watch: Homebrew taps a third-party repository and evaluates its formula without confirmation. |
 | **Lockfile (opt-in)** | `mcs.lock.yaml` pins pack commits for reproducible environments. Generation is off by default; enable with `mcs config set generate-lockfile true`. Explicit `generate-lockfile: false` is silent; only the never-configured `nil` state surfaces drift warnings against a stale pre-existing lockfile. Use `--lock` to check out pinned versions from an existing lockfile. `mcs update` honours `generate-lockfile`. |
 
 ## Concurrency Model

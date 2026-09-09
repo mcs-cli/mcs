@@ -63,7 +63,7 @@ struct DerivedDoctorCheckTests {
         #expect(check?.section == "Plugins")
     }
 
-    @Test("brewInstall action derives CommandCheck")
+    @Test("brewInstall action derives BrewPackageCheck")
     func brewInstallDerivation() {
         let component = makeComponent(
             displayName: "TestPkg",
@@ -74,6 +74,18 @@ struct DerivedDoctorCheckTests {
         #expect(check != nil)
         #expect(check?.name == "TestPkg")
         #expect(check?.section == "Dependencies")
+        #expect((check as? BrewPackageCheck)?.package == "testpkg")
+    }
+
+    @Test("brewInstall derivation keeps a tap-qualified package intact")
+    func brewInstallDerivationTapQualified() {
+        let component = makeComponent(
+            displayName: "TestPkg",
+            type: .brewPackage,
+            installAction: .brewInstall(package: "getsentry/xcodebuildmcp/xcodebuildmcp")
+        )
+        let check = component.deriveDoctorCheck() as? BrewPackageCheck
+        #expect(check?.package == "getsentry/xcodebuildmcp/xcodebuildmcp")
     }
 
     @Test("shellCommand action returns nil (not derivable)")
@@ -275,7 +287,7 @@ struct DerivedDoctorCheckTests {
 
     @Test("allDoctorChecks returns derived + supplementary")
     func allDoctorChecksCombines() {
-        let supplementary = CommandCheck(name: "test", section: "Dependencies", command: "test")
+        let supplementary = BrewPackageCheck(name: "test", section: "Dependencies", package: "test")
         let component = makeComponent(
             displayName: "TestPkg",
             type: .brewPackage,
@@ -283,13 +295,13 @@ struct DerivedDoctorCheckTests {
             supplementaryChecks: [supplementary]
         )
         let checks = component.allDoctorChecks()
-        // 1 derived (CommandCheck from brewInstall) + 1 supplementary
+        // 1 derived (BrewPackageCheck from brewInstall) + 1 supplementary
         #expect(checks.count == 2)
     }
 
     @Test("shellCommand with supplementaryChecks returns only supplementary")
     func shellCommandWithSupplementary() {
-        let supplementary = CommandCheck(name: "brew", section: "Dependencies", command: "brew")
+        let supplementary = BrewPackageCheck(name: "brew", section: "Dependencies", package: "brew")
         let component = makeComponent(
             type: .brewPackage,
             installAction: .shellCommand(command: "curl ..."),
