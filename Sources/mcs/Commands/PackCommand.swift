@@ -162,16 +162,16 @@ struct AddPack: LockedCommand {
         }
 
         // 5. Trust verification
-        let decision: PackTrustManager.TrustDecision
+        let trustedHashes: [String: String]?
         do {
-            decision = try verifyTrust(manifest: manifest, packPath: fetchResult.localPath, output: ctx.output)
+            trustedHashes = try verifyTrust(manifest: manifest, packPath: fetchResult.localPath, output: ctx.output)
         } catch {
             try? fetcher.remove(packPath: fetchResult.localPath)
             ctx.output.error("Trust verification failed: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        guard decision.approved else {
+        guard let approvedHashes = trustedHashes else {
             try? fetcher.remove(packPath: fetchResult.localPath)
             ctx.output.info("Pack not trusted. No changes made.")
             return
@@ -208,7 +208,7 @@ struct AddPack: LockedCommand {
             commitSHA: fetchResult.commitSHA,
             localPath: manifest.identifier,
             addedAt: ISO8601DateFormatter().string(from: Date()),
-            trustedScriptHashes: decision.scriptHashes,
+            trustedScriptHashes: approvedHashes,
             isLocal: nil
         )
 
@@ -275,15 +275,15 @@ struct AddPack: LockedCommand {
         }
 
         // 4. Trust verification
-        let decision: PackTrustManager.TrustDecision
+        let trustedHashes: [String: String]?
         do {
-            decision = try verifyTrust(manifest: manifest, packPath: path, output: ctx.output)
+            trustedHashes = try verifyTrust(manifest: manifest, packPath: path, output: ctx.output)
         } catch {
             ctx.output.error("Trust verification failed: \(error.localizedDescription)")
             throw ExitCode.failure
         }
 
-        guard decision.approved else {
+        guard let approvedHashes = trustedHashes else {
             ctx.output.info("Pack not trusted. No changes made.")
             return
         }
@@ -298,7 +298,7 @@ struct AddPack: LockedCommand {
             commitSHA: Constants.ExternalPacks.localCommitSentinel,
             localPath: path.path,
             addedAt: ISO8601DateFormatter().string(from: Date()),
-            trustedScriptHashes: decision.scriptHashes,
+            trustedScriptHashes: approvedHashes,
             isLocal: true
         )
 
@@ -376,19 +376,21 @@ struct AddPack: LockedCommand {
         return output.askYesNo("Replace existing pack?", default: false)
     }
 
-    /// Analyze scripts and prompt for trust approval. Throws on failure.
+    /// Analyze scripts and prompt for trust approval, returning the hashes to record.
+    /// `nil` means the user declined. Throws if the scripts cannot be analyzed.
     private func verifyTrust(
         manifest: ExternalPackManifest,
         packPath: URL,
         output: CLIOutput
-    ) throws -> PackTrustManager.TrustDecision {
+    ) throws -> [String: String]? {
         let trustManager = PackTrustManager(output: output)
         let items = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
-        return try trustManager.promptForTrust(
+        guard trustManager.promptForTrust(
             manifest: manifest,
             packPath: packPath,
             items: items
-        )
+        ) else { return nil }
+        return try trustManager.computeScriptHashes(items: items, packPath: packPath)
     }
 
     private func displayPackSummary(manifest: ExternalPackManifest, output: CLIOutput) {

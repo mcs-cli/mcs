@@ -84,7 +84,14 @@ struct SyncCommand: LockedCommand {
             strategy: GlobalSyncStrategy(environment: env)
         )
 
-        let persistedExclusions = try loadGlobalState(env: env, output: output).allExcludedComponents
+        let globalState = try loadGlobalState(env: env, output: output)
+        let persistedExclusions = globalState.allExcludedComponents
+
+        if Self.scopeIsBlockedByUnloadablePack(
+            configured: globalState.configuredPacks, registry: registry, output: output
+        ) {
+            return
+        }
 
         if all || !pack.isEmpty {
             let packs = try resolvePacks(from: registry, output: output)
@@ -112,7 +119,7 @@ struct SyncCommand: LockedCommand {
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
-        registry: TechPackRegistry,
+        registry loadedRegistry: TechPackRegistry,
         config: MCSConfig
     ) throws {
         let projectPath = effectiveTargetURL
@@ -126,9 +133,14 @@ struct SyncCommand: LockedCommand {
 
         let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
 
-        // Handle --lock: checkout locked commits before loading packs
+        // The caller's registry predates this checkout, so a pack that failed to load at the old
+        // commit may be fine at the locked one — and the guard below would refuse the repair.
+        let registry: TechPackRegistry
         if lock {
             try lockOps.checkoutLockedCommits(at: projectPath)
+            registry = TechPackRegistry.loadWithExternalPacks(environment: env, output: output)
+        } else {
+            registry = loadedRegistry
         }
 
         let configurator = Configurator(
@@ -151,6 +163,14 @@ struct SyncCommand: LockedCommand {
         let previouslyConfigured = projectState.configuredPacks
 
         let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
+
+        // Before any branch, including --dry-run. Returning here also skips the lockfile work
+        // below, which would otherwise record a state the project was never converged onto.
+        if Self.scopeIsBlockedByUnloadablePack(
+            configured: previouslyConfigured, registry: registry, output: output
+        ) {
+            return
+        }
 
         if all || !pack.isEmpty {
             let packs = try Self.filterGloballyBlocked(
@@ -184,6 +204,27 @@ struct SyncCommand: LockedCommand {
         case .skip:
             break
         }
+    }
+
+    /// Whether this scope must skip convergence because a pack it has configured failed to load.
+    /// Warns for each one — see `unloadableConfiguredPacks` for why the whole scope goes.
+    /// `static` so tests can reach it: `perform()` builds its own `Environment()`.
+    static func scopeIsBlockedByUnloadablePack(
+        configured: Set<String>,
+        registry: TechPackRegistry,
+        output: CLIOutput
+    ) -> Bool {
+        let unloadable = registry.unloadableConfiguredPacks(configured: configured)
+        guard !unloadable.isEmpty else { return false }
+
+        output.plain("")
+        for identifier in unloadable {
+            output.warn("Pack '\(identifier)' is configured here but failed to load (see above).")
+        }
+        output.warn("Skipping sync for this scope so the pack's artifacts are left in place.")
+        output.plain("  Run 'mcs pack update <pack>' to re-trust or repair it,")
+        output.plain("  or 'mcs pack remove <pack>' to remove it and its artifacts.")
+        return true
     }
 
     /// Lockfile action at the end of a project sync.

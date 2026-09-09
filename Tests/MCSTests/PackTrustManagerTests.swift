@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 @testable import mcs
 import Testing
@@ -108,10 +107,10 @@ struct PackTrustManagerTests {
 
         // Trusted before interpreter items existed: only the script file has a hash.
         let legacyHashes = try ["hooks/gate.sh": sha256(of: tmpDir.appendingPathComponent("hooks/gate.sh"))]
-        let changed = try manager.detectNewScripts(
-            currentHashes: legacyHashes,
-            updatedPackPath: tmpDir,
-            manifest: manifest
+        let changed = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            against: legacyHashes,
+            packPath: tmpDir
         )
         #expect(changed.isEmpty)
         #expect(items.contains { $0.type == .hookInterpreter })
@@ -139,10 +138,10 @@ struct PackTrustManagerTests {
         // The update drops the interpreter, so the same bytes now run under bash. A polyglot
         // script reviewed as JS would begin executing its shell branch unreviewed.
         let after = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
-        let changed = try manager.detectNewScripts(
-            currentHashes: trusted,
-            updatedPackPath: tmpDir,
-            manifest: after
+        let changed = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: after, packPath: tmpDir),
+            against: trusted,
+            packPath: tmpDir
         )
         #expect(changed.contains { $0.type == .hookInterpreter })
     }
@@ -212,10 +211,10 @@ struct PackTrustManagerTests {
 
         // The update leaves the script byte-identical and swaps only the interpreter.
         let after = try loadManifest(yaml: hookPackYAML(interpreterLine: "sh -c"), in: tmpDir)
-        let changed = try manager.detectNewScripts(
-            currentHashes: trusted,
-            updatedPackPath: tmpDir,
-            manifest: after
+        let changed = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: after, packPath: tmpDir),
+            against: trusted,
+            packPath: tmpDir
         )
 
         // Without the interpreter in the trust surface this returns empty: same file hash, no
@@ -237,10 +236,10 @@ struct PackTrustManagerTests {
             items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
             packPath: tmpDir
         )
-        let changed = try manager.detectNewScripts(
-            currentHashes: trusted,
-            updatedPackPath: tmpDir,
-            manifest: manifest
+        let changed = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            against: trusted,
+            packPath: tmpDir
         )
         #expect(changed.isEmpty)
     }
@@ -413,19 +412,31 @@ struct PackTrustManagerTests {
 
     // MARK: - verifyTrust
 
+    /// A pack declaring one hook at `hooks/gate.sh`, with that file written to disk.
+    /// Returns the manifest and the hook's current hash.
+    private func hookPack(in tmpDir: URL) throws -> (manifest: ExternalPackManifest, hash: String) {
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
+        let scriptFile = tmpDir.appendingPathComponent("hooks/gate.sh")
+        try FileManager.default.createDirectory(
+            at: scriptFile.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try writeFile("#!/bin/bash\necho ok", at: scriptFile)
+        let hash = try sha256(of: scriptFile)
+        return (manifest, hash)
+    }
+
     @Test("verifyTrust returns empty for matching hashes")
     func verifyTrustMatchingHashes() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let scriptFile = tmpDir.appendingPathComponent("script.sh")
-        try writeFile("#!/bin/bash\necho ok", at: scriptFile)
-        let hash = try sha256(of: scriptFile)
+        let pack = try hookPack(in: tmpDir)
 
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
-        let modified = manager.verifyTrust(
-            trustedHashes: ["script.sh": hash],
-            packPath: tmpDir
+        let modified = try manager.verifyTrust(
+            trustedHashes: ["hooks/gate.sh": pack.hash],
+            packPath: tmpDir,
+            manifest: pack.manifest
         )
 
         #expect(modified.isEmpty)
@@ -436,31 +447,145 @@ struct PackTrustManagerTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let scriptFile = tmpDir.appendingPathComponent("script.sh")
-        try writeFile("#!/bin/bash\necho ok", at: scriptFile)
+        let pack = try hookPack(in: tmpDir)
 
-        // Use a different hash than what's on disk
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
-        let modified = manager.verifyTrust(
-            trustedHashes: ["script.sh": "0000000000000000000000000000000000000000000000000000000000000000"],
-            packPath: tmpDir
+        let modified = try manager.verifyTrust(
+            trustedHashes: ["hooks/gate.sh": "0000000000000000000000000000000000000000000000000000000000000000"],
+            packPath: tmpDir,
+            manifest: pack.manifest
         )
 
-        #expect(modified == ["script.sh"])
+        #expect(modified == ["hooks/gate.sh": .mismatched])
     }
 
-    @Test("verifyTrust flags missing files")
+    @Test("verifyTrust flags a referenced file that is missing from disk")
     func verifyTrustMissingFile() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
+        // Manifest declares hooks/gate.sh, but the file is never written.
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: nil), in: tmpDir)
+
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
-        let modified = manager.verifyTrust(
-            trustedHashes: ["nonexistent.sh": "abc123"],
+        let modified = try manager.verifyTrust(
+            trustedHashes: ["hooks/gate.sh": "abc123"],
+            packPath: tmpDir,
+            manifest: manifest
+        )
+
+        // A referenced file that is gone reads as mismatched, not as an unreadable-file error.
+        #expect(modified == ["hooks/gate.sh": .mismatched])
+    }
+
+    @Test("verifyTrust ignores a stored key the manifest no longer references")
+    func verifyTrustIgnoresOrphanedKey() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let pack = try hookPack(in: tmpDir)
+
+        // The orphaned key is what bricked a pack that renamed all of its scripts.
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let modified = try manager.verifyTrust(
+            trustedHashes: ["hooks/gate.sh": pack.hash, "hooks/legacy.sh": "abc123"],
+            packPath: tmpDir,
+            manifest: pack.manifest
+        )
+
+        #expect(modified.isEmpty)
+    }
+
+    @Test("verifyTrust flags a referenced script that was never trusted")
+    func verifyTrustFlagsNeverTrustedScript() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let pack = try hookPack(in: tmpDir)
+
+        // On disk with no hash recorded — unchecked while verification walked the stored keys.
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let modified = try manager.verifyTrust(
+            trustedHashes: [:],
+            packPath: tmpDir,
+            manifest: pack.manifest
+        )
+
+        #expect(modified == ["hooks/gate.sh": .neverTrusted])
+    }
+
+    /// A pack whose only trustable content is one doctor `shellScript` check.
+    private func doctorScriptPackYAML() -> String {
+        """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        supplementaryDoctorChecks:
+          - type: shellScript
+            name: Check Env
+            command: scripts/doctor.sh
+        """
+    }
+
+    @Test("verifyTrust flags a trusted doctor script that was deleted")
+    func verifyTrustFlagsDeletedDoctorScript() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let scriptFile = tmpDir.appendingPathComponent("scripts/doctor.sh")
+        try FileManager.default.createDirectory(
+            at: scriptFile.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try writeFile("#!/bin/bash\necho ok", at: scriptFile)
+
+        let manifest = try loadManifest(yaml: doctorScriptPackYAML(), in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            packPath: tmpDir
+        )
+        #expect(trusted["scripts/doctor.sh"] != nil)
+
+        // Deleting the file reclassifies the declared path as an inline command.
+        try FileManager.default.removeItem(at: scriptFile)
+
+        let modified = try manager.verifyTrust(
+            trustedHashes: trusted, packPath: tmpDir, manifest: manifest
+        )
+
+        #expect(modified == ["scripts/doctor.sh": .mismatched])
+    }
+
+    @Test("verifyTrust does not report a doctor script path that was never trusted as a file")
+    func verifyTrustIgnoresNeverTrustedDoctorPath() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // A declared path with no file is a broken pack, which doctor reports at run time. It was
+        // never trusted as a file, so it must not be reported here as a deleted script.
+        let manifest = try loadManifest(yaml: """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        supplementaryDoctorChecks:
+          - type: shellScript
+            name: Check Env
+            command: scripts/absent.sh
+        """, in: tmpDir)
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let trusted = try manager.computeScriptHashes(
+            items: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
             packPath: tmpDir
         )
 
-        #expect(modified == ["nonexistent.sh"])
+        let modified = try manager.verifyTrust(
+            trustedHashes: trusted, packPath: tmpDir, manifest: manifest
+        )
+
+        #expect(modified.isEmpty)
     }
 
     @Test("verifyTrust skips inline synthetic keys")
@@ -468,13 +593,29 @@ struct PackTrustManagerTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
+        // Inline items stay out of the load-time gate even with no hash recorded.
+        let manifest = try loadManifest(yaml: """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: test.setup
+            displayName: Setup
+            description: Runs a command
+            type: configuration
+            installAction:
+              type: shellCommand
+              command: "echo hello"
+        """, in: tmpDir)
+
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
-        let modified = manager.verifyTrust(
+        let modified = try manager.verifyTrust(
             trustedHashes: ["inline:abc123def456": "somehash"],
-            packPath: tmpDir
+            packPath: tmpDir,
+            manifest: manifest
         )
 
-        // Inline keys should be skipped (no corresponding file on disk)
         #expect(modified.isEmpty)
     }
 
@@ -539,10 +680,10 @@ struct PackTrustManagerTests {
         let manifest = try loadManifest(yaml: yaml, in: tmpDir)
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
 
-        let newItems = try manager.detectNewScripts(
-            currentHashes: ["scripts/configure.sh": hash],
-            updatedPackPath: tmpDir,
-            manifest: manifest
+        let newItems = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            against: ["scripts/configure.sh": hash],
+            packPath: tmpDir
         )
 
         #expect(newItems.isEmpty)
@@ -570,10 +711,10 @@ struct PackTrustManagerTests {
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
 
         // Empty trusted hashes means everything is "new"
-        let newItems = try manager.detectNewScripts(
-            currentHashes: [:],
-            updatedPackPath: tmpDir,
-            manifest: manifest
+        let newItems = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            against: [:],
+            packPath: tmpDir
         )
 
         #expect(newItems.count == 1)
@@ -602,10 +743,10 @@ struct PackTrustManagerTests {
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
 
         // Hash doesn't match the file on disk
-        let newItems = try manager.detectNewScripts(
-            currentHashes: ["scripts/configure.sh": "oldhash000000"],
-            updatedPackPath: tmpDir,
-            manifest: manifest
+        let newItems = try manager.newOrChanged(
+            in: manager.analyzeScripts(manifest: manifest, packPath: tmpDir),
+            against: ["scripts/configure.sh": "oldhash000000"],
+            packPath: tmpDir
         )
 
         #expect(newItems.count == 1)

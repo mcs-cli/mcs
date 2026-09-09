@@ -179,6 +179,7 @@ swiftlint --fix
 - CI runs both in strict mode (warnings become errors) with GitHub Actions inline annotations
 - SwiftLint excludes `Tests/` — only Sources and Package.swift are linted
 - **Never use `try?` to silently discard errors** — use `do/catch` and surface the error (via `output.warn()`, logging, or propagation). `try?` hides root causes and makes debugging impossible. The only acceptable use is when the absence of a result is the *entire* semantic meaning (e.g., `FileManager.fileExists` alternative)
+- **Comments carry the non-obvious "why", not a narration of the code** — don't restate the line below, don't describe what the code used to do. If the code already says it, delete the comment; if the rationale needs more than a line or two, it belongs in the issue or a memory. State a given rationale once, at the site that owns it, rather than repeating it at every call site
 
 ## Testing
 

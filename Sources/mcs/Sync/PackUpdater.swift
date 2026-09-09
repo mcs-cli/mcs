@@ -62,6 +62,16 @@ struct PackUpdater {
                     beforeSnapshot: beforeSnapshot
                 )
             }
+            // Same commit, but recorded trust may still not describe what is on disk — a registry
+            // SHA advanced without re-trust, or a map naming files a past update renamed. Without
+            // this the loader's "run 'mcs pack update' to re-trust" advice is a dead end: refused
+            // at load, "already up to date" forever.
+            if trustNeedsRenewal(entry: entry, packPath: packPath, snapshot: beforeSnapshot) {
+                return validateAndTrust(
+                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA,
+                    beforeSnapshot: beforeSnapshot
+                )
+            }
             return .alreadyUpToDate
         }
 
@@ -90,6 +100,30 @@ struct PackUpdater {
         }
     }
 
+    /// Whether recorded trust still covers what is on disk at the current commit. Covers inline
+    /// items too, so a stale `shell:` or MCP-command hash is caught, not just a changed file.
+    ///
+    /// Reuses the pre-fetch snapshot's manifest: this only runs when the fetch moved nothing, so
+    /// the tree it described is the tree on disk. A `nil` snapshot means its `validate` threw, and
+    /// `validateAndTrust` is left to report the real error rather than this claiming trust is fine.
+    private func trustNeedsRenewal(
+        entry: PackRegistryFile.PackEntry,
+        packPath: URL,
+        snapshot: PackSnapshot?
+    ) -> Bool {
+        guard let manifest = snapshot?.manifest else { return true }
+        do {
+            let items = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
+            return !trustManager.newOrChanged(
+                in: items,
+                against: entry.trustedScriptHashes,
+                packPath: packPath
+            ).isEmpty
+        } catch {
+            return true
+        }
+    }
+
     /// Validate the manifest, detect new scripts, prompt for trust, and build an updated entry.
     private func validateAndTrust(
         entry: PackRegistryFile.PackEntry,
@@ -106,36 +140,42 @@ struct PackUpdater {
             return .manifestInvalid(underlying: error)
         }
 
-        var scriptHashes = entry.trustedScriptHashes
-        let newItems: [TrustableItem]
+        let allItems: [TrustableItem]
         do {
-            newItems = try trustManager.detectNewScripts(
-                currentHashes: entry.trustedScriptHashes,
-                updatedPackPath: packPath,
-                manifest: manifest
-            )
+            allItems = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
         } catch {
             return .internalError(underlying: error)
         }
+        let newItems = trustManager.newOrChanged(
+            in: allItems,
+            against: entry.trustedScriptHashes,
+            packPath: packPath
+        )
 
         if !newItems.isEmpty {
             output.warn("\(entry.displayName) has new or modified scripts:")
-            let decision: PackTrustManager.TrustDecision
-            do {
-                decision = try trustManager.promptForTrust(
-                    manifest: manifest,
-                    packPath: packPath,
-                    items: newItems
-                )
-            } catch {
-                return .internalError(underlying: error)
-            }
-            guard decision.approved else {
+            guard trustManager.promptForTrust(
+                manifest: manifest,
+                packPath: packPath,
+                items: newItems
+            ) else {
                 return .trustDeclined
             }
-            for (path, hash) in decision.scriptHashes {
-                scriptHashes[path] = hash
-            }
+        }
+
+        // Rebuild the map from the analyzed items instead of merging into the old one: merging left
+        // a key behind for every file an update renamed or deleted, and `verifyTrust` then refused
+        // the pack over files it no longer shipped. Unconditional even when nothing prompted — a
+        // commit that only *removes* a script produces no new items, and that is exactly the
+        // orphan case.
+        //
+        // This can never silently trust changed content: any item whose hash differs is in
+        // `newItems`, hence already prompted.
+        let scriptHashes: [String: String]
+        do {
+            scriptHashes = try trustManager.computeScriptHashes(items: allItems, packPath: packPath)
+        } catch {
+            return .internalError(underlying: error)
         }
 
         let updatedEntry = PackRegistryFile.PackEntry(
