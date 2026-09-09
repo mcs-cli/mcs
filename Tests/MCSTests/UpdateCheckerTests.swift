@@ -370,7 +370,8 @@ struct UpdateCheckerOrchestratorTests {
             .appendingPathComponent("pack-a").path
         #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin"])
         #expect(mock.runCalls[0].workingDirectory == expectedWorkDir)
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "HEAD", "origin/HEAD"])
+        // Diffed from the registry baseline, not HEAD — see `classifyUpstreamChange`.
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "origin/HEAD"])
         #expect(mock.runCalls[1].workingDirectory == expectedWorkDir)
     }
 
@@ -408,7 +409,7 @@ struct UpdateCheckerOrchestratorTests {
         _ = checker.classifyUpstreamChange(entry: makeEntry(ref: "v2.0"))
 
         #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "v2.0"])
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "HEAD", "FETCH_HEAD"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "FETCH_HEAD"])
     }
 
     @Test("Invalid entry.ref (argument injection) → .unknown(.fetchFailed); no git invocation")

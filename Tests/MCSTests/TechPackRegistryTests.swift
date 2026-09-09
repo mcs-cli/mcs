@@ -111,6 +111,42 @@ struct TechPackRegistryTests {
         #expect(!checks.isEmpty)
         #expect(checks.first?.name == "test-check")
     }
+
+    // MARK: - unloadableConfiguredPacks
+
+    @Test("A registered pack that did not load is reported as unloadable")
+    func unloadableReportsRegisteredButNotLoaded() {
+        // pack-b is in `registry.yaml` but produced no adapter — trust verification, an invalid
+        // manifest, or a missing checkout, all of which `loadAll` warned about and skipped.
+        let registry = TechPackRegistry(
+            packs: [FakeTechPack(identifier: "pack-a")],
+            registeredPackIDs: ["pack-a", "pack-b"]
+        )
+
+        #expect(registry.unloadableConfiguredPacks(configured: ["pack-a", "pack-b"]) == ["pack-b"])
+    }
+
+    @Test("A configured pack with no registry entry is not reported as unloadable")
+    func unloadableExcludesUnregisteredPack() {
+        // `ghost-pack` is in project state but not installed at all, so converging it away is the
+        // intended repair — and `mcs pack remove` could not clean it up if it were retained.
+        let registry = TechPackRegistry(
+            packs: [FakeTechPack(identifier: "pack-a")],
+            registeredPackIDs: ["pack-a"]
+        )
+
+        #expect(registry.unloadableConfiguredPacks(configured: ["pack-a", "ghost-pack"]).isEmpty)
+    }
+
+    @Test("Everything loading cleanly reports nothing")
+    func unloadableEmptyWhenAllLoaded() {
+        let registry = TechPackRegistry(
+            packs: [FakeTechPack(identifier: "pack-a")],
+            registeredPackIDs: ["pack-a"]
+        )
+
+        #expect(registry.unloadableConfiguredPacks(configured: ["pack-a"]).isEmpty)
+    }
 }
 
 // MARK: - Test Helper

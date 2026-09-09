@@ -84,7 +84,14 @@ struct SyncCommand: LockedCommand {
             strategy: GlobalSyncStrategy(environment: env)
         )
 
-        let persistedExclusions = try loadGlobalState(env: env, output: output).allExcludedComponents
+        let globalState = try loadGlobalState(env: env, output: output)
+        let persistedExclusions = globalState.allExcludedComponents
+
+        if scopeIsBlockedByUnloadablePack(
+            configured: globalState.configuredPacks, registry: registry, output: output
+        ) {
+            return
+        }
 
         if all || !pack.isEmpty {
             let packs = try resolvePacks(from: registry, output: output)
@@ -152,6 +159,14 @@ struct SyncCommand: LockedCommand {
 
         let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
 
+        // Before any branch, including --dry-run. Returning here also skips the lockfile work
+        // below, which would otherwise record a state the project was never converged onto.
+        if scopeIsBlockedByUnloadablePack(
+            configured: previouslyConfigured, registry: registry, output: output
+        ) {
+            return
+        }
+
         if all || !pack.isEmpty {
             let packs = try Self.filterGloballyBlocked(
                 resolvePacks(from: registry, output: output),
@@ -184,6 +199,26 @@ struct SyncCommand: LockedCommand {
         case .skip:
             break
         }
+    }
+
+    /// Whether this scope must skip convergence because a pack it has configured failed to load.
+    /// Warns for each one — see `unloadableConfiguredPacks` for why the whole scope goes.
+    private func scopeIsBlockedByUnloadablePack(
+        configured: Set<String>,
+        registry: TechPackRegistry,
+        output: CLIOutput
+    ) -> Bool {
+        let unloadable = registry.unloadableConfiguredPacks(configured: configured)
+        guard !unloadable.isEmpty else { return false }
+
+        output.plain("")
+        for identifier in unloadable {
+            output.warn("Pack '\(identifier)' is configured here but failed to load (see above).")
+        }
+        output.warn("Skipping sync for this scope so the pack's artifacts are left in place.")
+        output.plain("  Run 'mcs pack update <pack>' to re-trust or repair it,")
+        output.plain("  or 'mcs pack remove <pack>' to remove it and its artifacts.")
+        return true
     }
 
     /// Lockfile action at the end of a project sync.

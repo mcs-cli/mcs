@@ -586,4 +586,31 @@ struct DoctorSummaryWarningCountTests {
         #expect(spaced.passed == tight.passed)
         #expect(spaced.issues == tight.issues)
     }
+
+    /// A bare `mcs doctor` used to list the id on its "Packs (…)" line and then run no checks
+    /// for it in silence, because the advisory was gated on `--pack`.
+    @Test("Bare doctor warns about a configured pack that produced no checks")
+    func bareDoctorWarnsAboutPackWithNoChecks() throws {
+        let (home, project) = try makeSandboxProject(label: "doctor-unloadable")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let registry = TechPackRegistry(packs: [MockTechPack(identifier: "test-pack", displayName: "Test Pack")])
+
+        var baselineState = try ProjectState(projectRoot: project)
+        baselineState.recordPack("test-pack")
+        try baselineState.save()
+
+        var baselineRunner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let baseline = try baselineRunner.run()
+
+        // Now also tracking a pack the registry could not produce.
+        var state = try ProjectState(projectRoot: project)
+        state.recordPack("ghost-pack")
+        try state.save()
+
+        var ghostRunner = makeRunner(home: home, projectRoot: project, registry: registry)
+        let withGhost = try ghostRunner.run()
+
+        #expect(withGhost.warnings == baseline.warnings + 1)
+    }
 }

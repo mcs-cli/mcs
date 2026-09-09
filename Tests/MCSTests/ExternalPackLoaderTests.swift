@@ -312,6 +312,78 @@ struct ExternalPackLoaderTests {
         #expect(adapters[0].identifier == "my-pack")
     }
 
+    // MARK: - Trust verification at load
+
+    /// Write a pack checkout declaring one hook file, and register it with `hashes` — called with
+    /// the hook's real hash so a case can record it, corrupt it, or leave it out.
+    private func seedHookPack(
+        env: Environment,
+        hashes: (String) -> [String: String]
+    ) throws -> ExternalPackLoader {
+        let packDir = env.packsDirectory.appendingPathComponent("hook-pack")
+        let hookFile = packDir.appendingPathComponent("hooks/gate.sh")
+        try FileManager.default.createDirectory(
+            at: hookFile.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try "#!/bin/bash\necho gate".write(to: hookFile, atomically: true, encoding: .utf8)
+        try """
+        schemaVersion: 1
+        identifier: hook-pack
+        displayName: Hook Pack
+        description: A pack with one hook
+        components:
+          - id: gate
+            displayName: Gate Hook
+            description: A hook
+            hookEvent: PreToolUse
+            hook:
+              source: hooks/gate.sh
+              destination: gate.sh
+        """.write(
+            to: packDir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8
+        )
+
+        let hookHash = try FileHasher.sha256(of: hookFile)
+        let registry = PackRegistryFile(path: env.packsRegistry)
+        var data = PackRegistryFile.RegistryData()
+        var entry = makeRegistryEntry(identifier: "hook-pack")
+        entry.trustedScriptHashes = hashes(hookHash)
+        registry.register(entry, in: &data)
+        try registry.save(data)
+        return ExternalPackLoader(environment: env, registry: registry)
+    }
+
+    @Test("loadAll loads a pack whose trust map still names a file it no longer ships")
+    func loadAllIgnoresOrphanedTrustedHash() throws {
+        let (tmpDir, env) = try setupTestEnv()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // A pack renamed its scripts, so the map carries hashes for paths that no longer exist
+        // alongside valid ones.
+        let loader = try seedHookPack(env: env) { hookHash in
+            ["hooks/gate.sh": hookHash, "hooks/legacy.sh": "abc123"]
+        }
+
+        let adapters = loader.loadAll(output: CLIOutput(colorsEnabled: false))
+
+        #expect(adapters.count == 1)
+        #expect(adapters[0].identifier == "hook-pack")
+    }
+
+    @Test("loadAll refuses a pack whose referenced hook was never trusted")
+    func loadAllRefusesNeverTrustedHook() throws {
+        let (tmpDir, env) = try setupTestEnv()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // Nothing recorded for a script the pack will run: no stored key to iterate, so the
+        // key-driven check never looked at it.
+        let loader = try seedHookPack(env: env) { _ in [:] }
+
+        let adapters = loader.loadAll(output: CLIOutput(colorsEnabled: false))
+
+        #expect(adapters.isEmpty)
+    }
+
     @Test("loadAll skips packs with missing checkout")
     func loadAllSkipsMissing() throws {
         let (tmpDir, env) = try setupTestEnv()

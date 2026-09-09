@@ -311,9 +311,17 @@ struct UpdateChecker {
         )
         guard fetchResult.succeeded else { return .unknown(.fetchFailed) }
 
+        // Diff from the *registry* baseline, not from `HEAD`. Suppression advances
+        // `entry.commitSHA` to the remote SHA, so the classified range must be the range the
+        // caller compared. When the checkout sits ahead of the registry — advanced by an update
+        // whose trust was then declined — `HEAD..remote` is empty, empty classifies as suppressed,
+        // and advancing the baseline would erase the mismatch that lets `PackUpdater` re-prompt
+        // for trust, stranding the pack. `commitSHA` comes from `registry.yaml`, so validate it
+        // like `ref` above.
+        guard isValidGitRef(entry.commitSHA) else { return .unknown(.fetchFailed) }
         let diffResult = shell.run(
             environment.gitPath,
-            arguments: ["diff", "--name-only", "HEAD", diffTarget],
+            arguments: ["diff", "--name-only", entry.commitSHA, diffTarget],
             workingDirectory: workDir,
             additionalEnvironment: Self.gitNoPromptEnv
         )

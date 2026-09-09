@@ -180,13 +180,13 @@ struct DoctorRunner {
         var allPackIDs = Set<String>()
         let availablePacks = registry.availablePacks
 
-        // Warn about unregistered pack IDs from --pack filter
-        if packFilter != nil {
-            let availableIDs = Set(availablePacks.map(\.identifier))
-            for scope in scopes {
-                for id in scope.packIDs.sorted() where !availableIDs.contains(id) {
-                    output.warn("Pack \"\(id)\" is not registered \u{2014} no checks will be run for it")
-                }
+        // Warn for pack IDs that produced no pack — unconditional, not just under `--pack`: the
+        // scope line above lists the ID either way, so a pack that failed to load would otherwise
+        // be skipped in silence. The cause is not determined here, so the message names both.
+        let availableIDs = registry.availablePackIDs
+        for scope in scopes {
+            for id in scope.packIDs.sorted() where !availableIDs.contains(id) {
+                output.warn("Pack \"\(id)\" is not registered or failed to load \u{2014} no checks will be run for it")
             }
         }
 

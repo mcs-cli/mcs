@@ -200,6 +200,106 @@ struct PackUpdaterTests {
         }
     }
 
+    /// A manifest whose only trustable content is `configureProject.script`, plus that script —
+    /// one file-backed item and no inline ones, so the trust map has exactly one expected key.
+    private func pushConfigureScript(fixture: Fixture, body: String) throws {
+        try pushFiles(fixture: fixture, files: [
+            "scripts/configure.sh": body,
+            "techpack.yaml": """
+            schemaVersion: 1
+            identifier: test-pack
+            displayName: Test Pack
+            description: A test pack
+            configureProject:
+              script: scripts/configure.sh
+            """,
+        ])
+    }
+
+    @Test("update drops a trusted hash for a script the manifest no longer references")
+    func updatePrunesOrphanedHash() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        // Nothing new is detected and no prompt fires, yet the merge-only update kept the key
+        // and `verifyTrust` then refused the pack over a file it no longer ships.
+        let entry = makeEntry(
+            commitSHA: fix.initialSHA,
+            trustedScriptHashes: ["hooks/legacy.sh": "abc123"]
+        )
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        _ = try pushNewCommit(fixture: fix)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(updatedEntry, _) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(updatedEntry.trustedScriptHashes.isEmpty)
+    }
+
+    @Test("prompts for re-trust at an unchanged commit when the trust map does not cover disk")
+    func staleTrustAtSameCommitPrompts() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        // Registry entry sits at the same commit as the checkout with nothing recorded for the
+        // script — the state a declined trust prompt plus a baseline advance produces.
+        try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
+            Issue.record("Expected the fetch to advance the checkout")
+            return
+        }
+
+        let entry = makeEntry(commitSHA: fetched.commitSHA)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        // Reaching the prompt is the assertion: it declines non-interactively, where it used to
+        // short-circuit to .alreadyUpToDate and leave the pack unrecoverable.
+        guard case .trustDeclined = result else {
+            Issue.record("Expected .trustDeclined, got \(result)")
+            return
+        }
+    }
+
+    @Test("stays alreadyUpToDate at an unchanged commit when the trust map covers disk")
+    func currentTrustAtSameCommitIsUpToDate() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
+            Issue.record("Expected the fetch to advance the checkout")
+            return
+        }
+
+        let scriptHash = try FileHasher.sha256(
+            of: packPath.appendingPathComponent("scripts/configure.sh")
+        )
+        let entry = makeEntry(
+            commitSHA: fetched.commitSHA,
+            trustedScriptHashes: ["scripts/configure.sh": scriptHash]
+        )
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        // A fully-trusted pack must not be re-prompted on every update run.
+        guard case .alreadyUpToDate = result else {
+            Issue.record("Expected .alreadyUpToDate, got \(result)")
+            return
+        }
+    }
+
     @Test("returns updated when remote has a new commit (no new scripts)")
     func normalUpdateNoScripts() throws {
         let fix = try makeFixture()

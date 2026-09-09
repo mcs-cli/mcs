@@ -343,8 +343,24 @@ struct UpdateCommand: LockedCommand {
     ) throws {
         output.header(run.label)
 
+        // A pack that was skipped or failed to load makes the *whole* scope skip: `configure`
+        // treats its pack list as the complete desired state, so subtracting one silently
+        // unconfigures it (#382).
+        let notUpdated = run.configuredPackIDs.intersection(skippedPackIDs).sorted()
+        let unloadable = registry.unloadableConfiguredPacks(configured: run.configuredPackIDs)
+        if !notUpdated.isEmpty || !unloadable.isEmpty {
+            for identifier in notUpdated {
+                output.warn("  \(identifier): update did not complete — re-run 'mcs update'.")
+            }
+            for identifier in unloadable {
+                output.warn("  \(identifier): failed to load — run 'mcs pack update \(identifier)'.")
+            }
+            output.warn("  Skipping re-apply for this scope so no artifacts are removed.")
+            return
+        }
+
         var packs: [any TechPack] = []
-        for packID in run.configuredPackIDs.subtracting(skippedPackIDs).sorted() {
+        for packID in run.configuredPackIDs.sorted() {
             guard let pack = registry.pack(for: packID) else {
                 output.warn("  \(packID): tracked in state but missing from pack registry — skipping. Run 'mcs pack add' to restore it.")
                 continue

@@ -1,15 +1,9 @@
-import CryptoKit
 import Foundation
 
 /// Manages the trust lifecycle for external packs — analyzing executable content,
 /// prompting for user approval, and verifying script integrity before execution.
 struct PackTrustManager {
     let output: CLIOutput
-
-    struct TrustDecision {
-        let approved: Bool
-        let scriptHashes: [String: String] // relativePath -> SHA-256
-    }
 
     // MARK: - Analyze
 
@@ -134,14 +128,17 @@ struct PackTrustManager {
     // MARK: - Prompt
 
     /// Display all trustable items and prompt the user for approval.
-    /// If the pack has no executable content, trust is implicit (returns approved with empty hashes).
+    /// A pack with no executable content is trusted implicitly.
+    ///
+    /// Callers that need the approved hashes compute them from the same items via
+    /// `computeScriptHashes` — returning them here produced a map the update path discarded.
     func promptForTrust(
         manifest: ExternalPackManifest,
-        packPath: URL,
+        packPath _: URL,
         items: [TrustableItem]
-    ) throws -> TrustDecision {
+    ) -> Bool {
         if items.isEmpty {
-            return TrustDecision(approved: true, scriptHashes: [:])
+            return true
         }
 
         output.plain("")
@@ -219,90 +216,84 @@ struct PackTrustManager {
         }
 
         output.plain("")
-        let approved = output.askYesNo("Trust this pack?", default: false)
-
-        if approved {
-            let hashes = try computeScriptHashes(items: items, packPath: packPath)
-            return TrustDecision(approved: true, scriptHashes: hashes)
-        }
-
-        return TrustDecision(approved: false, scriptHashes: [:])
+        return output.askYesNo("Trust this pack?", default: false)
     }
 
     // MARK: - Verify
 
-    /// Verify that trusted scripts haven't changed since they were approved.
-    /// Returns relative paths of scripts that have been modified.
-    func verifyTrust(
-        trustedHashes: [String: String],
-        packPath: URL
-    ) -> [String] {
-        var modified: [String] = []
-        let fm = FileManager.default
-
-        for (relativePath, expectedHash) in trustedHashes {
-            // Skip synthetic keys for inline commands (they have no file on disk)
-            if relativePath.hasPrefix("inline:") {
-                continue
-            }
-
-            let fileURL = packPath.appendingPathComponent(relativePath)
-
-            guard fm.fileExists(atPath: fileURL.path) else {
-                modified.append(relativePath)
-                continue
-            }
-
-            do {
-                let currentHash = try FileHasher.sha256(of: fileURL)
-                if currentHash != expectedHash {
-                    modified.append(relativePath)
-                }
-            } catch {
-                // I/O error is distinct from tampering — surface the cause
-                modified.append("\(relativePath) (unreadable: \(error.localizedDescription))")
-            }
-        }
-
-        return modified.sorted()
+    /// Why a trustable item fails to match the approved set, or `nil` when it verifies.
+    enum TrustMismatch: Equatable {
+        case neverTrusted // No stored hash for this item
+        case mismatched // Content disagrees with the stored hash, or the file is gone
+        case unreadable(String) // Present, but could not be hashed
     }
 
-    /// Check if an update introduces new scripts not in the trusted set.
-    /// Returns items for scripts that are new or have changed.
-    func detectNewScripts(
-        currentHashes: [String: String],
-        updatedPackPath: URL,
+    /// Scripts the pack will execute that the user has not approved, keyed by pack-relative path.
+    ///
+    /// Walks forward from the manifest's analyzed items, never over the stored hash keys: a key
+    /// left behind for a file the pack no longer references says nothing about what will execute,
+    /// and a referenced script with *no* stored hash must not go unchecked.
+    ///
+    /// Inline items are exempt as a **bounded migration**, not because they are safe: a trust map
+    /// written before inline hashing has no synthetic keys, so enforcing them would refuse every
+    /// such pack at load. The first `mcs pack update` writes a complete map, after which they
+    /// could be enforced. Until then an inline `shell:` edited in the local checkout is not caught
+    /// here.
+    func verifyTrust(
+        trustedHashes: [String: String],
+        packPath: URL,
         manifest: ExternalPackManifest
-    ) throws -> [TrustableItem] {
-        let allItems = try analyzeScripts(manifest: manifest, packPath: updatedPackPath)
+    ) throws -> [String: TrustMismatch] {
+        var offenders: [String: TrustMismatch] = [:]
 
-        // Filter to items that are new or changed compared to trusted hashes
-        return allItems.filter { item in
-            guard let relativePath = item.relativePath else {
-                // Inline command — check synthetic hash against trusted set
-                let contentData = Data(item.content.utf8)
-                let hash = SHA256.hash(data: contentData)
-                    .map { String(format: "%02x", $0) }.joined()
-                let syntheticKey = Self.syntheticKey(for: item)
-                if let trustedHash = currentHashes[syntheticKey] {
-                    return trustedHash != hash // Changed since last trust
-                }
+        for item in try analyzeScripts(manifest: manifest, packPath: packPath) {
+            guard let relativePath = item.relativePath,
+                  let reason = mismatch(for: item, against: trustedHashes, packPath: packPath)
+            else { continue }
+            offenders[relativePath] = reason
+        }
+
+        return offenders
+    }
+
+    /// Filter analyzed items down to those needing user approval.
+    func newOrChanged(
+        in items: [TrustableItem],
+        against currentHashes: [String: String],
+        packPath: URL
+    ) -> [TrustableItem] {
+        items.filter { mismatch(for: $0, against: currentHashes, packPath: packPath) != nil }
+    }
+
+    /// The one comparison rule behind both load-time verification and update-time change detection.
+    private func mismatch(
+        for item: TrustableItem,
+        against trustedHashes: [String: String],
+        packPath: URL
+    ) -> TrustMismatch? {
+        guard let relativePath = item.relativePath else {
+            guard let trustedHash = trustedHashes[Self.syntheticKey(for: item)] else {
                 // Never trusted before. An item that merely restates the behaviour a pack already
                 // had needs no prompt — that is how packs predating hook-interpreter tracking stay
                 // quiet on their first update. Anything else is genuinely new.
-                return !item.representsDefaultBehavior
+                return item.representsDefaultBehavior ? nil : .neverTrusted
             }
-            guard let trustedHash = currentHashes[relativePath] else {
-                return true // New script not in trusted set
-            }
-            let fileURL = updatedPackPath.appendingPathComponent(relativePath)
-            let hash: String
-            do {
-                hash = try FileHasher.sha256(of: fileURL)
-            } catch {
-                return true // Can't verify — flag for re-trust
-            }
-            return hash != trustedHash // Changed since last trust
+            return trustedHash == Self.contentHash(of: item.content) ? nil : .mismatched
+        }
+
+        guard let trustedHash = trustedHashes[relativePath] else {
+            return .neverTrusted
+        }
+        // A deleted file reads as `.mismatched` rather than `.unreadable`, so the message stays
+        // about trust instead of quoting a "no such file" error.
+        let fileURL = packPath.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return .mismatched
+        }
+        do {
+            return try FileHasher.sha256(of: fileURL) == trustedHash ? nil : .mismatched
+        } catch {
+            return .unreadable(error.localizedDescription)
         }
     }
 
@@ -313,10 +304,12 @@ struct PackTrustManager {
     /// Note: Swift's `String.hashValue` is randomized per-process (SE-0206) and must not
     /// be used for persistent keys.
     private static func syntheticKey(for item: TrustableItem) -> String {
-        let descData = Data(item.description.utf8)
-        let descHash = SHA256.hash(data: descData)
-            .map { String(format: "%02x", $0) }.joined()
-        return "inline:\(descHash)"
+        "inline:\(contentHash(of: item.description))"
+    }
+
+    /// Hex-encoded SHA-256 of a string.
+    private static func contentHash(of content: String) -> String {
+        FileHasher.sha256(data: Data(content.utf8))
     }
 
     private func readFileContent(at url: URL, fallback: String) throws -> String {
@@ -398,7 +391,6 @@ struct PackTrustManager {
         return items
     }
 
-    /// Compute SHA-256 hashes for all trustable items — both script files and inline commands.
     /// Hashes for a set of trustable items — file hash by relative path, content hash under a
     /// synthetic key for inline items.
     ///
@@ -419,11 +411,7 @@ struct PackTrustManager {
                 }
             } else {
                 // Inline command — hash the content with a deterministic synthetic key
-                let contentData = Data(item.content.utf8)
-                let hash = SHA256.hash(data: contentData)
-                    .map { String(format: "%02x", $0) }.joined()
-                let syntheticKey = Self.syntheticKey(for: item)
-                hashes[syntheticKey] = hash
+                hashes[Self.syntheticKey(for: item)] = Self.contentHash(of: item.content)
             }
         }
 

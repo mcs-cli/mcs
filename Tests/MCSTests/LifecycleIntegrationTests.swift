@@ -2328,6 +2328,79 @@ struct UpdateReapplyLifecycleTests {
         #expect(try bed.globalState().configuredPacks.contains("shared-pack"))
         #expect(FileManager.default.fileExists(atPath: projectHook.path))
     }
+
+    @Test("A skipped pack makes the whole scope skip re-apply instead of unconfiguring it")
+    func skippedPackIsNotUnconfigured() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let sourceA = try bed.makeHookSource(name: "a.sh")
+        let sourceB = try bed.makeHookSource(name: "b.sh")
+        // Registered hooks, so the settings-recomposition assertion below is not vacuous:
+        // without a `hookRegistration` no settings entry is ever written to compare against.
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [bed.hookComponent(
+                pack: "pack-a", id: "a", source: sourceA, destination: "a.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [bed.hookComponent(
+                pack: "pack-b", id: "b", source: sourceB, destination: "b.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+
+        // Two packs in one scope: with a single pack the "no packs to refresh" guard masks the bug.
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [packA, packB], confirmRemovals: false)
+
+        let hookA = bed.project.appendingPathComponent(".claude/hooks/pack-a/a.sh")
+        let hookB = bed.project.appendingPathComponent(".claude/hooks/pack-b/b.sh")
+        #expect(FileManager.default.fileExists(atPath: hookA.path))
+        #expect(FileManager.default.fileExists(atPath: hookB.path))
+
+        // Deleting A's hook distinguishes "scope was skipped" from "scope converged": a re-apply
+        // that ran would restore it, since `copyPackFile` is convergent.
+        try FileManager.default.removeItem(at: hookA)
+
+        let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))
+            .resolve(filter: .projectOnly, projectRoot: bed.project)
+        #expect(runs.count == 1)
+
+        for run in runs {
+            try UpdateCommand.reapplyScope(
+                run,
+                skippedPackIDs: ["pack-b"],
+                registry: registry,
+                dryRun: false,
+                env: bed.env,
+                shell: ShellRunner(environment: bed.env),
+                output: CLIOutput(colorsEnabled: false),
+                claudeCLI: bed.mockCLI
+            )
+        }
+
+        // Subtracting B from the desired state used to unconfigure it with no prompt, so a
+        // declined trust prompt or a network failure uninstalled the pack (#382).
+        #expect(try bed.projectState().configuredPacks.contains("pack-b"))
+        #expect(FileManager.default.fileExists(atPath: hookB.path))
+
+        // `configure` recomposes hooks from the pack list it is handed, so excluding B would
+        // strip the entry that invokes the hook it kept.
+        let settings = try Settings.load(from: bed.settingsLocalPath)
+        let hookCommands = (settings.hooks ?? [:]).values
+            .flatMap(\.self).flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        #expect(hookCommands.contains(bed.projectHookCommand("pack-b/b.sh")))
+
+        // The accepted cost of skipping the scope: A is not refreshed this run.
+        #expect(!FileManager.default.fileExists(atPath: hookA.path))
+    }
 }
 
 // MARK: - Scenario: Hook Interpreters

@@ -15,6 +15,13 @@ struct ExternalPackLoader {
         case incompatibleVersion(pack: String, required: String, current: String)
         case localCheckoutMissing(identifier: String, path: String)
         case referencedFilesMissing(identifier: String, files: [String])
+        /// Scripts the pack would execute do not match what the user approved. A distinct case
+        /// because `loadAll` routes it to a security warning — matching on the message text
+        /// instead made that routing depend on the wording staying intact.
+        case trustVerificationFailed(
+            identifier: String,
+            offenders: [String: PackTrustManager.TrustMismatch]
+        )
 
         var errorDescription: String? {
             switch self {
@@ -28,6 +35,16 @@ struct ExternalPackLoader {
                 "Pack '\(id)' checkout missing at '\(path)'"
             case let .referencedFilesMissing(id, files):
                 "Pack '\(id)' references missing files: \(files.joined(separator: ", "))"
+            case let .trustVerificationFailed(id, offenders):
+                "Pack '\(id)' has unapproved scripts: "
+                    + offenders.keys.sorted().map { path in
+                        switch offenders[path] {
+                        case .neverTrusted: "\(path) (never trusted)"
+                        case let .unreadable(reason): "\(path) (unreadable: \(reason))"
+                        default: "\(path) (modified)"
+                        }
+                    }.joined(separator: ", ")
+                    + ". Run 'mcs pack update \(id)' to re-trust."
             }
         }
     }
@@ -193,8 +210,8 @@ struct ExternalPackLoader {
 
     /// Check if a load error is a trust verification failure.
     private func isTrustFailure(_ error: LoadError) -> Bool {
-        if case let .invalidManifest(_, reason) = error {
-            return reason.contains("Trusted scripts modified")
+        if case .trustVerificationFailed = error {
+            return true
         }
         return false
     }
@@ -227,15 +244,17 @@ struct ExternalPackLoader {
         // Skip trust verification for local packs — scripts change during development
         if !entry.isLocalPack {
             let trustManager = PackTrustManager(output: CLIOutput())
-            let modified = trustManager.verifyTrust(
+            // Analyzing reads script contents, so an unreadable script surfaces as a plain load
+            // failure rather than the security warning below.
+            let offenders = try trustManager.verifyTrust(
                 trustedHashes: entry.trustedScriptHashes,
-                packPath: packPath
+                packPath: packPath,
+                manifest: manifest
             )
-            if !modified.isEmpty {
-                throw LoadError.invalidManifest(
+            if !offenders.isEmpty {
+                throw LoadError.trustVerificationFailed(
                     identifier: entry.identifier,
-                    reason:
-                    "Trusted scripts modified: \(modified.joined(separator: ", ")). Run 'mcs pack update \(entry.identifier)' to re-trust."
+                    offenders: offenders
                 )
             }
         }
