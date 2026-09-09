@@ -4,6 +4,14 @@
 What does this PR do and why? One to three sentences.
 -->
 
+Closes #
+
+<!--
+GitHub auto-closes an issue only on a `Closes #N` reference in the body — the
+`ISSUE-N` prefix in the title does nothing on its own. Delete this line if the
+PR closes no issue.
+-->
+
 ## Changes
 
 <!--
