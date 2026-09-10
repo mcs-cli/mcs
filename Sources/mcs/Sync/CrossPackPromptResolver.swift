@@ -3,8 +3,9 @@ import Foundation
 /// Collects prompt definitions from multiple packs, identifies shared keys,
 /// and executes shared prompts once with a combined display showing each pack's label.
 ///
-/// Only `input` and `select` prompt types are eligible for deduplication.
-/// `script` and `fileDetect` types are pack-specific and always run per-pack.
+/// Only `input` and `select` prompt types are eligible for deduplication; `script` and
+/// `fileDetect` are pack-specific and always resolve per-pack. Per-pack is not per-sync:
+/// a `fileDetect` prior that `partitionDeclaredPrompts` accepts skips the executor entirely.
 enum CrossPackPromptResolver {
     /// A prompt definition paired with the pack that declares it.
     struct PackPromptInfo {

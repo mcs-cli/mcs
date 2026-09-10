@@ -453,7 +453,7 @@ See the [Schema Reference](techpack-schema.md#the-ignore-field) for full semanti
 
 Prompts gather values from the user during `mcs sync`. These values are available as `__KEY__` placeholders in templates, settings files, MCP server configs, and copyPackFile artifacts — and as `MCS_RESOLVED_KEY` environment variables in scripts.
 
-When multiple packs declare prompts with the same `key` (e.g., both a core pack and an iOS pack want `BRANCH_PREFIX`), the user is asked **once** with a combined display. Only `input` and `select` types are deduplicated — `fileDetect` and `script` always run per-pack.
+When multiple packs declare prompts with the same `key` (e.g., both a core pack and an iOS pack want `BRANCH_PREFIX`), the user is asked **once** with a combined display. Only `input` and `select` types are deduplicated — `fileDetect` and `script` always resolve per-pack. A `fileDetect` answer is still reused on later syncs while the scan finds the same file; `script` re-runs every time.
 
 ```yaml
 prompts:

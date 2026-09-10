@@ -442,7 +442,7 @@ prompts:
 
 | Type | Behavior |
 |------|----------|
-| `fileDetect` | Scans the project directory for files matching the glob pattern(s). If one match is found, it's used automatically. If multiple, the user picks one. |
+| `fileDetect` | Scans the project directory for files matching the glob pattern(s). If one match is found, it's used automatically. If multiple, the user picks one — and on a later sync that choice is reused while the scan still finds it. |
 | `input` | Free-text input with optional default value. |
 | `select` | Choose from a predefined list of options. |
 | `script` | Runs a shell command and uses its stdout as the value. |
@@ -451,7 +451,7 @@ prompts:
 
 When multiple packs declare prompts with the same `key`, `mcs` detects the overlap and asks the user **once** with a combined display showing each pack's label. The resolved value is shared across all packs.
 
-Only `input` and `select` prompts are eligible for deduplication. `fileDetect` and `script` prompts are too pack-specific and always run per-pack.
+Only `input` and `select` prompts are eligible for deduplication. `fileDetect` and `script` prompts are too pack-specific and always resolve per-pack. Deduplication is separate from reuse: a `fileDetect` answer stored by an earlier sync is reused while the current scan still finds that file, so the picker does not reappear on every run. `script` prompts re-execute every sync.
 
 For shared `select` prompts, options are merged across packs (deduplicated by value, first occurrence wins). If one pack uses `input` and another uses `select` for the same key, the prompt falls back to `input` with a warning.
 
