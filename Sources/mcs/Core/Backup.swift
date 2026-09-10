@@ -28,12 +28,13 @@ struct Backup {
     }
 
     /// Find all backup files matching `*.backup.*` under the given directory.
-    static func findBackups(in directory: URL) -> [URL] {
+    /// Pass `recursive: false` to look only at the directory's own entries.
+    static func findBackups(in directory: URL, recursive: Bool = true) -> [URL] {
         let fm = FileManager.default
         guard let enumerator = fm.enumerator(
             at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: []
+            includingPropertiesForKeys: nil,
+            options: recursive ? [] : [.skipsSubdirectoryDescendants]
         ) else {
             return []
         }
@@ -41,6 +42,10 @@ struct Backup {
         var backups: [URL] = []
         for case let url as URL in enumerator
             where url.lastPathComponent.contains(".backup.") {
+            // A directory can carry the pattern too, and deleting one takes its contents with it.
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else { continue }
             backups.append(url)
         }
         return backups

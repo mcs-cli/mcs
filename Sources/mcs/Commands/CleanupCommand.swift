@@ -7,8 +7,14 @@ struct CleanupCommand: LockedCommand {
         abstract: "Find and delete backup files"
     )
 
-    @Flag(name: .long, help: "Delete backups without confirmation")
+    @Flag(name: .shortAndLong, help: "Delete backups without confirmation")
     var force: Bool = false
+
+    @Flag(
+        name: [.short, .customLong("all-projects")],
+        help: "Also scan every project tracked in the index (machine-wide)"
+    )
+    var allProjects: Bool = false
 
     func perform() throws {
         let env = Environment()
@@ -18,56 +24,59 @@ struct CleanupCommand: LockedCommand {
 
         output.header("Backup Cleanup")
 
-        // Scan directories for backups
-        var allBackups: [URL] = []
+        let scanner = BackupScanner(
+            environment: env,
+            currentDirectory: URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        )
+        let groups = scanner.scan(includeTrackedProjects: allProjects, output: output)
+        let backups = groups.flatMap(\.backups)
 
-        // ~/.claude/
-        allBackups.append(contentsOf: Backup.findBackups(in: env.claudeDirectory))
-
-        // Current directory (if different from home)
-        let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        if cwd.path != env.homeDirectory.path {
-            allBackups.append(contentsOf: Backup.findBackups(in: cwd))
-        }
-
-        // Deduplicate by path
-        var seen = Set<String>()
-        let unique = allBackups.filter { url in
-            let path = url.standardizedFileURL.path
-            if seen.contains(path) { return false }
-            seen.insert(path)
-            return true
-        }.sorted { $0.path < $1.path }
-
-        guard !unique.isEmpty else {
+        guard !backups.isEmpty else {
             output.success("No backup files found.")
             return
         }
 
-        output.info("Found \(unique.count) backup file(s):")
-        let fm = FileManager.default
-        for backup in unique {
-            let attrs = try? fm.attributesOfItem(atPath: backup.path)
-            let size = (attrs?[.size] as? Int) ?? 0
-            let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
-            output.plain("  \(backup.lastPathComponent) (\(sizeStr))")
+        output.info("Found \(backups.count) backup file(s):")
+        for group in groups {
+            output.plain("")
+            output.plain("  \(label(for: group))")
+            for backup in group.backups {
+                let name = PathContainment.relativePath(of: backup.path, within: group.root.path)
+                output.plain("    \(name) (\(formattedSize(of: backup)))")
+            }
         }
 
         output.plain("")
 
-        if force || output.askYesNo("Delete all \(unique.count) backup file(s)?", default: false) {
-            let failures = Backup.deleteBackups(unique)
-            let deleted = unique.count - failures.count
-            if failures.isEmpty {
-                output.success("Deleted \(deleted) backup file(s).")
-            } else {
-                output.warn("Deleted \(deleted) backup(s), \(failures.count) could not be deleted:")
-                for failure in failures {
-                    output.warn("  \(failure.url.lastPathComponent): \(failure.error.localizedDescription)")
-                }
-            }
-        } else {
+        guard force || output.askYesNo("Delete all \(backups.count) backup file(s)?", default: false) else {
             output.info("No backups deleted.")
+            return
         }
+
+        let failures = Backup.deleteBackups(backups)
+        let deleted = backups.count - failures.count
+        if failures.isEmpty {
+            output.success("Deleted \(deleted) backup file(s).")
+        } else {
+            output.warn("Deleted \(deleted) backup(s), \(failures.count) could not be deleted:")
+            for failure in failures {
+                output.warn("  \(failure.url.path): \(failure.error.localizedDescription)")
+            }
+        }
+    }
+
+    private func label(for group: BackupScanner.Group) -> String {
+        let kind = switch group.kind {
+        case .global: "Global"
+        case .currentDirectory: "Current directory"
+        case .project: "Project"
+        }
+        return "\(kind) (\(group.root.path))"
+    }
+
+    private func formattedSize(of file: URL) -> String {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
+        let size = (attrs?[.size] as? Int) ?? 0
+        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
     }
 }

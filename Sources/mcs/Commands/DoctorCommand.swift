@@ -7,16 +7,16 @@ struct DoctorCommand: LockedCommand {
         abstract: "Check installation health and diagnose issues"
     )
 
-    @Flag(name: .long, help: "Attempt to automatically fix issues")
+    @Flag(name: .shortAndLong, help: "Attempt to automatically fix issues")
     var fix = false
 
     @Flag(name: .shortAndLong, help: "Skip confirmation prompt before applying fixes")
     var yes = false
 
-    @Option(name: .long, help: "Only check a specific tech pack (e.g. ios)")
+    @Option(name: .shortAndLong, help: "Only check a specific tech pack (e.g. ios)")
     var pack: String?
 
-    @Flag(name: .long, help: "Check globally-configured packs only")
+    @Flag(name: .shortAndLong, help: "Check globally-configured packs only")
     var global = false
 
     var skipLock: Bool {

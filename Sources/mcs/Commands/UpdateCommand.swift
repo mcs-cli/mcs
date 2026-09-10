@@ -14,13 +14,16 @@ struct UpdateCommand: LockedCommand {
     @Argument(help: "Path to the project directory (defaults to current directory)")
     var path: String?
 
-    @Flag(name: .long, help: "Only refresh the global scope")
+    @Flag(name: .shortAndLong, help: "Only refresh the global scope")
     var global: Bool = false
 
-    @Flag(name: .long, help: "Only refresh the current project's scope")
+    @Flag(name: .shortAndLong, help: "Only refresh the current project's scope")
     var project: Bool = false
 
-    @Flag(name: .customLong("all-projects"), help: "Refresh every project in the index plus the global scope (fan out machine-wide)")
+    @Flag(
+        name: [.short, .customLong("all-projects")],
+        help: "Refresh every project in the index plus the global scope (fan out machine-wide)"
+    )
     var allProjects: Bool = false
 
     @Flag(name: .long, help: "Show what would change without making any modifications")

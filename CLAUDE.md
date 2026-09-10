@@ -43,6 +43,7 @@ mcs pack update [name]           # Refresh pack registry only (low-level fetch; 
 mcs pack validate [source]       # Validate a tech pack (path, identifier, or current directory)
 mcs cleanup                      # Find and delete backup files
 mcs cleanup --force              # Delete backups without confirmation
+mcs cleanup --all-projects       # Also scan every project tracked in ~/.mcs/projects.yaml
 mcs export <dir>                 # Export current config as a tech pack
 mcs export <dir> --global        # Export global scope (~/.claude/)
 mcs export <dir> --identifier id # Set pack identifier (prompted if omitted)
