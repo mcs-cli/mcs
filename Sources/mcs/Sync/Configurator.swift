@@ -716,7 +716,8 @@ struct Configurator {
     /// Reuses values from the previous sync when safe:
     /// - `input` priors are reused verbatim.
     /// - `select` priors are reused only if the stored value is still a valid option.
-    /// - `script` and `fileDetect` always re-execute (computed / filesystem-dependent).
+    /// - `fileDetect` priors are reused only if this run's scan still finds the stored file.
+    /// - `script` always re-executes (computed, never answered).
     private func resolveAllValues(
         packs: [any TechPack],
         state: inout ProjectState,
@@ -733,12 +734,13 @@ struct Configurator {
             packs: packs, context: initialContext
         )
         let (reusableValues, newDeclaredKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            allDeclaredPrompts, priorValues: priorValues
+            allDeclaredPrompts, priorValues: priorValues, projectPath: initialContext.projectPath
         )
 
         let seedFromPriors = decideSeedStrategy(
             reusableValues: reusableValues,
             newDeclaredKeys: newDeclaredKeys,
+            visibleValueKeys: CrossPackPromptResolver.visibleValueKeys(in: allDeclaredPrompts),
             customize: customize,
             reusePriorValuesSilently: reusePriorValuesSilently
         )
@@ -795,12 +797,14 @@ struct Configurator {
     /// acknowledgement (visible in CI logs, not loud). Interactive with new prompts
     /// added since last sync reuses old values and prompts only for the new ones.
     /// Interactive with only reusable prompts shows the key list (values masked —
-    /// prompts often hold secrets) and gates on a single Y/n.
+    /// prompts often hold secrets, except the `visibleValueKeys` the packs scanned
+    /// off disk) and gates on a single Y/n.
     /// `reusePriorValuesSilently` (set by `mcs update`) collapses the interactive-only
     /// branches into the same silent-reuse path used for non-interactive runs.
     private func decideSeedStrategy(
         reusableValues: [String: String],
         newDeclaredKeys: Set<String>,
+        visibleValueKeys: Set<String>,
         customize: Bool,
         reusePriorValuesSilently: Bool
     ) -> Bool {
@@ -828,9 +832,11 @@ struct Configurator {
         }
 
         output.plain("")
-        output.info("Previously configured keys (values hidden — prompts may hold secrets):")
-        for key in reusableValues.keys.sorted() {
-            output.dimmed("  \(key)")
+        output.info("Previously configured keys (values hidden where they may hold secrets):")
+        for line in ConfiguratorSupport.reusableKeysListing(
+            reusableValues: reusableValues, visibleValueKeys: visibleValueKeys
+        ) {
+            output.dimmed(line)
         }
         return output.askYesNo("Reuse these values?", default: true)
     }

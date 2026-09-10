@@ -307,6 +307,26 @@ struct SyncCommandTests {
         #expect(lines[1] == "    Backend → /dev/b")
         #expect(lines[2] == "    iOS → /dev/a")
     }
+
+    // MARK: - Reuse gate listing
+
+    @Test("Reuse listing shows scan-derived values and redacts everything else")
+    func reuseListingRedactsUserEnteredValues() {
+        let lines = ConfiguratorSupport.reusableKeysListing(
+            reusableValues: ["API_TOKEN": "sk-secret", "PROJECT": "App.xcworkspace"],
+            visibleValueKeys: ["PROJECT"]
+        )
+        #expect(lines == ["  API_TOKEN", "  PROJECT: App.xcworkspace"])
+    }
+
+    @Test("Reuse listing redacts every value when nothing is scan-derived")
+    func reuseListingRedactsAllByDefault() {
+        let lines = ConfiguratorSupport.reusableKeysListing(
+            reusableValues: ["B_KEY": "two", "A_KEY": "one"],
+            visibleValueKeys: []
+        )
+        #expect(lines == ["  A_KEY", "  B_KEY"])
+    }
 }
 
 // MARK: - Guard: cwd inside ~/.claude detection

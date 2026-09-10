@@ -244,6 +244,10 @@ struct MockPromptTechPack: TechPack {
             if prompt.type == .select, let prior, let options = prompt.options,
                !options.contains(where: { $0.value == prior }) {
                 resolved[prompt.key] = defaultAnswer(prompt.key)
+            } else if prompt.type == .fileDetect {
+                // The real executor re-scans and asks when a fileDetect key reaches it,
+                // so reaching this branch at all means the prior was not reused.
+                resolved[prompt.key] = defaultAnswer(prompt.key)
             } else {
                 resolved[prompt.key] = prior ?? defaultAnswer(prompt.key)
             }

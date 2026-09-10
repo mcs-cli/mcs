@@ -609,6 +609,25 @@ struct ScannerExtensionTests {
 // MARK: - partitionDeclaredPrompts
 
 struct PartitionDeclaredPromptsTests {
+    /// Scan directory for prompt sets that declare no `fileDetect`, so nothing is ever scanned.
+    private let unscannedPath = FileManager.default.temporaryDirectory
+
+    static let projectPrompt = PromptDefinition(
+        key: "PROJECT", type: .fileDetect,
+        label: nil, defaultValue: nil, options: nil,
+        detectPatterns: ["*.xcodeproj", "*.xcworkspace"], scriptCommand: nil
+    )
+
+    private func makeDetectDir(files: [String]) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-partition-detect-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for file in files {
+            try "".write(to: dir.appendingPathComponent(file), atomically: true, encoding: .utf8)
+        }
+        return dir
+    }
+
     @Test("partition: input prompt with prior becomes reusable")
     func partitionInputPriorReusable() {
         let prompt = PromptDefinition(
@@ -617,7 +636,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["BRANCH_PREFIX": "bruno"]
+            [prompt], priorValues: ["BRANCH_PREFIX": "bruno"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["BRANCH_PREFIX": "bruno"])
         #expect(newKeys.isEmpty)
@@ -631,7 +651,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: [:]
+            [prompt], priorValues: [:],
+            projectPath: unscannedPath
         )
         #expect(reusable.isEmpty)
         #expect(newKeys == ["NEW_KEY"])
@@ -649,7 +670,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["LOG_LEVEL": "debug"]
+            [prompt], priorValues: ["LOG_LEVEL": "debug"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["LOG_LEVEL": "debug"])
         #expect(newKeys.isEmpty)
@@ -667,7 +689,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["LOG_LEVEL": "trace-removed"]
+            [prompt], priorValues: ["LOG_LEVEL": "trace-removed"],
+            projectPath: unscannedPath
         )
         #expect(reusable.isEmpty)
         #expect(newKeys == ["LOG_LEVEL"])
@@ -688,7 +711,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [fromPackA, fromPackB], priorValues: ["REGION": "eu"]
+            [fromPackA, fromPackB], priorValues: ["REGION": "eu"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["REGION": "eu"])
         #expect(newKeys.isEmpty)
@@ -703,7 +727,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["FREEFORM": "anything"]
+            [prompt], priorValues: ["FREEFORM": "anything"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["FREEFORM": "anything"])
         #expect(newKeys.isEmpty)
@@ -718,7 +743,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, _) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["FREEFORM": "anything"]
+            [prompt], priorValues: ["FREEFORM": "anything"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["FREEFORM": "anything"])
     }
@@ -740,7 +766,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [constrained, unconstrained], priorValues: ["REGION": "zz"]
+            [constrained, unconstrained], priorValues: ["REGION": "zz"],
+            projectPath: unscannedPath
         )
         #expect(reusable.isEmpty)
         #expect(newKeys == ["REGION"])
@@ -761,7 +788,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, _) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [constrained, unconstrained], priorValues: ["REGION": "us"]
+            [constrained, unconstrained], priorValues: ["REGION": "us"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["REGION": "us"])
     }
@@ -799,7 +827,8 @@ struct PartitionDeclaredPromptsTests {
 
         // Downstream partition sees both declarations → "eu" from pack B validates.
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            collected, priorValues: ["REGION": "eu"]
+            collected, priorValues: ["REGION": "eu"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["REGION": "eu"])
         #expect(newKeys.isEmpty)
@@ -813,24 +842,84 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: "echo 1.0"
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["VERSION": "0.9"]
+            [prompt], priorValues: ["VERSION": "0.9"],
+            projectPath: unscannedPath
         )
         #expect(reusable.isEmpty)
         #expect(newKeys.isEmpty)
     }
 
-    @Test("partition: fileDetect prompt is neither reusable nor newDeclared")
-    func partitionFileDetectExcluded() {
-        let prompt = PromptDefinition(
-            key: "PROJECT", type: .fileDetect,
+    @Test("partition: fileDetect prior still on disk is reusable")
+    func partitionFileDetectPriorStillDetected() throws {
+        let dir = try makeDetectDir(files: ["App.xcodeproj", "App.xcworkspace"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "App.xcworkspace"], projectPath: dir
+        )
+        #expect(reusable == ["PROJECT": "App.xcworkspace"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: fileDetect prior no longer detected becomes newDeclared")
+    func partitionFileDetectPriorGone() throws {
+        let dir = try makeDetectDir(files: ["Renamed.xcodeproj"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "App.xcworkspace"], projectPath: dir
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["PROJECT"])
+    }
+
+    @Test("partition: fileDetect prior in an empty directory becomes newDeclared")
+    func partitionFileDetectEmptyDirectory() throws {
+        let dir = try makeDetectDir(files: [])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "App.xcworkspace"], projectPath: dir
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["PROJECT"])
+    }
+
+    @Test("partition: fileDetect declared as input by another pack keeps verbatim reuse")
+    func partitionFileDetectMixedWithInput() throws {
+        let dir = try makeDetectDir(files: ["Other.xcodeproj"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let asInput = PromptDefinition(
+            key: "PROJECT", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt, asInput],
+            priorValues: ["PROJECT": "App.xcworkspace"],
+            projectPath: dir
+        )
+        #expect(reusable == ["PROJECT": "App.xcworkspace"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("visibleValueKeys covers scan-resolved keys and excludes mixed declarations")
+    func visibleValueKeysPartitionByDeclaration() {
+        let mixed = PromptDefinition(
+            key: "SHARED", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let mixedDetect = PromptDefinition(
+            key: "SHARED", type: .fileDetect,
             label: nil, defaultValue: nil, options: nil,
             detectPatterns: ["*.xcodeproj"], scriptCommand: nil
         )
-        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [prompt], priorValues: ["PROJECT": "App.xcodeproj"]
+        let keys = CrossPackPromptResolver.visibleValueKeys(
+            in: [Self.projectPrompt, mixed, mixedDetect]
         )
-        #expect(reusable.isEmpty)
-        #expect(newKeys.isEmpty)
+        #expect(keys == ["PROJECT"])
     }
 
     @Test("partition: type conflict falls back to input reuse semantics")
@@ -847,7 +936,8 @@ struct PartitionDeclaredPromptsTests {
             detectPatterns: nil, scriptCommand: nil
         )
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            [asInput, asSelect], priorValues: ["SHARED": "anything"]
+            [asInput, asSelect], priorValues: ["SHARED": "anything"],
+            projectPath: unscannedPath
         )
         #expect(reusable == ["SHARED": "anything"])
         #expect(newKeys.isEmpty)

@@ -69,6 +69,23 @@ enum ConfiguratorSupport {
             ]
     }
 
+    /// The reuse gate's per-key listing, one line per key, sorted.
+    ///
+    /// Values stay hidden unless the key is in `visibleValueKeys`: prompts commonly hold MCP
+    /// credentials, and the gate is printed to a terminal the user may be sharing. Pure so the
+    /// redaction itself is testable — `CLIOutput` writes straight to stdout with no capture seam.
+    static func reusableKeysListing(
+        reusableValues: [String: String],
+        visibleValueKeys: Set<String>
+    ) -> [String] {
+        reusableValues.keys.sorted().map { key in
+            guard visibleValueKeys.contains(key), let value = reusableValues[key] else {
+                return "  \(key)"
+            }
+            return "  \(key): \(value)"
+        }
+    }
+
     /// Emit `projectDuplicationWarning`, doing nothing outside the global scope.
     ///
     /// The scope gate lives here rather than at each call site: only a global install can create
