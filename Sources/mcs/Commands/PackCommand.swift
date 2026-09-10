@@ -44,10 +44,10 @@ struct AddPack: LockedCommand {
     @Argument(help: "Git URL, GitHub shorthand (user/repo), or local path")
     var source: String
 
-    @Option(name: .long, help: "Git tag, branch, or commit (git packs only)")
+    @Option(name: .shortAndLong, help: "Git tag, branch, or commit (git packs only)")
     var ref: String?
 
-    @Flag(name: .long, help: "Preview pack contents without installing")
+    @Flag(name: .shortAndLong, help: "Preview pack contents without installing")
     var preview: Bool = false
 
     var skipLock: Bool {
@@ -432,7 +432,7 @@ struct RemovePack: LockedCommand {
     @Argument(help: "Pack identifier to remove")
     var identifier: String
 
-    @Flag(name: .long, help: "Skip confirmation prompt")
+    @Flag(name: .shortAndLong, help: "Skip confirmation prompt")
     var force: Bool = false
 
     func perform() throws {

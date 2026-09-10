@@ -10,22 +10,22 @@ struct SyncCommand: LockedCommand {
     @Argument(help: "Path to the project directory (defaults to current directory)")
     var path: String?
 
-    @Option(name: .long, help: "Tech pack to apply (e.g. ios). Can be specified multiple times.")
+    @Option(name: .shortAndLong, help: "Tech pack to apply (e.g. ios). Can be specified multiple times.")
     var pack: [String] = []
 
-    @Flag(name: .long, help: "Apply all registered packs without prompts")
+    @Flag(name: .shortAndLong, help: "Apply all registered packs without prompts")
     var all: Bool = false
 
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
-    @Flag(name: .long, help: "Checkout locked pack versions from mcs.lock.yaml before syncing")
+    @Flag(name: .shortAndLong, help: "Checkout locked pack versions from mcs.lock.yaml before syncing")
     var lock = false
 
-    @Flag(name: .long, help: "Customize which components to include per pack")
+    @Flag(name: .shortAndLong, help: "Customize which components to include per pack")
     var customize = false
 
-    @Flag(name: .long, help: "Install to global scope (MCP servers with user scope, files to ~/.claude/)")
+    @Flag(name: .shortAndLong, help: "Install to global scope (MCP servers with user scope, files to ~/.claude/)")
     var global = false
 
     var skipLock: Bool {

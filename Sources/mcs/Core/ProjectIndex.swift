@@ -28,6 +28,12 @@ struct ProjectIndex {
         var url: URL? {
             isGlobal ? nil : URL(fileURLWithPath: path)
         }
+
+        /// Whether the entry's directory is still on disk. The global sentinel is always present.
+        var directoryExists: Bool {
+            guard let url else { return true }
+            return FileManager.default.fileExists(atPath: url.path)
+        }
     }
 
     struct IndexData: Codable {
@@ -96,20 +102,25 @@ struct ProjectIndex {
         data.projects.filter { $0.packs.contains(packID) }
     }
 
+    /// Project directories still on disk, sorted by path. Excludes the `__global__` sentinel.
+    func existingProjectURLs(in data: IndexData) -> [URL] {
+        data.projects
+            .filter(\.directoryExists)
+            .compactMap(\.url)
+            .map(\.standardizedFileURL)
+            .sorted { $0.path < $1.path }
+    }
+
     /// Remove entries for project directories that no longer exist on disk.
     /// The `__global__` sentinel is never pruned.
     /// Returns the pruned paths for reporting.
     @discardableResult
     func pruneStale(in data: inout IndexData) -> [String] {
-        let fm = FileManager.default
         var pruned: [String] = []
         data.projects.removeAll { entry in
-            guard entry.path != Self.globalSentinel else { return false }
-            if !fm.fileExists(atPath: entry.path) {
-                pruned.append(entry.path)
-                return true
-            }
-            return false
+            guard !entry.directoryExists else { return false }
+            pruned.append(entry.path)
+            return true
         }
         return pruned
     }

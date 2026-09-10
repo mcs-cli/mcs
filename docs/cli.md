@@ -19,12 +19,12 @@ mcs sync --lock                  # Checkout locked versions from mcs.lock.yaml
 | Flag | Description |
 |------|-------------|
 | `[path]` | Project directory (defaults to current directory) |
-| `--pack <name>` | Apply a specific pack non-interactively. Repeatable for multiple packs. |
-| `--all` | Apply all registered packs without interactive selection. |
+| `-p, --pack <name>` | Apply a specific pack non-interactively. Repeatable for multiple packs. |
+| `-a, --all` | Apply all registered packs without interactive selection. |
 | `--dry-run` | Preview changes without writing any files. |
-| `--customize` | Per-pack component selection (deselect individual components). |
-| `--global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
-| `--lock` | Check out the commits pinned in `mcs.lock.yaml`. |
+| `-c, --customize` | Per-pack component selection (deselect individual components). |
+| `-g, --global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
+| `-l, --lock` | Check out the commits pinned in `mcs.lock.yaml`. |
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
 
@@ -43,9 +43,9 @@ mcs update --dry-run             # Preview without making changes
 | Flag | Description |
 |------|-------------|
 | `[path]` | Project directory (defaults to current directory) |
-| `--global` | Only refresh the global scope. Mutually exclusive with `--project` and `--all-projects`. |
-| `--project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
-| `--all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
+| `-g, --global` | Only refresh the global scope. Mutually exclusive with `--project` and `--all-projects`. |
+| `-p, --project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
+| `-a, --all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
 | `--dry-run` | Preview changes without writing any files. |
 
 `mcs update` always refreshes the full configured set of every selected scope. To advance a single pack's registry pointer without applying anywhere, use [`mcs pack update <name>`](#mcs-pack-update-name).
@@ -82,8 +82,8 @@ mcs pack add <url> --preview     # Preview pack contents without installing
 
 | Flag | Description |
 |------|-------------|
-| `--ref <tag>` | Pin to a specific git tag, branch, or commit (git packs only). |
-| `--preview` | Preview the pack's contents without installing. |
+| `-r, --ref <tag>` | Pin to a specific git tag, branch, or commit (git packs only). |
+| `-p, --preview` | Preview the pack's contents without installing. |
 
 Source resolution order: URL schemes → filesystem paths → GitHub shorthand.
 
@@ -95,6 +95,10 @@ Remove a registered pack.
 mcs pack remove <name>           # Remove with confirmation
 mcs pack remove <name> --force   # Remove without confirmation
 ```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip the confirmation prompt. |
 
 Removal is federated: `mcs` discovers all projects using the pack (via the project index) and runs convergence cleanup for each scope.
 
@@ -159,10 +163,10 @@ mcs doctor --global              # Check globally-configured packs only
 
 | Flag | Description |
 |------|-------------|
-| `--fix` | Auto-fix issues where possible (re-add gitignore entries, create missing state files, etc.). |
+| `-f, --fix` | Auto-fix issues where possible (re-add gitignore entries, create missing state files, etc.). |
 | `-y, --yes` | Skip confirmation prompt before applying fixes (use with `--fix`). |
-| `--pack <name>` | Only check a specific pack. |
-| `--global` | Only check globally-configured packs. |
+| `-p, --pack <name>` | Only check a specific pack. |
+| `-g, --global` | Only check globally-configured packs. |
 
 Doctor resolves packs from: explicit `--pack` flag → project `.mcs-project` state → `CLAUDE.local.md` section markers → global manifest.
 
@@ -173,7 +177,18 @@ Find and delete timestamped backup files created during sync.
 ```bash
 mcs cleanup                      # List backups and confirm before deleting
 mcs cleanup --force              # Delete backups without confirmation
+mcs cleanup --all-projects       # Also scan every project tracked in the index
 ```
+
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Delete without confirmation. |
+| `-a, --all-projects` | Also scan every project tracked in `~/.mcs/projects.yaml`. |
+
+Without `--all-projects`, cleanup scans `~/.claude/` and the current directory. With it,
+each tracked project is scanned at its root (top level only) plus `<project>/.claude/` in
+full — the two places sync writes backups. Index entries whose directory no longer exists
+are skipped.
 
 ## `mcs export`
 
@@ -190,9 +205,9 @@ mcs export <dir> --dry-run       # Preview what would be exported
 | Flag | Description |
 |------|-------------|
 | `<dir>` | Output directory for the generated pack. |
-| `--global` | Export global scope (`~/.claude/`) instead of the current project. |
-| `--identifier id` | Set the pack identifier (prompted interactively if omitted). |
-| `--non-interactive` | Include all discovered artifacts without prompting for selection. |
+| `-g, --global` | Export global scope (`~/.claude/`) instead of the current project. |
+| `-i, --identifier id` | Set the pack identifier (prompted interactively if omitted). |
+| `-y, --non-interactive` | Include all discovered artifacts without prompting for selection. |
 | `--dry-run` | Preview what would be exported without writing files. |
 
 The export wizard discovers MCP servers, hooks, skills, commands, agents, plugins, `CLAUDE.md` sections, gitignore entries (global only), and settings. Sensitive env vars are replaced with `__PLACEHOLDER__` tokens and corresponding `prompts:` entries are generated.
@@ -210,7 +225,7 @@ mcs check-updates --json         # Machine-readable JSON output
 | Flag | Description |
 |------|-------------|
 | `--hook` | Run as a Claude Code SessionStart hook. Respects the 24-hour cooldown and config keys. Without this flag, always fetches from remote. |
-| `--json` | Output results as JSON instead of human-readable text. |
+| `-j, --json` | Output results as JSON instead of human-readable text. |
 
 **How it works:**
 - **Pack checks**: Runs `git ls-remote` per pack to compare the remote HEAD against the local commit SHA. Local packs are skipped.

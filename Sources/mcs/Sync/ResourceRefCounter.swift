@@ -147,7 +147,6 @@ struct ResourceRefCounter {
     ) -> Bool {
         guard var indexData = cachedIndexData() else { return true }
 
-        let fm = FileManager.default
         var stalePaths: [String] = []
         var stillNeeded = false
 
@@ -157,12 +156,9 @@ struct ResourceRefCounter {
             // by *declaration* would keep resources the pack never actually installed.
             if entry.path == scopePath, entry.path == ProjectIndex.globalSentinel { continue }
 
-            // Validate project still exists (skip __global__ — always valid)
-            if entry.path != ProjectIndex.globalSentinel {
-                guard fm.fileExists(atPath: entry.path) else {
-                    stalePaths.append(entry.path)
-                    continue
-                }
+            guard entry.directoryExists else {
+                stalePaths.append(entry.path)
+                continue
             }
 
             // Check each pack in this scope. The scope being removed is still scanned — a

@@ -10,7 +10,7 @@ struct CheckUpdatesCommand: ParsableCommand {
     @Flag(name: .long, help: "Run as a Claude Code SessionStart hook (respects 24-hour cooldown and config)")
     var hook: Bool = false
 
-    @Flag(name: .long, help: "Output results as JSON")
+    @Flag(name: .shortAndLong, help: "Output results as JSON")
     var json: Bool = false
 
     func run() throws {

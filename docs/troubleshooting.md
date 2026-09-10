@@ -289,6 +289,7 @@ Over time, `mcs sync` creates timestamped backups of files it modifies.
 ```bash
 mcs cleanup          # Lists backups and asks before deleting
 mcs cleanup --force  # Deletes without confirmation
+mcs cleanup --all-projects  # Also scans every project tracked in the index
 ```
 
 ## Getting More Help

@@ -14,13 +14,13 @@ struct ExportCommand: ParsableCommand {
     @Argument(help: "Output directory for the generated pack")
     var outputDir: String
 
-    @Flag(name: .long, help: "Export global scope (~/.claude/) instead of project scope")
+    @Flag(name: .shortAndLong, help: "Export global scope (~/.claude/) instead of project scope")
     var global = false
 
-    @Option(name: .long, help: "Pack identifier (prompted if omitted)")
+    @Option(name: .shortAndLong, help: "Pack identifier (prompted if omitted)")
     var identifier: String?
 
-    @Flag(name: .long, help: "Include everything without prompts")
+    @Flag(name: [.customShort("y"), .long], help: "Include everything without prompts")
     var nonInteractive = false
 
     @Flag(name: .long, help: "Preview what would be exported without writing")
