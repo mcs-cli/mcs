@@ -3,8 +3,9 @@ import Foundation
 /// Collects prompt definitions from multiple packs, identifies shared keys,
 /// and executes shared prompts once with a combined display showing each pack's label.
 ///
-/// Only `input` and `select` prompt types are eligible for deduplication.
-/// `script` and `fileDetect` types are pack-specific and always run per-pack.
+/// Only `input` and `select` prompt types are eligible for deduplication; `script` and
+/// `fileDetect` are pack-specific and always resolve per-pack. Per-pack is not per-sync:
+/// a `fileDetect` prior that `partitionDeclaredPrompts` accepts skips the executor entirely.
 enum CrossPackPromptResolver {
     /// A prompt definition paired with the pack that declares it.
     struct PackPromptInfo {
@@ -14,6 +15,14 @@ enum CrossPackPromptResolver {
 
     /// Prompt types eligible for cross-pack deduplication.
     static let deduplicableTypes: Set<PromptType> = [.input, .select]
+
+    /// Prompt types whose prior value can survive into the next sync. `script` is absent
+    /// because its value is computed, not answered — re-running it costs the user nothing.
+    static let reusableTypes: Set<PromptType> = [.input, .select, .fileDetect]
+
+    /// Prompt types whose resolved value is safe to print back to the user. Only types the pack
+    /// resolves by scanning: everything a user typed is treated as potentially secret.
+    static let visibleValueTypes: Set<PromptType> = [.fileDetect]
 
     /// Flat list of every declaration from every pack. Multiple packs can declare
     /// the same key — `partitionDeclaredPrompts` groups them when merging select options.
@@ -26,8 +35,8 @@ enum CrossPackPromptResolver {
 
     /// Partition declared prompts against `priorValues`.
     ///
-    /// `script` and `fileDetect` keys are excluded from both outputs — they always
-    /// re-run and must not trigger the "new prompts" UX branch.
+    /// `script` keys are excluded from both outputs — they always re-execute and must
+    /// not trigger the "new prompts" UX branch.
     ///
     /// Select priors are reusable when:
     /// - no declaration constrains the value (all have nil/empty options — the executor
@@ -39,24 +48,37 @@ enum CrossPackPromptResolver {
     /// the prior must satisfy those constraints (matches `resolveSharedPrompts` which
     /// presents the merged constrained option list to the user).
     ///
+    /// `fileDetect` priors are reusable only when this run's scan still finds the stored
+    /// file: the scan stays dynamic, but a project that hasn't changed stops re-asking.
+    /// An empty scan re-asks, mirroring the executor's zero-match branch, which prompts.
+    ///
     /// Type conflicts across packs (input vs select) fall back to input semantics.
+    ///
+    /// - Parameter projectPath: Directory the `fileDetect` patterns are scanned in.
     static func partitionDeclaredPrompts(
         _ prompts: [PromptDefinition],
-        priorValues: [String: String]
+        priorValues: [String: String],
+        projectPath: URL
     ) -> (reusableValues: [String: String], newDeclaredKeys: Set<String>) {
         var constrainedOptionsByKey: [String: Set<String>] = [:]
-        var typesByKey: [String: Set<PromptType>] = [:]
+        var detectedFilesByKey: [String: Set<String>] = [:]
         for prompt in prompts {
-            typesByKey[prompt.key, default: []].insert(prompt.type)
             if prompt.type == .select, let options = prompt.options, !options.isEmpty {
                 constrainedOptionsByKey[prompt.key, default: []].formUnion(options.map(\.value))
+            }
+            // Only a prior can be validated against the scan, so a key without one skips it.
+            if prompt.type == .fileDetect, priorValues[prompt.key] != nil {
+                let detected = PromptExecutor.detectFiles(
+                    matching: prompt.detectPatterns ?? ["*"], in: projectPath
+                )
+                detectedFilesByKey[prompt.key, default: []].formUnion(detected)
             }
         }
 
         var reusable: [String: String] = [:]
         var newKeys: Set<String> = []
-        for (key, types) in typesByKey {
-            let answerableTypes = types.intersection(deduplicableTypes)
+        for (key, types) in typesByKey(in: prompts) {
+            let answerableTypes = types.intersection(reusableTypes)
             guard !answerableTypes.isEmpty else { continue }
 
             guard let prior = priorValues[key] else {
@@ -64,19 +86,39 @@ enum CrossPackPromptResolver {
                 continue
             }
 
-            if answerableTypes == [.select] {
-                let constrained = constrainedOptionsByKey[key] ?? []
-                // No constraints → free-form; any constraint → prior must satisfy it.
-                if constrained.isEmpty || constrained.contains(prior) {
-                    reusable[key] = prior
-                } else {
-                    newKeys.insert(key)
-                }
+            let constrained = constrainedOptionsByKey[key] ?? []
+            let permitted: Bool = if answerableTypes.contains(.input) {
+                true
+            } else if answerableTypes.contains(.fileDetect) {
+                detectedFilesByKey[key, default: []].contains(prior)
             } else {
+                // No constraints → free-form; any constraint → prior must satisfy it.
+                constrained.isEmpty || constrained.contains(prior)
+            }
+
+            if permitted {
                 reusable[key] = prior
+            } else {
+                newKeys.insert(key)
             }
         }
         return (reusable, newKeys)
+    }
+
+    /// Keys whose value every declaring pack resolves by scanning, per `visibleValueTypes`.
+    /// A key any pack declares as another type stays hidden — the same conservative rule the
+    /// reuse partition applies to mixed declarations.
+    static func visibleValueKeys(in prompts: [PromptDefinition]) -> Set<String> {
+        Set(typesByKey(in: prompts).filter { $0.value.isSubset(of: visibleValueTypes) }.keys)
+    }
+
+    /// Every type each key is declared as, across all packs.
+    private static func typesByKey(in prompts: [PromptDefinition]) -> [String: Set<PromptType>] {
+        var typesByKey: [String: Set<PromptType>] = [:]
+        for prompt in prompts {
+            typesByKey[prompt.key, default: []].insert(prompt.type)
+        }
+        return typesByKey
     }
 
     /// Collect prompts from all packs and group by key, skipping already-resolved keys.

@@ -307,6 +307,46 @@ struct PackTrustManagerTests {
         #expect(items[0].content.contains("TestServer"))
     }
 
+    @Test("Two MCP servers in one pack get separate trust keys and stay trusted")
+    func twoMCPServersDoNotShareATrustKey() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A test pack
+        version: "1.0.0"
+        components:
+          - id: test.first
+            displayName: First
+            description: A command-based MCP server
+            mcp:
+              name: FirstServer
+              command: first-server
+              args:
+                - mcp
+          - id: test.second
+            displayName: Second
+            description: An HTTP MCP server
+            mcp:
+              url: https://example.test/mcp
+        """
+        let manifest = try loadManifest(yaml: yaml, in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+        #expect(items.count == 2)
+
+        let hashes = try manager.computeScriptHashes(items: items, packPath: tmpDir)
+        #expect(hashes.count == 2)
+
+        // Both servers verify against the map their own approval produced — the collision made
+        // one of them re-prompt on every update, no matter how often it was approved.
+        let unapproved = manager.newOrChanged(in: items, against: hashes, packPath: tmpDir)
+        #expect(unapproved.isEmpty)
+    }
+
     @Test("analyzeScripts surfaces commandExists doctor check commands")
     func analyzeScriptsCommandExists() throws {
         let tmpDir = try makeTmpDir()

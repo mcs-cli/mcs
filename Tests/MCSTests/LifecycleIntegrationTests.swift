@@ -1859,6 +1859,18 @@ struct PromptValueReuseLifecycleTests {
         )
     }
 
+    private func fileDetectPrompt(_ key: String, patterns: [String]) -> PromptDefinition {
+        PromptDefinition(
+            key: key, type: .fileDetect,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: patterns, scriptCommand: nil
+        )
+    }
+
+    private func touch(_ name: String, in directory: URL) throws {
+        try "".write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
     private func selectPrompt(_ key: String, options: [String]) -> PromptDefinition {
         PromptDefinition(
             key: key, type: .select,
@@ -1972,6 +1984,57 @@ struct PromptValueReuseLifecycleTests {
         let state2 = try bed.projectState()
         // "trace" is no longer valid → partition treats as newDeclared → mock returns default "info"
         #expect(state2.resolvedValues?["LOG_LEVEL"] == "info")
+    }
+
+    @Test("fileDetect prior still on disk is reused instead of re-detected")
+    func fileDetectReuseOnSecondSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        try touch("App.xcodeproj", in: bed.project)
+        try touch("App.xcworkspace", in: bed.project)
+
+        let pack = MockPromptTechPack(
+            identifier: "detect-pack",
+            displayName: "Detect Pack",
+            prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"])],
+            defaultAnswer: { _ in "re-asked" }
+        )
+        let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["PROJECT": "App.xcworkspace"])
+        try state.save()
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcworkspace")
+    }
+
+    @Test("fileDetect prior is re-asked once the stored file is gone")
+    func fileDetectStalePriorReAsks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        try touch("App.xcodeproj", in: bed.project)
+
+        let pack = MockPromptTechPack(
+            identifier: "detect-pack",
+            displayName: "Detect Pack",
+            prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"])],
+            defaultAnswer: { _ in "re-asked" }
+        )
+        let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["PROJECT": "Removed.xcworkspace"])
+        try state.save()
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
     }
 
     @Test("Non-interactive sync reuses priors silently")

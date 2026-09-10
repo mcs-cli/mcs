@@ -28,8 +28,8 @@ struct PromptExecutor {
     ///   - packPath: Root directory of the external pack
     ///   - projectPath: Current project root directory
     ///   - priorValue: Value resolved in a previous sync, used as the default for
-    ///     `input`/`select` prompts. Ignored for `script` and `fileDetect` (both
-    ///     re-compute every sync).
+    ///     `input`/`select` prompts and as the pre-selected file for `fileDetect`.
+    ///     Ignored for `script`, which re-computes every sync.
     /// - Returns: The resolved value string
     func execute(
         prompt: PromptDefinition,
@@ -39,7 +39,7 @@ struct PromptExecutor {
     ) throws -> String {
         switch prompt.type {
         case .fileDetect:
-            try executeFileDetect(prompt: prompt, projectPath: projectPath)
+            try executeFileDetect(prompt: prompt, projectPath: projectPath, priorValue: priorValue)
         case .input:
             executeInput(prompt: prompt, priorValue: priorValue)
         case .select:
@@ -80,9 +80,12 @@ struct PromptExecutor {
     // MARK: - File Detect
 
     /// Scan for files matching one or more patterns and present a selector.
+    /// `priorValue` pre-selects the file chosen last sync — pattern order decides the
+    /// cursor otherwise, which can land on a sibling of the file the user actually picked.
     private func executeFileDetect(
         prompt: PromptDefinition,
-        projectPath: URL
+        projectPath: URL,
+        priorValue: String?
     ) throws -> String {
         let patterns = prompt.detectPatterns ?? ["*"]
         let files = Self.detectFiles(matching: patterns, in: projectPath)
@@ -108,7 +111,8 @@ struct PromptExecutor {
                 return (name: name, description: ext.isEmpty ? "File" : ext)
             }
             let label = prompt.label ?? "Select a file"
-            let selected = output.singleSelect(title: label, items: items)
+            let initialIndex = priorValue.flatMap { files.firstIndex(of: $0) } ?? 0
+            let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
             return files[selected]
         }
     }

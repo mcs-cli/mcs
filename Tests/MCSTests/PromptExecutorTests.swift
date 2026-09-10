@@ -449,4 +449,62 @@ struct PromptExecutorTests {
 
         #expect(value == "3.0.0")
     }
+
+    @Test("fileDetect prompt pre-selects the prior when several files match")
+    func fileDetectPromptPreSelectsPrior() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try "".write(to: tmpDir.appendingPathComponent("App.xcodeproj"), atomically: true, encoding: .utf8)
+        try "".write(to: tmpDir.appendingPathComponent("App.xcworkspace"), atomically: true, encoding: .utf8)
+
+        let prompt = PromptDefinition(
+            key: "PROJECT",
+            type: .fileDetect,
+            label: "Xcode project / workspace",
+            defaultValue: nil,
+            options: nil,
+            detectPatterns: ["*.xcodeproj", "*.xcworkspace"],
+            scriptCommand: nil
+        )
+
+        let executor = makeExecutor()
+        let value = try executor.execute(
+            prompt: prompt,
+            packPath: tmpDir,
+            projectPath: tmpDir,
+            priorValue: "App.xcworkspace"
+        )
+
+        #expect(value == "App.xcworkspace")
+    }
+
+    @Test("fileDetect prompt falls back to the first match when the prior is gone")
+    func fileDetectPromptIgnoresMissingPrior() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try "".write(to: tmpDir.appendingPathComponent("App.xcodeproj"), atomically: true, encoding: .utf8)
+        try "".write(to: tmpDir.appendingPathComponent("Other.xcodeproj"), atomically: true, encoding: .utf8)
+
+        let prompt = PromptDefinition(
+            key: "PROJECT",
+            type: .fileDetect,
+            label: "Xcode project",
+            defaultValue: nil,
+            options: nil,
+            detectPatterns: ["*.xcodeproj"],
+            scriptCommand: nil
+        )
+
+        let executor = makeExecutor()
+        let value = try executor.execute(
+            prompt: prompt,
+            packPath: tmpDir,
+            projectPath: tmpDir,
+            priorValue: "Renamed.xcodeproj"
+        )
+
+        #expect(value == "App.xcodeproj")
+    }
 }
