@@ -37,7 +37,10 @@ struct PackTrustManager {
                         type: .mcpServerCommand,
                         relativePath: nil,
                         content: serverDesc,
-                        description: "MCP server — runs on every Claude Code session"
+                        // Scoped per component for the same reason `.hookInterpreter` below is: a
+                        // pack declaring two MCP servers put both under one key, and whichever
+                        // lost the write re-prompted on every update.
+                        description: "\(component.id) — MCP server, runs on every Claude Code session"
                     ))
 
                 case let .copyPackFile(config):
