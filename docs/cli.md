@@ -96,6 +96,10 @@ mcs pack remove <name>           # Remove with confirmation
 mcs pack remove <name> --force   # Remove without confirmation
 ```
 
+| Flag | Description |
+|------|-------------|
+| `-f, --force` | Skip the confirmation prompt. |
+
 Removal is federated: `mcs` discovers all projects using the pack (via the project index) and runs convergence cleanup for each scope.
 
 ### `mcs pack list`

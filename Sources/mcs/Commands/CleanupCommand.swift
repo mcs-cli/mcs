@@ -42,7 +42,7 @@ struct CleanupCommand: LockedCommand {
             output.plain("  \(label(for: group))")
             for backup in group.backups {
                 let name = PathContainment.relativePath(of: backup.path, within: group.root.path)
-                output.plain("    \(name) (\(formattedSize(of: backup)))")
+                output.plain("    \(name) (\(formattedSize(of: backup, output: output)))")
             }
         }
 
@@ -74,9 +74,16 @@ struct CleanupCommand: LockedCommand {
         return "\(kind) (\(group.root.path))"
     }
 
-    private func formattedSize(of file: URL) -> String {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: file.path)
-        let size = (attrs?[.size] as? Int) ?? 0
-        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+    /// A file listed by the scan but unreadable now is one the delete pass will also fail on,
+    /// so the reason is worth saying out loud rather than rendering as a plausible zero.
+    private func formattedSize(of file: URL, output: CLIOutput) -> String {
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: file.path)
+            guard let size = attrs[.size] as? Int else { return "size unknown" }
+            return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        } catch {
+            output.warn("Could not read \(file.path): \(error.localizedDescription)")
+            return "size unknown"
+        }
     }
 }
