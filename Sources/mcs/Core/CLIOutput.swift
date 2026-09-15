@@ -267,7 +267,11 @@ struct CLIOutput {
             renderYesNo(prompt: prompt, selected: selected)
 
             while true {
-                let byte = readByte()
+                // End of input is Ctrl-D by another name, so it takes the same exit.
+                guard let byte = readByte() else {
+                    write("\n")
+                    return defaultValue
+                }
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm
@@ -408,7 +412,10 @@ struct CLIOutput {
             renderSingleSelectList(title: title, items: items, cursor: cursor)
 
             while true {
-                let byte = readByte()
+                guard let byte = readByte() else {
+                    write("\n")
+                    return cursor
+                }
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm selection
@@ -541,7 +548,10 @@ struct CLIOutput {
             renderInteractiveList(groups: groups, cursor: cursor)
 
             while true {
-                let byte = readByte()
+                guard let byte = readByte() else {
+                    write("\n")
+                    return collectSelected(from: groups)
+                }
 
                 switch byte {
                 case 0x0A, 0x0D: // Enter
@@ -694,9 +704,15 @@ struct CLIOutput {
         write(output)
     }
 
-    private func readByte() -> UInt8 {
+    /// One byte from stdin, or `nil` at end of input.
+    ///
+    /// Optional because the pickers below loop until they recognise a key: on EOF or a read error
+    /// no key will ever arrive, and a zero byte matches no case, so returning one would spin at
+    /// 100% CPU until the process is killed. Reachable whenever stdin closes under a raw-mode
+    /// prompt — a hung-up terminal in a `nohup`/`setsid` wrapper that ignores SIGHUP, for instance.
+    private func readByte() -> UInt8? {
         var byte: UInt8 = 0
-        _ = read(STDIN_FILENO, &byte, 1)
+        guard read(STDIN_FILENO, &byte, 1) > 0 else { return nil }
         return byte
     }
 
