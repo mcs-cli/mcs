@@ -71,6 +71,12 @@ jobs:
       # Not a `container:` job: the official swift images run as root, and
       # UpdateCheckerTests.registryWriteFailureContract asserts that a write into a 0555
       # directory fails, which root ignores.
+      - name: Install Swift toolchain build dependencies
+        # swiftly's installer needs libcurl's dev headers to build/verify the toolchain
+        # (confirmed by the exact error swiftly prints when it's missing); ubuntu-latest
+        # does not ship them.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
       - name: Install Swift via swiftly
         # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
         run: |

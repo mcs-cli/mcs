@@ -121,6 +121,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Install Swift toolchain build dependencies
+        # swiftly's installer needs libcurl's dev headers to build/verify the toolchain
+        # (confirmed by the exact error swiftly prints when it's missing); ubuntu-latest
+        # does not ship them.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
       - name: Install Swift via swiftly
         # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
         run: |
@@ -157,6 +163,12 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+
+      - name: Install Swift toolchain build dependencies
+        # swiftly's installer needs libcurl's dev headers to build/verify the toolchain
+        # (confirmed by the exact error swiftly prints when it's missing); ubuntu-latest
+        # does not ship them.
+        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
 
       - name: Install Swift via swiftly
         # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
