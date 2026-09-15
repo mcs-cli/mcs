@@ -25,6 +25,16 @@ struct FileHasherTests {
         #expect(hash == expected)
     }
 
+    @Test("sha256(data:) matches the NIST known answer")
+    func knownAnswerForData() {
+        // Pins the digest across CryptoKit (Darwin) and swift-crypto (Linux): a hash recorded in
+        // .mcs-project state on one platform has to validate on the other.
+        #expect(
+            FileHasher.sha256(data: Data("abc".utf8))
+                == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        )
+    }
+
     @Test("directoryFileHashes returns sorted entries for all files")
     func directoryHashes() throws {
         let tmpDir = try makeTmpDir()
