@@ -22,7 +22,10 @@ struct HomebrewTests {
         #if canImport(Darwin)
         #expect(Homebrew.allPrefixes == ["/opt/homebrew", "/usr/local"])
         #else
-        #expect(Homebrew.allPrefixes == ["/home/linuxbrew/.linuxbrew", NSHomeDirectory() + "/.linuxbrew"])
+        #expect(
+            Homebrew.allPrefixes
+                == ["/home/linuxbrew/.linuxbrew", Environment.defaultHomeDirectory() + "/.linuxbrew"]
+        )
         #endif
     }
 

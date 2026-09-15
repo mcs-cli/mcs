@@ -30,7 +30,7 @@ struct Environment {
     private static let resolvedBrewPath: String? = resolveCommand("brew")
 
     init(home: URL? = nil) {
-        let home = home ?? URL(fileURLWithPath: NSHomeDirectory())
+        let home = home ?? URL(fileURLWithPath: Self.defaultHomeDirectory())
         homeDirectory = home
 
         let claudeDir = home.appendingPathComponent(Constants.FileNames.claudeDirectory)
@@ -70,6 +70,20 @@ struct Environment {
     static func brewPrefix(forBrewPath path: String) -> String {
         URL(fileURLWithPath: path)
             .deletingLastPathComponent().deletingLastPathComponent().path
+    }
+
+    /// The user's home directory, `$HOME` first.
+    ///
+    /// corelibs Foundation's `NSHomeDirectory()` reads the passwd entry and ignores `$HOME`, where
+    /// Darwin's honours it — so without this, `HOME=… mcs …` would mean different things on the two
+    /// platforms. Takes the environment as a parameter so it can be tested as a pure function.
+    static func defaultHomeDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        guard let home = environment["HOME"], !home.isEmpty else {
+            return NSHomeDirectory()
+        }
+        return home
     }
 
     /// Where Homebrew installs itself when no `brew` is on PATH to ask.

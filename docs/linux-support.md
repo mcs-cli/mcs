@@ -10,7 +10,7 @@ ADR-style entry per decision.
 ## 1. Status and supported configurations
 
 `mcs` is built and tested on **Linux x86_64 with glibc**. Every feature works, and section 4 records
-how each one was verified; five features behave differently from macOS, and the matrix says how.
+how each one was verified; six features behave differently from macOS, and the matrix says how.
 
 | | |
 |---|---|
@@ -112,6 +112,7 @@ Legend: `verified` — run on Linux and observed; `verified (with a difference)`
 | `mcs cleanup` | supported | verified | Found and deleted a `CLAUDE.local.md.backup.*` file, with and without `--force`. |
 | `mcs check-updates` + SessionStart hook | supported | verified (with a difference) | `check-updates`, `--json` and `--hook` all run; `mcs config set update-check-cli true` registered `mcs check-updates --hook` in `~/.claude/settings.json` and the cooldown file was written. The upgrade instruction differs: `brew upgrade` on macOS, download the release tarball on Linux. |
 | `mcs config` | supported | verified | `list` / `get` / `set` against `~/.mcs/config.yaml`. |
+| `$HOME` override | supported | verified (with a difference) | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, so `HOME=… mcs …` behaves the same on both platforms. One gap: a `~` typed in a pack path or a pack's doctor `path:` is still expanded from the passwd entry on Linux — see known limitations. |
 | File lock (`flock`) | supported | verified | Two concurrent syncs: the second exited 1 with "Another mcs process is running". |
 | Lockfile (`mcs.lock.yaml`) | supported | verified | Written after sync with `generate-lockfile true`; `mcs sync --lock` consumed it. |
 | Terminal colours / width | supported | verified | ANSI colour and the wrapped/re-rendered picker observed under a PTY; colours suppressed when stdout is a pipe. |
@@ -355,6 +356,12 @@ platforms list stays `[.macOS(.v13)]`; Linux needs no entry.
   is left in place.
 - **`techpack.yaml` cannot mark a component macOS-only.** A pack declaring `brew: mas` will run on
   Linux and fail that component with a clear message. See D8's rejected options.
+- **A literal `~` in a user-supplied path ignores `$HOME` on Linux.** `mcs` resolves its own home
+  through `Environment.defaultHomeDirectory()`, which prefers `$HOME`, but the two places that
+  expand a tilde typed by a user — a path passed to `mcs pack add`, and a pack's doctor `path:` —
+  go through Foundation's `expandingTildeInPath`, which reads the passwd entry on corelibs and the
+  `$HOME` value on Darwin. This only shows up when `$HOME` differs from the passwd home, e.g. under
+  `sudo -H` or in a container. Pass an absolute path there if you override `$HOME`.
 - **Nothing is claimed about Fedora, Alpine or NixOS** — they are untested.
 
 ## 7. How to add a platform-specific path

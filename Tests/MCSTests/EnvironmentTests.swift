@@ -105,6 +105,31 @@ struct EnvironmentTests {
         #expect(!env.isInsideClaudeHome(env.homeDirectory))
     }
 
+    // MARK: - Home directory
+
+    @Test("The default home directory prefers $HOME")
+    func defaultHomeDirectoryPrefersHOME() {
+        // Tested as a pure function rather than by mutating the process environment: swift-testing
+        // runs in parallel, and setenv would leak into every other test in flight.
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": "/sandbox/home"]) == "/sandbox/home")
+    }
+
+    @Test("An unset or empty $HOME falls back to the passwd entry")
+    func defaultHomeDirectoryFallsBackToPasswd() {
+        #expect(Environment.defaultHomeDirectory(environment: [:]) == NSHomeDirectory())
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": ""]) == NSHomeDirectory())
+    }
+
+    @Test("Environment derives every path from the resolved home")
+    func environmentUsesResolvedHome() {
+        let home = Environment.defaultHomeDirectory(environment: ["HOME": "/sandbox/home"])
+        let env = Environment(home: URL(fileURLWithPath: home))
+
+        #expect(env.homeDirectory.path == "/sandbox/home")
+        #expect(env.claudeDirectory.path == "/sandbox/home/.claude")
+        #expect(env.mcsDirectory.path == "/sandbox/home/.mcs")
+    }
+
     // MARK: - Homebrew prefix
 
     @Test("brewPrefix keeps the symlinked entry point's own prefix")

@@ -8,7 +8,7 @@ struct Homebrew {
         #if canImport(Darwin)
         ["/opt/homebrew", "/usr/local"]
         #else
-        ["/home/linuxbrew/.linuxbrew", NSHomeDirectory() + "/.linuxbrew"]
+        ["/home/linuxbrew/.linuxbrew", Environment.defaultHomeDirectory() + "/.linuxbrew"]
         #endif
     }
 
