@@ -209,8 +209,9 @@ struct ShellRunner: ShellRunning {
         // an allocation failure, and a force-unwrap there would trap through the Swift runtime.
         // Every C string the child needs is therefore allocated and checked here, in the parent —
         // a nil in the middle of argv or envp would otherwise truncate the vector at execve, which
-        // stops at the first NULL. (Glibc types `strdup` as returning an optional; Darwin
-        // implicitly unwraps it.)
+        // stops at the first NULL. (Glibc marks the `execve`/`chdir` parameters `__nonnull`, so
+        // Swift imports them non-optional there and rejects the `Optional` Darwin's unannotated
+        // signatures accept.)
         guard let executablePath = strdup(executable) else {
             return ShellResult(
                 exitCode: 1, stdout: "", stderr: "Could not allocate the command path for \(executable)"
@@ -270,7 +271,6 @@ struct ShellRunner: ShellRunning {
                     _exit(126)
                 }
             }
-            // Use the pre-allocated C string instead of the Swift String.
             execve(executablePath, argv, envp)
             let err = strerror(errno)
             _ = write(STDERR_FILENO, "execve failed: ", 15)
@@ -315,30 +315,27 @@ struct ShellRunner: ShellRunning {
                 break
             }
 
-            // An errored PTY means the command is gone, so it ends the bridge.
-            if fds[1].revents & Int16(POLLERR | POLLNVAL) != 0 {
-                break bridgeLoop
-            }
+            let ptyAction = PTYBridge.ptyAction(revents: fds[1].revents)
+            if ptyAction == .close { break bridgeLoop }
 
-            // Terminal → PTY (user typing, including password input). Readable data is drained
-            // first — a hung-up pipe can still carry buffered bytes — and only a descriptor with
-            // nothing to read and nothing coming (hangup, error, closed) is dropped. Dropping it
-            // matters: poll(2) reports POLLHUP/POLLERR whether or not they were requested, so
-            // leaving the fd in the set would make poll return immediately, forever, with no
-            // branch taken. poll(2) skips negative fds, so the loop carries on draining the PTY.
-            if fds[0].revents & Int16(POLLIN) != 0 {
+            // Terminal → PTY (user typing, including password input). poll(2) skips negative
+            // fds, so a dropped stdin leaves the loop draining the PTY alone.
+            switch PTYBridge.stdinAction(revents: fds[0].revents) {
+            case .forward:
                 let n = read(STDIN_FILENO, &buf, buf.count)
                 if n <= 0 {
                     fds[0].fd = -1
                 } else {
                     writeAll(fd: ptyFD, buf: buf, count: n)
                 }
-            } else if fds[0].revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+            case .drop:
                 fds[0].fd = -1
+            case .idle:
+                break
             }
 
             // PTY → Terminal (command output, prompts, progress bars)
-            if fds[1].revents & Int16(POLLIN | POLLHUP) != 0 {
+            if ptyAction == .read {
                 let n = read(ptyFD, &buf, buf.count)
                 if n <= 0 { break bridgeLoop } // Child closed the PTY
                 writeAll(fd: STDOUT_FILENO, buf: buf, count: n)

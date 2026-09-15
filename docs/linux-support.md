@@ -259,11 +259,12 @@ and the call links and runs on glibc 2.39 with no extra linker flag. `cfmakeraw`
 not missing; reimplementing with `posix_openpt`/`grantpt`/`setsid`/`ioctl(TIOCSCTTY)` duplicates
 forty lines of subtle libc behaviour for no benefit.
 
-**Consequences.** One real difference did surface inside the fork child: Glibc types `strdup` as
-returning an optional where Darwin implicitly unwraps it, so the child was left dereferencing
-optionals for the command path and the working directory. A force-unwrap there would trap through
-the Swift runtime after `fork()`, where only async-signal-safe calls are legal, so both strings are
-now allocated and checked in the parent. If a future toolchain drops `pty.h` the build fails
+**Consequences.** One real difference did surface inside the fork child: glibc declares the
+`execve` and `chdir` parameters `__nonnull`, so Swift imports them as non-optional and rejects the
+`Optional` element of the `argv` array that Darwin's unannotated signatures accept (`strdup` itself
+imports as an implicitly unwrapped optional on both). A force-unwrap there would trap through the
+Swift runtime after `fork()`, where only async-signal-safe calls are legal, so every C string the
+child needs is allocated and checked in the parent. If a future toolchain drops `pty.h` the build fails
 immediately and the C shim remains a ~15-line fallback.
 
 ### D6 — termios: index `c_cc` through `VMIN`/`VTIME`, widen masks through `tcflag_t`
