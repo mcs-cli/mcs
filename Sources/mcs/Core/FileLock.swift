@@ -78,7 +78,10 @@ func withFileLock<T>(at path: URL, body: () throws -> T) throws -> T {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
     }
 
-    let fd = open(path.path, O_CREAT | O_RDWR, 0o644)
+    // O_CLOEXEC: a flock belongs to the open file description, which fork+exec shares, so without
+    // it a child outliving the command — a daemon started by a shellInteractive component, say —
+    // inherits the descriptor and keeps the lock held after mcs has exited.
+    let fd = open(path.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
     guard fd >= 0 else {
         throw FileLockError.openFailed(path: path.path, errno: errno)
     }
