@@ -304,6 +304,14 @@ struct ShellRunner: ShellRunning {
                 break
             }
 
+            // A descriptor that errored or was closed under us never becomes readable, so poll(2)
+            // would keep returning immediately with no branch taken. poll(2) skips negative fds,
+            // so dropping it here lets the loop carry on draining the PTY. POLLHUP is deliberately
+            // not included: a hung-up stdin can still have buffered data, which the read drains.
+            if fds[0].revents & Int16(POLLERR | POLLNVAL) != 0 {
+                fds[0].fd = -1
+            }
+
             // Terminal → PTY (user typing, including password input)
             if fds[0].revents & Int16(POLLIN) != 0 {
                 let n = read(STDIN_FILENO, &buf, buf.count)
