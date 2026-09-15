@@ -81,9 +81,14 @@ struct ExternalCommandExistsCheck: DoctorCheck {
 
     func fix() -> FixResult {
         guard let fixCommand else {
-            // The pack declares no fix, and nothing here knows which component — if any — would
-            // install this command, so pointing at 'mcs sync' would be a guess that often no-ops.
-            return .notFixable("Install '\(command)' and make sure it is on PATH")
+            // The pack declares no fix and nothing here knows which component — if any — provides
+            // this command, so 'mcs sync' is a guess either way. It is at least a *possible* one
+            // while Homebrew is there to install with; with no brew it provably cannot act.
+            let shell = ShellRunner(environment: environment)
+            guard Homebrew(shell: shell, environment: environment).isInstalled else {
+                return .notFixable("Install '\(command)' and make sure it is on PATH")
+            }
+            return .notFixable("Run 'mcs sync' to install dependencies")
         }
         let result = scriptRunner.runCommand(fixCommand)
         if result.succeeded {

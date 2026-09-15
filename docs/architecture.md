@@ -378,7 +378,7 @@ The codebase uses Swift 6's strict concurrency. All core types conform to `Senda
 
 ## Platform Support
 
-`mcs` builds for macOS 13+ and for Linux (glibc, x86_64). Platform-dependent knowledge is confined to `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift` and `Core/Constants.swift`; everything else calls into them. `swift-crypto` is a Linux-only target dependency supplying SHA-256, which Foundation does not have there. See [Linux support](linux-support.md) for the compatibility matrix, the decisions behind each platform branch, and the rules for adding a new one.
+`mcs` builds for macOS 13+ and for Linux (glibc, x86_64). Platform-dependent knowledge is confined to `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift` and `Core/ClaudePrerequisite.swift`; everything else calls into them. `swift-crypto` is a Linux-only target dependency supplying SHA-256, which Foundation does not have there. See [Linux support](linux-support.md) for the compatibility matrix, the decisions behind each platform branch, and the rules for adding a new one.
 
 ---
 

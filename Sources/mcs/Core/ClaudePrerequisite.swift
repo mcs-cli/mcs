@@ -54,7 +54,9 @@ func ensureClaudeCLI(
 /// shell, or writing into npm's global prefix, is a trust decision that belongs to the user.
 private func printManualClaudeInstallInstructions(_ output: CLIOutput) {
     output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
-    #if !canImport(Darwin)
+    #if canImport(Darwin)
+    // macOS has already been offered the Homebrew cask, so the docs link is the whole answer.
+    #else
     output.plain("    curl -fsSL https://claude.ai/install.sh | bash")
     output.plain("    npm install -g @anthropic-ai/claude-code")
     #endif

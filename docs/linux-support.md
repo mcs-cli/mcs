@@ -378,9 +378,12 @@ import Glibc
 
 Three rules keep this from spreading:
 
-1. **Platform knowledge lives in four places only** — `Core/TerminalAttributes.swift`,
-   `Core/Environment.swift`, `Core/Homebrew.swift` and `Core/Constants.swift`. Everything else calls
-   into them. If a fifth file needs a `#if`, that is a sign the value belongs in one of these.
+1. **Platform knowledge lives in five places only** — `Core/TerminalAttributes.swift`,
+   `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift` and
+   `Core/ClaudePrerequisite.swift`. Everything else calls into them. If a sixth file needs a `#if`,
+   that is a sign the value belongs in one of these. `ClaudePrerequisite` is on the list because
+   what differs there is *control flow*, not a value: macOS offers a Homebrew install of Claude
+   Code and Linux has no cask to offer, so there is no constant to move into `Constants`.
 2. **A `#if` is for a value or API that genuinely differs**, never for making a diagnostic go away.
    The same applies to `_ =`, `try?`, `@unchecked` and `nonisolated(unsafe)`: fix the cause. When a
    Foundation method is `@discardableResult` on Darwin and not on Linux, use the result — it always

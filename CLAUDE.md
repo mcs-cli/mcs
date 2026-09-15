@@ -77,7 +77,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `Backup.swift` — timestamped backups for mixed-ownership files (CLAUDE.local.md), backup discovery and deletion
 - `GitignoreManager.swift` — global gitignore management, core entry list
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/remove`
-- `ClaudePrerequisite.swift` — Claude Code CLI availability check with optional Homebrew auto-install
+- `ClaudePrerequisite.swift` — Claude Code CLI availability check; macOS offers a Homebrew install, Linux prints the native-installer and npm commands
 - `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
 - `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
 - `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
@@ -191,7 +191,7 @@ import Darwin
 import Glibc
 #endif
 ```
-  Platform knowledge lives **only** in `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift` and `Core/Constants.swift` — everything else calls into them. A `#if` is for a value or API that genuinely differs, never to make a diagnostic go away; the same goes for `_ =`. Several Foundation methods are `@discardableResult` on Darwin and not on Linux — use the result, it always means something. A test gated out on one platform is a coverage regression: give the `#else` branch the equivalent assertion. Rationale and the compatibility matrix are in `docs/linux-support.md`
+  Platform knowledge lives **only** in `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift` and `Core/ClaudePrerequisite.swift` — everything else calls into them. The last one is there because what differs is control flow, not a value: macOS offers a Homebrew install of Claude Code and Linux cannot, so there is no constant to move. A `#if` is for a value or API that genuinely differs, never to make a diagnostic go away; the same goes for `_ =`. Several Foundation methods are `@discardableResult` on Darwin and not on Linux — use the result, it always means something. A test gated out on one platform is a coverage regression: give the `#else` branch the equivalent assertion. Rationale and the compatibility matrix are in `docs/linux-support.md`
 - **Comments carry the non-obvious "why", not a narration of the code** — don't restate the line below, don't describe what the code used to do. If the code already says it, delete the comment; if the rationale needs more than a line or two, it belongs in the issue or a memory. State a given rationale once, at the site that owns it, rather than repeating it at every call site
 
 ## Testing
