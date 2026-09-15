@@ -17,12 +17,11 @@ how each one was verified; six features behave differently from macOS, and the m
 | Architecture | x86_64. No aarch64 artifact is published yet. |
 | libc | glibc. musl is untested; there is no `canImport(Musl)` branch. |
 | glibc floor | 2.35 — the published binary is built on Ubuntu 22.04. |
-| Tested on | Ubuntu 24.04 (development); the `ubuntu-latest` GitHub runner once this PR's CI has run. |
+| Tested on | Ubuntu 24.04 (development); the `ubuntu-latest` GitHub runner in CI. |
 | Other distributions | Any glibc ≥ 2.35 distribution is expected to work. **Nothing is claimed about Fedora, Alpine or NixOS** — they have not been tested. |
 
 CI is configured to run `swift build`, the full test suite and the release build on Linux for every
-pull request, alongside the two macOS jobs; the Linux job lands with this change, so its first run is
-this PR's. Lint runs on macOS only: SwiftFormat and SwiftLint give the same verdicts on both, so a
+pull request, alongside the two macOS jobs. Lint runs on macOS only: SwiftFormat and SwiftLint give the same verdicts on both, so a
 second run would only add version skew.
 
 ## 2. Prerequisites
@@ -108,7 +107,7 @@ Legend: `verified` — run on Linux and observed; `verified (with a difference)`
 | Non-TTY fallback picker | supported | verified | stdin a PTY, stdout a pipe: numeric toggle + `Enter`, colours disabled. |
 | `shell:` components | supported | verified | `shell: touch <path>` created the marker. |
 | `shellInteractive: true` (PTY/sudo) | supported | verified | `forkpty` path ran the command; marker file created, with stdin from `/dev/null` and under a real controlling terminal. Also asserted by `LifecycleIntegrationTests`. The PTY is allocated with a default 0×0 window size on both platforms. |
-| `brew:` components | supported | verified (with a difference) | Same predicate on both platforms. Without Linuxbrew a `brew:` component is satisfied only when the formula name is also the command name — `brew: node` passes with `node` on PATH, `brew: ripgrep` does not because the command is `rg`. Doctor then reports it missing and names the system package manager instead of pointing back at `mcs sync`. Installing a formula still needs Linuxbrew. |
+| `brew:` components | supported | verified (with a difference) | Same predicate on both platforms. Without Linuxbrew a `brew:` component is satisfied only when the formula name is also the command name — `brew: node` passes with `node` on PATH, `brew: ripgrep` does not because the command is `rg`. Doctor then reports it missing, and `--fix` names the system package manager instead of pointing back at `mcs sync`. Installing a formula still needs Linuxbrew. |
 | `mcp:` (`claude mcp add`) | supported | verified | `demo-server` registered via `claude mcp add -s local`; `claude mcp list` shows it; removal deregisters it. |
 | `plugin:` | supported | verified | `hookify@claude-code-plugins` installed through `claude plugin install`; `claude plugin list` shows it enabled. |
 | `hook:` / `command:` / `skill:` / `agent:` copies | supported | verified | All four installed; hooks namespaced under `<pack-id>/`; interpreter inferred (`bash` for `.sh`, `python3` for `.py`). |
@@ -239,9 +238,11 @@ import Glibc
 SwiftGlibc — see D5. No `canImport(Musl)` branch is added: nothing here builds for musl, and an
 untested branch is worse than no branch.
 
-**Consequence beyond the imports.** Four Foundation methods are `@discardableResult` on Darwin and
-not on Linux, so their results had to be used rather than dropped. Three sites now require the file
-to exist before treating it as a directory, which is behaviour-identical. The fourth is a small
+**Consequence beyond the imports.** Two Foundation methods — `fileExists(atPath:isDirectory:)` and
+`createFile(atPath:contents:)` — are `@discardableResult` on Darwin and not on Linux, so their
+results had to be used rather than dropped, at four call sites. Three now require the file to exist
+before treating it as a directory: identical in practice, and now defined, where Apple documents
+`isDirectory` as undefined for a missing path. The fourth is a small
 **macOS-visible change**: `GitignoreManager`'s bootstrap used `createFile(atPath:contents:)`, whose
 `false` return was ignored, and now writes through `Data` — so a failure to create the global
 gitignore throws out of `ensureFileExists()` instead of passing silently and failing later at the
@@ -417,6 +418,10 @@ site ever accepted it.
   section 2.
 - **No Linuxbrew auto-install**, and **no Claude Code auto-install** on Linux.
 - **`brew:` components are name-sensitive** without Linuxbrew — see D8 decision 3.
+- **A `.zsh` hook's missing interpreter is not reported on Linux.** `HookInterpreter` treats `zsh`
+  as always present, which is true on macOS and false on Debian, Ubuntu and Fedora by default. Packs
+  that ship zsh hooks should say so; a per-platform set was not worth a sixth home for platform
+  knowledge.
 - **`mcs export`'s brew formula hints are empty** without Linuxbrew: `detectFormula` reads symlinks
   under the Homebrew prefixes.
 - **The PTY is allocated with a 0×0 window size** — the same on macOS, so full-screen TUIs run inside

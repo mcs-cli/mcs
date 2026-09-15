@@ -69,8 +69,8 @@ component.
 > **Linux**: verification falls back to `brew list` only when Homebrew is installed, which on Linux
 > it usually is not. Without it a `brew:` component is satisfied only when the formula name is also
 > the command name (`node` yes, `ripgrep` → `rg` no), and `mcs` cannot install the formula — that
-> needs Linuxbrew. `mcs doctor` reports the package missing and points the user at their system
-> package manager. There is no per-platform component gating in this schema yet, so a macOS-only
+> needs Linuxbrew. `mcs doctor` reports the package missing and `mcs doctor --fix` points the user at
+> their system package manager. There is no per-platform component gating in this schema yet, so a macOS-only
 > formula will simply fail its component on Linux with that message. See
 > [Linux support](linux-support.md).
 

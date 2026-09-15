@@ -1,7 +1,7 @@
 #if canImport(CryptoKit)
 import CryptoKit
 #else
-// Foundation has no SHA-256 on Linux, so the Glibc build gets the digest from swift-crypto, whose
+// CryptoKit is Apple-only, so the Glibc build gets the digest from swift-crypto, whose
 // `Crypto` module is API-identical. The dependency is declared for Linux only so macOS keeps
 // hashing through the system CryptoKit — a digest written into `.mcs-project` state on one
 // platform has to validate on the other.
@@ -9,9 +9,8 @@ import Crypto
 #endif
 import Foundation
 
-/// SHA-256 file hashing utilities.
-/// Extracted from the deleted `Manifest` type — used by `PackTrustManager`
-/// for trust verification and by `ComponentExecutor` for directory copies.
+/// SHA-256 file hashing utilities, used by `PackTrustManager` for trust verification and by
+/// `ComponentExecutor` for directory copies.
 enum FileHasher {
     /// Compute SHA-256 hash of a file.
     static func sha256(of url: URL) throws -> String {
