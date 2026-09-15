@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Shared, mutable tally of warnings emitted through a `CLIOutput`.
 ///
@@ -85,7 +90,7 @@ struct CLIOutput {
 
     private var terminalColumns: Int {
         var ws = winsize()
-        if ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0, ws.ws_col > 0 {
+        if ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws) == 0, ws.ws_col > 0 {
             return Int(ws.ws_col)
         }
         return 80
@@ -691,7 +696,7 @@ struct CLIOutput {
 
     private func readByte() -> UInt8 {
         var byte: UInt8 = 0
-        _ = Darwin.read(STDIN_FILENO, &byte, 1)
+        _ = read(STDIN_FILENO, &byte, 1)
         return byte
     }
 
@@ -707,10 +712,7 @@ struct CLIOutput {
     private func withRawTerminal<T>(_ body: () -> T) -> T {
         var original = termios()
         tcgetattr(STDIN_FILENO, &original)
-        var raw = original
-        raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1 // VMIN = 1
-        raw.c_cc.17 = 0 // VTIME = 0
+        var raw = TerminalAttributes.rawMode(from: original)
         tcsetattr(STDIN_FILENO, TCSANOW, &raw)
         write("\u{1B}[?25l")
         defer {

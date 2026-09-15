@@ -47,7 +47,7 @@ struct GitignoreManager {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         if !fm.fileExists(atPath: path.path) {
-            fm.createFile(atPath: path.path, contents: nil)
+            try Data().write(to: path)
         }
     }
 

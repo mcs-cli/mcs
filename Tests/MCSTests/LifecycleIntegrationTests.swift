@@ -1279,7 +1279,7 @@ struct ShellCommandLifecycleTests {
         #expect(FileManager.default.fileExists(atPath: markerPath))
     }
 
-    @Test("shellCommand with interactive flag is accepted and state is recorded")
+    @Test("shellCommand with interactive flag really runs under a PTY")
     func shellCommandInteractiveAccepted() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
@@ -1303,12 +1303,14 @@ struct ShellCommandLifecycleTests {
         )
         let registry = TechPackRegistry(packs: [pack])
 
-        // Configure — interactive commands use forkpty() in real ShellRunner,
-        // but the test verifies the component is accepted and state is recorded.
+        // Interactive commands go through forkpty() in the real ShellRunner, so the marker file
+        // proves the whole path ran — fork, execve and the terminal/PTY bridge loop — not just
+        // that the component was recorded.
         let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        // Verify state records the pack
+        #expect(FileManager.default.fileExists(atPath: markerPath))
+
         let state = try ProjectState(stateFile: bed.env.globalStateFile)
         #expect(state.configuredPacks.contains("interactive-pack"))
     }

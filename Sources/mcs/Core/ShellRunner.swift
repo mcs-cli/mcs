@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Result of running a shell command.
 struct ShellResult {
@@ -200,13 +205,32 @@ struct ShellRunner: ShellRunning {
         } + [nil]
         defer { envp.compactMap(\.self).forEach { free($0) } }
 
-        let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
-        defer { argv.compactMap(\.self).forEach { free($0) } }
+        // After fork() only async-signal-safe calls are legal, so the child has no way to report
+        // an allocation failure, and a force-unwrap there would trap through the Swift runtime.
+        // Every C string the child needs is therefore allocated and checked here, in the parent.
+        // (Glibc types `strdup` as returning an optional; Darwin implicitly unwraps it.)
+        guard let executablePath = strdup(executable) else {
+            return ShellResult(
+                exitCode: 1, stdout: "", stderr: "Could not allocate the command path for \(executable)"
+            )
+        }
+        let argv: [UnsafeMutablePointer<CChar>?] = [executablePath] + arguments.map { strdup($0) } + [nil]
+        defer { argv.compactMap(\.self).forEach { free($0) } } // frees executablePath too — it is argv[0]
 
         // Pre-convert workingDirectory to a C string before fork so the child
         // doesn't need to invoke Swift's String-to-CString bridge (not fork-safe).
-        let cwdCStr = workingDirectory.map { strdup($0) }
-        defer { cwdCStr.map { free($0) } }
+        let workingDirectoryPath: UnsafeMutablePointer<CChar>?
+        if let workingDirectory {
+            guard let copy = strdup(workingDirectory) else {
+                return ShellResult(
+                    exitCode: 1, stdout: "", stderr: "Could not allocate the working directory path"
+                )
+            }
+            workingDirectoryPath = copy
+        } else {
+            workingDirectoryPath = nil
+        }
+        defer { workingDirectoryPath.map { free($0) } }
 
         // Save the terminal's current attributes so we can restore them after.
         var originalTermios = termios()
@@ -226,7 +250,7 @@ struct ShellRunner: ShellRunning {
             // After fork, only async-signal-safe functions are safe. Avoid Swift
             // runtime calls (String interpolation, ARC) — they can deadlock on
             // locks held by other threads in the parent at fork time.
-            if let cwd = cwdCStr {
+            if let cwd = workingDirectoryPath {
                 if chdir(cwd) != 0 {
                     let err = strerror(errno)
                     _ = write(STDERR_FILENO, "chdir failed: ", 14)
@@ -235,8 +259,8 @@ struct ShellRunner: ShellRunning {
                     _exit(126)
                 }
             }
-            // Use argv[0] (already a C string from strdup) instead of the Swift String.
-            execve(argv[0], argv, envp)
+            // Use the pre-allocated C string instead of the Swift String.
+            execve(executablePath, argv, envp)
             let err = strerror(errno)
             _ = write(STDERR_FILENO, "execve failed: ", 15)
             if let err { _ = write(STDERR_FILENO, err, strlen(err)) }

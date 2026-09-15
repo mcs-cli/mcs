@@ -169,8 +169,8 @@ struct PackSourceResolverTests {
 
         // Change CWD to tmpDir so "org/pack" resolves to the directory
         let originalDir = FileManager.default.currentDirectoryPath
-        FileManager.default.changeCurrentDirectoryPath(tmpDir.path)
-        defer { FileManager.default.changeCurrentDirectoryPath(originalDir) }
+        #expect(FileManager.default.changeCurrentDirectoryPath(tmpDir.path))
+        defer { #expect(FileManager.default.changeCurrentDirectoryPath(originalDir)) }
 
         let result = try PackSourceResolver().resolve("org/pack")
         guard case let .localPath(url) = result else {

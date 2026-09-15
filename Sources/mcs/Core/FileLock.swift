@@ -1,5 +1,10 @@
 import ArgumentParser
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Errors thrown when the process lock cannot be acquired.
 enum FileLockError: Error, LocalizedError {
