@@ -14,8 +14,7 @@ enum TerminalAttributes {
     /// Reads one control character. Exists for `TerminalAttributesTests`: asserting raw mode
     /// without a TTY is the only way to cover this on both platforms.
     static func controlCharacter(_ attributes: termios, _ index: Int32) -> cc_t {
-        var attributes = attributes
-        return withUnsafeBytes(of: &attributes.c_cc) { raw in
+        withUnsafeBytes(of: attributes.c_cc) { raw in
             raw.bindMemory(to: cc_t.self)[Int(index)]
         }
     }

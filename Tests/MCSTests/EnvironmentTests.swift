@@ -175,9 +175,17 @@ struct EnvironmentTests {
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
 
-        let path = env.pathWithBrew
         let brewBin = "\(env.brewPrefix)/bin"
-        #expect(path.contains(brewBin))
-        #expect(path.components(separatedBy: brewBin).count == 2, "brew bin must appear exactly once")
+        let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        let path = env.pathWithBrew
+
+        // Asserted against the ambient PATH rather than a fixed shape: a developer whose profile
+        // is sourced twice genuinely has the brew bin in there more than once, and that is not a
+        // failure of this code.
+        if currentPath.contains(brewBin) {
+            #expect(path == currentPath, "an already-present brew bin must not be prepended again")
+        } else {
+            #expect(path.hasPrefix("\(brewBin):"))
+        }
     }
 }

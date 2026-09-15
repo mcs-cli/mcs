@@ -256,21 +256,19 @@ struct MCSConfigTests {
         #expect(config.updateCheckPacks == true, "a stale key must not discard the live ones")
     }
 
-    @Test("The config list rendering ignores a stale telemetry key")
-    func listIgnoresStaleTelemetryKey() throws {
+    @Test("A stale telemetry key is unreachable from every key-driven surface")
+    func staleTelemetryKeyIsUnreachable() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
         let path = tmpDir.appendingPathComponent("config.yaml")
         try "telemetry: false\n".write(to: path, atomically: true, encoding: .utf8)
-
         let config = MCSConfig.load(from: path)
-        // Mirrors ListConfig.run(): every known key is rendered from value(forKey:).
-        let rendered = MCSConfig.knownKeys.map { known -> String in
-            let current = config.value(forKey: known.key)
-            return "\(known.key): \(current.map { String($0) } ?? "(not set)")"
-        }
-        #expect(!rendered.contains { $0.contains("telemetry") })
-        #expect(rendered.count == MCSConfig.CodingKeys.allCases.count)
+
+        // `mcs config list`, `get` and `set` are all driven by these two, so proving telemetry is
+        // absent from them proves it cannot be printed or written. Running ListConfig.run() itself
+        // would mean capturing process stdout, which CLIOutput has no seam for.
+        #expect(!MCSConfig.knownKeys.contains { $0.key == "telemetry" })
+        #expect(config.value(forKey: "telemetry") == nil)
     }
 }

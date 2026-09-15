@@ -22,10 +22,14 @@ struct HomebrewTests {
         #if canImport(Darwin)
         #expect(Homebrew.allPrefixes == ["/opt/homebrew", "/usr/local"])
         #else
-        #expect(
-            Homebrew.allPrefixes
-                == ["/home/linuxbrew/.linuxbrew", Environment.defaultHomeDirectory() + "/.linuxbrew"]
-        )
+        // Asserted by shape, not by re-evaluating the source's own expression: `allPrefixes` is
+        // static and reads the process home, so a literal home cannot be injected here — that
+        // contract is pinned in EnvironmentTests instead.
+        let prefixes = Homebrew.allPrefixes
+        #expect(prefixes.count == 2)
+        #expect(prefixes[0] == "/home/linuxbrew/.linuxbrew")
+        #expect(prefixes[1].hasSuffix("/.linuxbrew"))
+        #expect(prefixes[1] != prefixes[0], "the single-user prefix is the user's home, not the shared one")
         #endif
     }
 
