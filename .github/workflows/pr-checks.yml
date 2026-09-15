@@ -10,12 +10,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Keep in sync with release.yml, which pins the same toolchain for the release build.
+  SWIFT_VERSION: '6.2.0'
+
 jobs:
   lint:
     name: Lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install linters
         run: |
@@ -37,9 +41,9 @@ jobs:
       matrix:
         os: [macos-15, macos-26]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -57,14 +61,56 @@ jobs:
       - name: Test
         run: swift test
 
+  build-and-test-linux:
+    name: Build & Test (linux)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Not a `container:` job: the official swift images run as root, and
+      # UpdateCheckerTests.registryWriteFailureContract asserts that a write into a 0555
+      # directory fails, which root ignores.
+      - uses: ./.github/actions/setup-swift-linux
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-linux-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-linux-
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      # --no-parallel: corelibs Foundation opens files for writing without O_CLOEXEC, on both its
+      # atomic and non-atomic paths, so a test that forks while another is mid-write leaks that
+      # write descriptor into the child and a later exec of the same file fails with ETXTBSY.
+      # Measured at roughly one failure in four full runs. mcs itself is unaffected — it never
+      # executes a file it has just written — so this is a test-runner constraint, not a product
+      # limitation, and the macOS jobs stay parallel.
+      - name: Test
+        run: swift test --no-parallel
+
+      # The shape release.yml ships. Without this, a break in it first shows up on a tag.
+      - name: Build release binary
+        run: swift build -c release --static-swift-stdlib
+
   build-universal:
     name: Universal Binary
     needs: lint
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts

@@ -7,6 +7,18 @@ struct ShellRunnerTests {
         ShellRunner(environment: Environment())
     }
 
+    @Test("An interactive failure points at the terminal unless the bridge itself reported why")
+    func interactiveFailureMessageShapes() {
+        #expect(
+            ShellRunner.interactiveFailureMessage(name: "Ollama", stderr: "")
+                == "Ollama failed (see output above)"
+        )
+        #expect(
+            ShellRunner.interactiveFailureMessage(name: "Ollama", stderr: "forkpty failed: No such file or directory")
+                == "Ollama failed: forkpty failed: No such file or directory"
+        )
+    }
+
     @Test("run captures stdout")
     func capturesStdout() {
         let result = shell.run("/bin/echo", arguments: ["hello"])

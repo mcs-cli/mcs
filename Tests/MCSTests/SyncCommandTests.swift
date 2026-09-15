@@ -393,7 +393,7 @@ struct SyncCommandGuardTests {
         let env = Environment(home: home)
 
         let originalCwd = FileManager.default.currentDirectoryPath
-        defer { FileManager.default.changeCurrentDirectoryPath(originalCwd) }
+        defer { #expect(FileManager.default.changeCurrentDirectoryPath(originalCwd)) }
 
         let cmd = try SyncCommand.parse([env.claudeDirectory.path, "--global", "--pack", "foo"])
         let effective = try cmd.guardClaudeHomeCwd(env: env, output: silentOutput())
@@ -401,7 +401,7 @@ struct SyncCommandGuardTests {
 
         let resultCwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .resolvingSymlinksInPath()
-        #expect(resultCwd == env.homeDirectory.resolvingSymlinksInPath())
+        #expect(resultCwd.path == env.homeDirectory.resolvingSymlinksInPath().path)
     }
 
     @Test("Guard triggers for nested paths like ~/.claude/skills")

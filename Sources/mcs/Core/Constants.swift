@@ -154,16 +154,20 @@ enum Constants {
 
         /// The Homebrew formula name for mcs.
         static let brewFormula = "mcs-cli/tap/mcs"
-    }
 
-    // MARK: - Telemetry
+        /// How the user upgrades mcs on this platform. Only macOS ships through the tap; the
+        /// Linux artifact is a release tarball, so telling a Linux user to run `brew upgrade`
+        /// would send them somewhere mcs did not come from.
+        static var upgradeInstruction: String {
+            #if canImport(Darwin)
+            "brew upgrade \(brewFormula)"
+            #else
+            "download the latest release from \(releasesURL)"
+            #endif
+        }
 
-    enum Telemetry {
-        /// The TelemetryDeck app identifier.
-        static let appID = "A6CB95A6-0DD5-4B46-82AA-5A319797ACA0"
-
-        /// Marker file indicating the telemetry notice has been shown.
-        static let telemetryNoticedFile = ".telemetry-noticed"
+        /// Where the release tarballs are published.
+        static let releasesURL = "https://github.com/mcs-cli/mcs/releases/latest"
     }
 
     // MARK: - Plugins

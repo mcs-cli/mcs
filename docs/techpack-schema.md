@@ -66,6 +66,14 @@ Tap-qualified (`owner/tap/formula`) and versioned (`node@22`) names work, as do 
 passed to `brew` verbatim; only the PATH probe behind the auto-derived check uses the last path
 component.
 
+> **Linux**: verification falls back to `brew list` only when Homebrew is installed, which on Linux
+> it usually is not. Without it a `brew:` component is satisfied only when the formula name is also
+> the command name (`node` yes, `ripgrep` → `rg` no), and `mcs` cannot install the formula — that
+> needs Linuxbrew. `mcs doctor` reports the package missing and `mcs doctor --fix` points the user at
+> their system package manager. There is no per-platform component gating in this schema yet, so a macOS-only
+> formula will simply fail its component on Linux with that message. See
+> [Linux support](linux-support.md).
+
 > **Tapped formulae install from an unaudited source.** `brew install owner/tap/formula` clones the
 > tap's repository and evaluates its formula. Homebrew taps it without asking, and `mcs` runs `brew`
 > without a terminal, so Homebrew's own plan prompt cannot appear either. Nothing in `mcs` gates
@@ -320,7 +328,7 @@ Infers: `type: configuration`, `installAction: gitignoreEntries`
 | Field | Type | Description |
 |-------|------|-------------|
 | `shell` | `String` | Shell command to execute |
-| `shellInteractive` | `Bool` | When `true`, allocates a PTY so commands like `sudo` can prompt for passwords securely. Default: `false` |
+| `shellInteractive` | `Bool` | When `true`, allocates a PTY so commands like `sudo` can prompt for passwords securely. Default: `false`. Works the same on macOS and Linux — `forkpty` on both — with a 0×0 window size on both |
 
 **Does not infer `type`** — you must provide `type:` explicitly. This is because a shell command could install anything (a brew package, a skill, a tool).
 

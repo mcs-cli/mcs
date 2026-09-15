@@ -19,6 +19,14 @@ struct SettingsHasherTests {
         #expect(hash1 == hash2)
     }
 
+    @Test("the canonical form hashes to a pinned digest")
+    func pinnedDigest() {
+        // SHA-256 of the canonical form "alwaysThinkingEnabled=true\n". Pinned so the digest cannot
+        // drift between CryptoKit and swift-crypto — see FileHasherTests.knownAnswerForData.
+        let hash = SettingsHasher.hash(keyPaths: ["alwaysThinkingEnabled"], in: ["alwaysThinkingEnabled": true])
+        #expect(hash == "2bdbc4888ab5234a3b483dfb56870d73b941e36a5fe86d6d5bcd8497b9df73a9")
+    }
+
     @Test("dotted key path extracts nested value")
     func dottedKeyPath() {
         let json: [String: Any] = ["env": ["FOO": "bar"]]

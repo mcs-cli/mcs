@@ -189,7 +189,7 @@ struct UpdateChecker {
         case material([String])
         case unknown(UnknownReason)
 
-        /// Why a classification could not be made. Carries enough context for telemetry
+        /// Why a classification could not be made. Carries enough context for diagnostics
         /// without requiring callers to inspect the orchestrator's call sites.
         enum UnknownReason: Equatable {
             case missingClone
@@ -280,7 +280,7 @@ struct UpdateChecker {
         // `resolvedPath` only validates the path shape; it doesn't stat the filesystem. If the
         // clone was deleted out from under us (e.g. user `rm -rf`'d `~/.mcs/packs/foo`), classify
         // as `.missingClone` instead of letting git fail with a bogus cwd — same outcome at the
-        // call site (notification surfaces) but accurate telemetry and one fewer subprocess.
+        // call site (notification surfaces) but accurate classification and one fewer subprocess.
         guard let workDirURL = entry.resolvedPath(packsDirectory: environment.packsDirectory),
               FileManager.default.fileExists(atPath: workDirURL.path)
         else {
@@ -602,7 +602,7 @@ struct UpdateChecker {
             if let cli = result.cliUpdate {
                 output.warn(
                     "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                        + "To update, \(Constants.MCSRepo.upgradeInstruction)."
                 )
             }
             if !result.packUpdates.isEmpty {
@@ -635,7 +635,7 @@ struct UpdateChecker {
         if let cli = result.cliUpdate {
             lines.append(
                 "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion))."
-                    + " The user should run: brew upgrade \(Constants.MCSRepo.brewFormula)"
+                    + " To update, the user should \(Constants.MCSRepo.upgradeInstruction)."
             )
         }
         if !result.packUpdates.isEmpty {

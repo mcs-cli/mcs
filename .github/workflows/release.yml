@@ -11,12 +11,16 @@ permissions:
 concurrency:
   group: release
 
+env:
+  # Keep in sync with pr-checks.yml.
+  SWIFT_VERSION: '6.2.0'
+
 jobs:
   verify-version:
     name: Verify Version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Verify tag matches source version
         env:
@@ -34,9 +38,9 @@ jobs:
     needs: verify-version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -53,9 +57,9 @@ jobs:
     needs: resolve
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -67,14 +71,14 @@ jobs:
       - name: Test
         run: swift test
 
-  build-and-release:
-    name: Build and Release
+  build-macos:
+    name: Build macOS Universal Binary
     needs: [test]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -99,25 +103,118 @@ jobs:
           fi
           echo "Binary verified: ${BUILT_VERSION}"
 
-      - name: Prepare artifacts
+      - name: Prepare artifact
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: tar -czf "mcs-${TAG_NAME}-macos-universal.tar.gz" -C "${BIN_DIR}" mcs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcs-macos-universal
+          path: mcs-${{ github.ref_name }}-macos-universal.tar.gz
+          if-no-files-found: error
+
+  test-linux:
+    name: Test (linux)
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-swift-linux
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-linux-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-linux-
+
+      # --no-parallel for the same reason as pr-checks.yml: corelibs Foundation leaks write
+      # descriptors into concurrently forked children, which surfaces as a spurious ETXTBSY.
+      - name: Test
+        run: swift test --no-parallel
+
+  build-linux:
+    name: Build Linux x86_64 Binary
+    needs: [test, test-linux]
+    # ubuntu-22.04 on purpose: it sets the glibc floor of the published binary at 2.35.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: ./.github/actions/setup-swift-linux
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-linux-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-linux-
+
+      - name: Build release binary
+        run: |
+          swift build -c release --static-swift-stdlib
+          echo "BIN_DIR=$(swift build -c release --static-swift-stdlib --show-bin-path)" >> "$GITHUB_ENV"
+
+      - name: Verify binary
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          TARBALL="mcs-${TAG_NAME}-macos-universal.tar.gz"
-          tar -czf "${TARBALL}" -C "${BIN_DIR}" mcs
-          shasum -a 256 "${TARBALL}" > SHA256SUMS
-          echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
+          BUILT_VERSION=$("${BIN_DIR}/mcs" --version)
+          if [ "$BUILT_VERSION" != "$TAG_NAME" ]; then
+            echo "::error::Built binary reports version '${BUILT_VERSION}' but tag is '${TAG_NAME}'"
+            exit 1
+          fi
+          echo "Binary verified: ${BUILT_VERSION}"
+
+      - name: Prepare artifact
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: tar -czf "mcs-${TAG_NAME}-linux-x86_64.tar.gz" -C "${BIN_DIR}" mcs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcs-linux-x86_64
+          path: mcs-${{ github.ref_name }}-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Checksum artifacts
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          # sha256sum, not shasum: identical "<hash>  <file>" output and present on every runner.
+          sha256sum *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          echo "TARBALL=mcs-${TAG_NAME}-macos-universal.tar.gz" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
-          TARBALL: ${{ env.TARBALL }}
         run: |
           gh release create "${TAG_NAME}" \
+            --repo "${{ github.repository }}" \
             --verify-tag \
             --generate-notes \
-            "${TARBALL}" SHA256SUMS
+            *.tar.gz SHA256SUMS
 
       - name: Update Homebrew tap
         env:
@@ -126,10 +223,15 @@ jobs:
           TARBALL: ${{ env.TARBALL }}
         if: env.HOMEBREW_TAP_TOKEN != ''
         run: |
-          SHA=$(shasum -a 256 "${TARBALL}" | cut -d' ' -f1)
+          # The formula keeps pointing at the macOS tarball; Linux ships as a plain release asset.
+          SHA=$(sha256sum "${TARBALL}" | cut -d' ' -f1)
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/mcs-cli/homebrew-tap.git" tap
           cd tap
+          # This job has no checkout and Ubuntu runners have dotless hostnames, so git cannot
+          # auto-detect an author and would refuse the commit. Same identity as auto-release.yml.
+          git config user.email "autorelease@mcs-cli.dev"
+          git config user.name "MCS Auto Release"
           cat > Formula/mcs.rb << FORMULA
           class Mcs < Formula
             desc "Configure Claude Code with MCP servers, plugins, skills, and hooks"

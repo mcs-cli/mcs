@@ -1,5 +1,9 @@
 import Foundation
-import os
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Shared, mutable tally of warnings emitted through a `CLIOutput`.
 ///
@@ -11,7 +15,7 @@ import os
 /// `Sendable` so `CLIOutput` stays `Sendable` (it's captured in isolated
 /// closures, e.g. via `ScriptRunner`); the lock supplies that guarantee.
 final class WarningCounter: Sendable {
-    private let lock = OSAllocatedUnfairLock(initialState: 0)
+    private let lock = Locked(0)
 
     var count: Int {
         lock.withLock { $0 }
@@ -86,7 +90,7 @@ struct CLIOutput {
 
     private var terminalColumns: Int {
         var ws = winsize()
-        if ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0, ws.ws_col > 0 {
+        if ioctl(STDOUT_FILENO, UInt(TIOCGWINSZ), &ws) == 0, ws.ws_col > 0 {
             return Int(ws.ws_col)
         }
         return 80
@@ -263,7 +267,13 @@ struct CLIOutput {
             renderYesNo(prompt: prompt, selected: selected)
 
             while true {
-                let byte = readByte()
+                // Unlike the text fallback, this path only runs when stdin *was* a terminal, so
+                // end of input here is a hangup, not an unattended run — and the default may be
+                // the destructive answer. No is safe at every call site.
+                guard let byte = readByte() else {
+                    reportInputClosed()
+                    return false
+                }
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm
@@ -404,7 +414,10 @@ struct CLIOutput {
             renderSingleSelectList(title: title, items: items, cursor: cursor)
 
             while true {
-                let byte = readByte()
+                guard let byte = readByte() else {
+                    reportInputClosed()
+                    return cursor
+                }
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm selection
@@ -537,7 +550,10 @@ struct CLIOutput {
             renderInteractiveList(groups: groups, cursor: cursor)
 
             while true {
-                let byte = readByte()
+                guard let byte = readByte() else {
+                    reportInputClosed()
+                    return collectSelected(from: groups)
+                }
 
                 switch byte {
                 case 0x0A, 0x0D: // Enter
@@ -690,9 +706,23 @@ struct CLIOutput {
         write(output)
     }
 
-    private func readByte() -> UInt8 {
+    /// Leaves a line in scrollback saying why the prompt ended without a key — the pickers return
+    /// a value either way, and without this the transcript shows only the question.
+    private func reportInputClosed() {
+        write("\n")
+        warn("Input closed before the prompt was answered.")
+    }
+
+    /// One byte from `fd`, or `nil` at end of input.
+    ///
+    /// Optional because the pickers below loop until they recognise a key: on EOF or a read error
+    /// no key will ever arrive, and a zero byte matches no case, so returning one would spin at
+    /// 100% CPU until the process is killed. Reachable whenever stdin closes under a raw-mode
+    /// prompt — a hung-up terminal in a `nohup`/`setsid` wrapper that ignores SIGHUP, for instance.
+    /// The descriptor is a parameter so the EOF path can be driven from a pipe under test.
+    func readByte(from fd: Int32 = STDIN_FILENO) -> UInt8? {
         var byte: UInt8 = 0
-        _ = Darwin.read(STDIN_FILENO, &byte, 1)
+        guard read(fd, &byte, 1) > 0 else { return nil }
         return byte
     }
 
@@ -708,10 +738,7 @@ struct CLIOutput {
     private func withRawTerminal<T>(_ body: () -> T) -> T {
         var original = termios()
         tcgetattr(STDIN_FILENO, &original)
-        var raw = original
-        raw.c_lflag &= ~UInt(ICANON | ECHO)
-        raw.c_cc.16 = 1 // VMIN = 1
-        raw.c_cc.17 = 0 // VTIME = 0
+        var raw = TerminalAttributes.rawMode(from: original)
         tcsetattr(STDIN_FILENO, TCSANOW, &raw)
         write("\u{1B}[?25l")
         defer {

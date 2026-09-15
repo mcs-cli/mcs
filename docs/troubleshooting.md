@@ -12,14 +12,14 @@ mcs doctor --global  # Check globally-configured packs only
 
 ### Homebrew not installed
 
-**Symptom**: `mcs sync` fails with "Homebrew is required but not installed."
+**Symptom**: `mcs sync` prints `Homebrew not found — ...` and the package is not installed. The rest of the line differs by platform: macOS points at <https://brew.sh>, Linux names your system package manager.
 
-**Fix**: Install Homebrew first:
+**Fix on macOS**: install Homebrew, then re-run `mcs sync`:
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-Then re-run `mcs sync`.
+**Fix on Linux**: Homebrew is optional. Install the package with your distribution's package manager (`apt`, `dnf`, `pacman`, …) and make sure it is on your `PATH`; `mcs doctor` verifies `brew:` components through `PATH` first, so that is enough. Note that this only works when the formula name is also the command name — `brew: ripgrep` installs a command called `rg`, which mcs cannot know. See [Linux support](linux-support.md#d8--homebrew-on-linux). If you want mcs to install formulae for you, install [Linuxbrew](https://docs.brew.sh/Homebrew-on-Linux).
 
 ### Xcode Command Line Tools missing
 
@@ -47,15 +47,40 @@ If you manage Node.js through nvm or similar, make sure it's available in your P
 
 **Symptom**: MCP servers and plugins can't be registered.
 
-**Fix**: Install Claude Code:
+**Fix on macOS**:
 ```bash
 brew install claude-code
+```
+
+**Fix on Linux**: `claude-code` is a Homebrew cask, and Linuxbrew has no casks, so mcs does not offer a brew install there. Use the native installer or npm:
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+# or
+npm install -g @anthropic-ai/claude-code
 ```
 
 Verify:
 ```bash
 claude --version
 ```
+
+### `mcs doctor` reports that nothing is installed (Linux)
+
+**Symptom**: every command-based check says "not found" on a machine where the tools are clearly present.
+
+**Cause**: mcs resolves command names through `/usr/bin/which`. If that binary is missing — it is absent on NixOS, and Debian has been retiring it — every resolution returns nothing: `mcs sync` and `mcs update` refuse to run (they report Claude Code as missing even when it is installed) and `mcs doctor` reports everything as not found.
+
+**Fix**: install it (`apt-get install debianutils`, or your distribution's equivalent) and re-run `mcs doctor`.
+
+### `mcs: command not found` after unpacking the Linux tarball
+
+**Symptom**: the tarball unpacked, but the shell cannot find `mcs`.
+
+**Fix**: the tarball contains a bare binary, not an installer. Put it somewhere on your `PATH`:
+```bash
+install -D -m 0755 mcs ~/.local/bin/mcs
+```
+If the binary is found but fails to start with an error about `libstdc++.so.6`, install it — the released binary links the Swift runtime statically but still needs the C++ runtime (`apt-get install -y libstdc++6`).
 
 ## MCP Servers
 

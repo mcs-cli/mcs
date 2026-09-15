@@ -35,6 +35,8 @@ struct PackSourceResolver {
     /// character to exclude path-like inputs such as `../foo` or `./bar`.
     static let shorthandPattern = #"^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.-]*$"#
 
+    var environment: Environment = .init()
+
     func resolve(_ input: String) throws -> PackSource {
         guard !input.hasPrefix("-") else {
             throw PackSourceError.invalidInput("must not start with '-'")
@@ -59,11 +61,10 @@ struct PackSourceResolver {
             input
         }
 
-        // expandingTildeInPath handles ~/... and is a no-op for other paths.
         // URL(fileURLWithPath:) resolves relative paths (../, ./) against CWD.
         // Extract .path first to get the absolute string, then re-wrap —
         // calling .standardized directly on a relative URL mangles ".." components.
-        let expanded = NSString(string: pathString).expandingTildeInPath
+        let expanded = environment.expandingTilde(pathString)
         let resolved = URL(fileURLWithPath: URL(fileURLWithPath: expanded).path)
 
         var isDir: ObjCBool = false

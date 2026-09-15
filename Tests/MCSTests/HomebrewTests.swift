@@ -15,6 +15,42 @@ struct HomebrewTests {
         #expect(Homebrew.bareName(of: package) == expected)
     }
 
+    // MARK: - allPrefixes
+
+    @Test("allPrefixes lists this platform's Homebrew locations")
+    func allPrefixesPerPlatform() {
+        #if canImport(Darwin)
+        #expect(Homebrew.allPrefixes == ["/opt/homebrew", "/usr/local"])
+        #else
+        // Asserted by shape, not by re-evaluating the source's own expression: `allPrefixes` is
+        // static and reads the process home, so a literal home cannot be injected here — that
+        // contract is pinned in EnvironmentTests instead.
+        let prefixes = Homebrew.allPrefixes
+        #expect(prefixes.count == 2)
+        #expect(prefixes[0] == "/home/linuxbrew/.linuxbrew")
+        #expect(prefixes[1].hasSuffix("/.linuxbrew"))
+        #expect(prefixes[1] != prefixes[0], "the single-user prefix is the user's home, not the shared one")
+        #endif
+    }
+
+    // MARK: - Guidance when Homebrew is absent
+
+    @Test("Install advice names the package and the platform's way to get it")
+    func manualInstallAdviceIsActionable() {
+        let advice = Homebrew.manualInstallAdvice(for: "ripgrep")
+        #expect(advice.contains("ripgrep"))
+        #if canImport(Darwin)
+        #expect(advice.contains("brew.sh"))
+        #else
+        #expect(advice.contains("system package manager"))
+        #endif
+    }
+
+    @Test("Uninstall advice names the package")
+    func manualUninstallAdviceNamesPackage() {
+        #expect(Homebrew.manualUninstallAdvice(for: "ripgrep").contains("ripgrep"))
+    }
+
     // MARK: - provides
 
     @Test("provides takes the PATH fast path without spawning brew")

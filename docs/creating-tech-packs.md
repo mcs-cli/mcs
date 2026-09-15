@@ -122,6 +122,8 @@ components:
 
 When a user runs `mcs sync`, these get installed via `brew install`. The engine auto-verifies them with `mcs doctor`, which looks for the command on `PATH` and falls back to `brew list` — so a cask, a versioned formula like `node@22`, or a formula whose command is spelled differently (`ripgrep` installs `rg`) still verifies correctly.
 
+> **On Linux, Homebrew is usually absent.** Verification then has only the `PATH` probe, so a `brew:` component is satisfied only when the **formula name is also the command name**: `brew: node` passes when `node` is on `PATH`, `brew: ripgrep` does not, because the command is `rg`. mcs cannot install it either — that needs [Linuxbrew](https://docs.brew.sh/Homebrew-on-Linux) — so `mcs doctor` reports the package missing and `mcs doctor --fix` names the system package manager as the way to get it. Prefer formulae whose name matches their command when you can, and say in your pack's description which tools a Linux user has to install themselves. There is no per-platform component gating in `techpack.yaml` yet; see [Linux support](linux-support.md).
+
 A tap-qualified package (`owner/tap/formula`) works too, but note that installing one taps a third-party repository without asking anyone; `mcs pack validate` warns when your pack declares one.
 
 Need to depend on Homebrew itself? That's a special case — Homebrew can't install itself, so use `shell:` with an explicit doctor check:
@@ -129,7 +131,7 @@ Need to depend on Homebrew itself? That's a special case — Homebrew can't inst
 ```yaml
   - id: homebrew
     displayName: Homebrew
-    description: macOS package manager
+    description: macOS package manager (this component is macOS-only in practice)
     type: brewPackage
     shell: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
     doctorChecks:

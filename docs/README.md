@@ -22,6 +22,7 @@ Creating your own shareable Claude Code configuration:
 How mcs works under the hood:
 
 1. [Architecture](architecture.md) — Package structure, sync flow, convergence model, safety guarantees, and extension points
+2. [Linux support](linux-support.md) — Supported configurations, prerequisites, the per-feature compatibility matrix, and the decisions behind every platform branch
 
 ## Quick Links
 
@@ -36,7 +37,8 @@ How mcs works under the hood:
 | Diagnose issues | [CLI > mcs doctor](cli.md#mcs-doctor) |
 | Understand internals | [Architecture](architecture.md) |
 | Fix a problem | [Troubleshooting](troubleshooting.md) |
+| Run mcs on Linux | [Linux support](linux-support.md) |
 
 ---
 
-[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md)
+[Home](README.md) | [CLI Reference](cli.md) | [Creating Tech Packs](creating-tech-packs.md) | [Schema](techpack-schema.md) | [Architecture](architecture.md) | [Troubleshooting](troubleshooting.md) | [Linux support](linux-support.md)
