@@ -74,12 +74,10 @@ struct Environment {
 
     /// Where Homebrew installs itself when no `brew` is on PATH to ask.
     static var defaultBrewPrefix: String {
-        #if canImport(Darwin)
-        #if arch(arm64)
+        #if canImport(Darwin) && arch(arm64)
         "/opt/homebrew"
-        #else
+        #elseif canImport(Darwin)
         "/usr/local"
-        #endif
         #else
         // Linuxbrew's documented multi-user prefix; unlike macOS it does not vary by architecture.
         "/home/linuxbrew/.linuxbrew"

@@ -135,12 +135,10 @@ struct EnvironmentTests {
 
     @Test("The fallback prefix is the platform's own default")
     func defaultBrewPrefixPerPlatform() {
-        #if canImport(Darwin)
-        #if arch(arm64)
+        #if canImport(Darwin) && arch(arm64)
         #expect(Environment.defaultBrewPrefix == "/opt/homebrew")
-        #else
+        #elseif canImport(Darwin)
         #expect(Environment.defaultBrewPrefix == "/usr/local")
-        #endif
         #else
         #expect(Environment.defaultBrewPrefix == "/home/linuxbrew/.linuxbrew")
         #endif
