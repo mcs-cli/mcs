@@ -20,7 +20,7 @@ jobs:
     name: Verify Version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Verify tag matches source version
         env:
@@ -38,9 +38,9 @@ jobs:
     needs: verify-version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -57,9 +57,9 @@ jobs:
     needs: resolve
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -76,9 +76,9 @@ jobs:
     needs: [test]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -108,30 +108,72 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: tar -czf "mcs-${TAG_NAME}-macos-universal.tar.gz" -C "${BIN_DIR}" mcs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mcs-macos-universal
           path: mcs-${{ github.ref_name }}-macos-universal.tar.gz
           if-no-files-found: error
 
-  build-linux:
-    name: Build Linux x86_64 Binary
-    needs: [test]
-    # ubuntu-22.04 on purpose: it sets the glibc floor of the published binary at 2.35.
-    runs-on: ubuntu-22.04
+  test-linux:
+    name: Test (linux)
+    needs: verify-version
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Install Swift via swiftly
+        # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
         run: |
+          cd "$RUNNER_TEMP"
           curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
           tar zxf "swiftly-$(uname -m).tar.gz"
           ./swiftly init --quiet-shell-followup --assume-yes --skip-install
-          . "$HOME/.local/share/swiftly/env.sh"
+          # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
+          # continuing without swiftly on PATH if the layout ever moves.
+          ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+          test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
+          . "$ENV_SH"
           swiftly install --use "$SWIFT_VERSION" --assume-yes
-          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+          echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-linux-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-linux-
+
+      # --no-parallel for the same reason as pr-checks.yml: corelibs Foundation leaks write
+      # descriptors into concurrently forked children, which surfaces as a spurious ETXTBSY.
+      - name: Test
+        run: swift test --no-parallel
+
+  build-linux:
+    name: Build Linux x86_64 Binary
+    needs: [test, test-linux]
+    # ubuntu-22.04 on purpose: it sets the glibc floor of the published binary at 2.35.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Swift via swiftly
+        # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+          tar zxf "swiftly-$(uname -m).tar.gz"
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+          # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
+          # continuing without swiftly on PATH if the layout ever moves.
+          ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+          test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
+          . "$ENV_SH"
+          swiftly install --use "$SWIFT_VERSION" --assume-yes
+          echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -161,7 +203,7 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: tar -czf "mcs-${TAG_NAME}-linux-x86_64.tar.gz" -C "${BIN_DIR}" mcs
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: mcs-linux-x86_64
           path: mcs-${{ github.ref_name }}-linux-x86_64.tar.gz
@@ -172,7 +214,7 @@ jobs:
     needs: [build-macos, build-linux]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
 
@@ -208,6 +250,10 @@ jobs:
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/mcs-cli/homebrew-tap.git" tap
           cd tap
+          # This job has no checkout and Ubuntu runners have dotless hostnames, so git cannot
+          # auto-detect an author and would refuse the commit. Same identity as auto-release.yml.
+          git config user.email "autorelease@mcs-cli.dev"
+          git config user.name "MCS Auto Release"
           cat > Formula/mcs.rb << FORMULA
           class Mcs < Formula
             desc "Configure Claude Code with MCP servers, plugins, skills, and hooks"
