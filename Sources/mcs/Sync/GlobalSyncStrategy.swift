@@ -137,7 +137,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                 if result.succeeded {
                     output.success("  \(component.displayName) installed")
                 } else if interactive {
-                    output.warn("  \(component.displayName) failed (see output above)")
+                    output.warn("  " + ShellRunner.interactiveFailureMessage(name: component.displayName, stderr: result.stderr))
                 } else {
                     output.warn("  \(component.displayName) requires manual installation:")
                     output.plain("    \(command)")

@@ -115,7 +115,7 @@ struct ProjectSyncStrategy: SyncStrategy {
                 let result = shell.shell(command, interactive: interactive)
                 if !result.succeeded {
                     if interactive {
-                        output.warn("  \(component.displayName) failed (see output above)")
+                        output.warn("  " + ShellRunner.interactiveFailureMessage(name: component.displayName, stderr: result.stderr))
                     } else {
                         output.warn("  \(component.displayName) failed: \(String(result.stderr.prefix(200)))")
                     }

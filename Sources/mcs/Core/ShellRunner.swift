@@ -77,6 +77,14 @@ extension ShellRunning {
 
 /// Runs shell commands and captures output.
 struct ShellRunner: ShellRunning {
+    /// The warning for a failed interactive command. The child's own output already went to the
+    /// terminal, so the result's `stderr` is empty unless the bridge itself failed before `exec` —
+    /// `forkpty` refused, a C string could not be allocated — and then it is the only record of
+    /// why, so it is what gets printed.
+    static func interactiveFailureMessage(name: String, stderr: String) -> String {
+        stderr.isEmpty ? "\(name) failed (see output above)" : "\(name) failed: \(stderr)"
+    }
+
     let environment: Environment
 
     /// Check if a command exists on PATH.
