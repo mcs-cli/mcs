@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # One place for the Linux toolchain version; release.yml pins the same value.
+  # Keep in sync with release.yml, which pins the same toolchain for the release build.
   SWIFT_VERSION: '6.2.0'
 
 jobs:
@@ -71,26 +71,9 @@ jobs:
       # Not a `container:` job: the official swift images run as root, and
       # UpdateCheckerTests.registryWriteFailureContract asserts that a write into a 0555
       # directory fails, which root ignores.
-      - name: Install Swift toolchain build dependencies
-        # swiftly's installer needs libcurl's dev headers to build/verify the toolchain
-        # (confirmed by the exact error swiftly prints when it's missing); ubuntu-latest
-        # does not ship them.
-        run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-
-      - name: Install Swift via swiftly
-        # Unpacked outside the checkout so the tree the next steps build and test in stays clean.
-        run: |
-          cd "$RUNNER_TEMP"
-          curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
-          tar zxf "swiftly-$(uname -m).tar.gz"
-          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
-          # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
-          # continuing without swiftly on PATH if the layout ever moves.
-          ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
-          test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
-          . "$ENV_SH"
-          swiftly install --use "$SWIFT_VERSION" --assume-yes
-          echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup-swift-linux
+        with:
+          swift-version: ${{ env.SWIFT_VERSION }}
 
       - uses: actions/cache@v6
         with:

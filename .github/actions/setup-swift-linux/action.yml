@@ -1,0 +1,34 @@
+name: Set up Swift on Linux
+description: Install a pinned Swift toolchain on an Ubuntu runner via swiftly and put it on PATH.
+
+inputs:
+  swift-version:
+    description: The toolchain version swiftly installs and selects (for example 6.2.0).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install the toolchain's system dependencies
+      # swiftly refuses to install a toolchain until Swift's documented Ubuntu packages are
+      # present; libcurl4-openssl-dev is the one ubuntu-latest lacks.
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
+
+    - name: Install Swift via swiftly
+      # Unpacked outside the checkout so the tree the caller builds and tests in stays clean.
+      shell: bash
+      env:
+        SWIFT_VERSION: ${{ inputs.swift-version }}
+      run: |
+        cd "$RUNNER_TEMP"
+        curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
+        tar zxf "swiftly-$(uname -m).tar.gz"
+        ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+        # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
+        # continuing without swiftly on PATH if the layout ever moves.
+        ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+        test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
+        . "$ENV_SH"
+        swiftly install --use "$SWIFT_VERSION" --assume-yes
+        echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
