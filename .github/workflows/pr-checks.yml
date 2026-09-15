@@ -95,8 +95,14 @@ jobs:
       - name: Resolve packages
         run: swift package resolve
 
+      # --no-parallel: corelibs Foundation opens files for writing without O_CLOEXEC, on both its
+      # atomic and non-atomic paths, so a test that forks while another is mid-write leaks that
+      # write descriptor into the child and a later exec of the same file fails with ETXTBSY.
+      # Measured at roughly one failure in four full runs. mcs itself is unaffected — it never
+      # executes a file it has just written — so this is a test-runner constraint, not a product
+      # limitation, and the macOS jobs stay parallel.
       - name: Test
-        run: swift test
+        run: swift test --no-parallel
 
   build-universal:
     name: Universal Binary

@@ -83,6 +83,10 @@ directory read-only and asserts that a write into it fails; root ignores directo
 that one test fails under `sudo` or in a root container. This is why the CI job runs on the
 `ubuntu-latest` runner rather than in a `swift:*` container image.
 
+**Run it with `--no-parallel` on Linux.** CI does, for the reason in the known limitations below;
+without it roughly one full run in four fails with a spurious `ETXTBSY`. Serial costs about a
+quarter more wall-clock time (42s against 34s here).
+
 ## 4. Compatibility matrix
 
 Legend: `verified` — run on Linux and observed; `verified (with a difference)` — works, but not identically to macOS; the Notes column says how.
@@ -362,6 +366,16 @@ platforms list stays `[.macOS(.v13)]`; Linux needs no entry.
   go through Foundation's `expandingTildeInPath`, which reads the passwd entry on corelibs and the
   `$HOME` value on Darwin. This only shows up when `$HOME` differs from the passwd home, e.g. under
   `sudo -H` or in a container. Pass an absolute path there if you override `$HOME`.
+- **The test suite runs serially on Linux (`swift test --no-parallel`).** corelibs Foundation opens
+  files for writing without `O_CLOEXEC` — measured with `strace` on both its atomic path
+  (`openat(…, ".dat.nosyncXXXX", O_RDWR|O_CREAT|O_EXCL, 0666)`) and its non-atomic one
+  (`openat(…, "b.sh", O_WRONLY|O_CREAT|O_TRUNC, 0666)`) — so when one test forks a subprocess while
+  another is mid-write, the child inherits that write descriptor and a later `exec` of the same file
+  fails with `ETXTBSY`, surfacing as `NSCocoaErrorDomain 256`. Measured at about one failure in four
+  full parallel runs. **mcs itself is unaffected**: it never executes a file it has just written.
+  Since the leak is in Foundation rather than in mcs, there is no `open`-side fix available the way
+  there was for the process lock, and the interfering forks come from unrelated suites, so marking
+  one suite `.serialized` would not close it. The macOS jobs stay parallel.
 - **Nothing is claimed about Fedora, Alpine or NixOS** — they are untested.
 
 ## 7. How to add a platform-specific path
