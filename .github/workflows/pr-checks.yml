@@ -10,6 +10,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # One place for the Linux toolchain version; release.yml pins the same value.
+  SWIFT_VERSION: '6.2.0'
+
 jobs:
   lint:
     name: Lint
@@ -47,6 +51,43 @@ jobs:
             .build/workspace-state.json
           key: spm-${{ matrix.os }}-${{ hashFiles('Package.swift') }}
           restore-keys: spm-${{ matrix.os }}-
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Resolve packages
+        run: swift package resolve
+
+      - name: Test
+        run: swift test
+
+  build-and-test-linux:
+    name: Build & Test (linux)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Not a `container:` job: the official swift images run as root, and
+      # UpdateCheckerTests.registryWriteFailureContract asserts that a write into a 0555
+      # directory fails, which root ignores.
+      - name: Install Swift via swiftly
+        run: |
+          curl -O https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz
+          tar zxf "swiftly-$(uname -m).tar.gz"
+          ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+          . "$HOME/.local/share/swiftly/env.sh"
+          swiftly install --use "$SWIFT_VERSION" --assume-yes
+          echo "$HOME/.local/share/swiftly/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+          key: spm-linux-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-linux-
 
       - name: Swift version
         run: swift --version
