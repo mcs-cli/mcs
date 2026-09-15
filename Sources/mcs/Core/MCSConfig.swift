@@ -6,19 +6,12 @@ import Yams
 struct MCSConfig: Codable {
     var updateCheckPacks: Bool?
     var updateCheckCLI: Bool?
-    var telemetry: Bool?
     var generateLockfile: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case updateCheckPacks = "update-check-packs"
         case updateCheckCLI = "update-check-cli"
-        case telemetry
         case generateLockfile = "generate-lockfile"
-    }
-
-    /// Whether telemetry is enabled. Defaults to `true` when unconfigured (`nil`).
-    var isTelemetryEnabled: Bool {
-        telemetry != false
     }
 
     /// Whether any update check is enabled (at least one key is true).
@@ -64,11 +57,6 @@ struct MCSConfig: Codable {
             defaultValue: "false"
         ),
         ConfigKey(
-            key: CodingKeys.telemetry.rawValue,
-            description: "Enable anonymous usage telemetry",
-            defaultValue: "true"
-        ),
-        ConfigKey(
             key: CodingKeys.generateLockfile.rawValue,
             description: "Write mcs.lock.yaml after each sync (pin pack commits for reproducible setups)",
             defaultValue: "false"
@@ -106,7 +94,6 @@ struct MCSConfig: Codable {
         switch key {
         case CodingKeys.updateCheckPacks.rawValue: updateCheckPacks
         case CodingKeys.updateCheckCLI.rawValue: updateCheckCLI
-        case CodingKeys.telemetry.rawValue: telemetry
         case CodingKeys.generateLockfile.rawValue: generateLockfile
         default: nil
         }
@@ -120,9 +107,6 @@ struct MCSConfig: Codable {
             return true
         case CodingKeys.updateCheckCLI.rawValue:
             updateCheckCLI = value
-            return true
-        case CodingKeys.telemetry.rawValue:
-            telemetry = value
             return true
         case CodingKeys.generateLockfile.rawValue:
             generateLockfile = value
