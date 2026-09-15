@@ -63,20 +63,27 @@ struct Environment {
 
     /// The Homebrew prefix implied by the path `brew` was found at.
     ///
-    /// Two components up from `$PREFIX/bin/brew`, deliberately *without* resolving symlinks:
-    /// Linuxbrew and Intel macOS install `bin/brew` as a symlink into `$PREFIX/Homebrew/bin/brew`,
-    /// and resolving it first would yield `$PREFIX/Homebrew`, whose `bin` holds only `brew` —
-    /// hiding `$PREFIX/bin`, where every formula's symlink lives, from `pathWithBrew`.
+    /// Symlinks are resolved first so a shim elsewhere on PATH (`~/.local/bin/brew` pointing at the
+    /// real install) still yields the prefix formulae link into. The installer itself links
+    /// `$PREFIX/bin/brew -> ../Homebrew/bin/brew` on Linux and Intel macOS, which resolves to the
+    /// repository checkout rather than the prefix — hence the trailing `Homebrew` is stripped.
     static func brewPrefix(forBrewPath path: String) -> String {
-        URL(fileURLWithPath: path)
-            .deletingLastPathComponent().deletingLastPathComponent().path
+        var prefix = URL(fileURLWithPath: path)
+            .resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        if prefix.lastPathComponent == "Homebrew" {
+            prefix = prefix.deletingLastPathComponent()
+        }
+        return prefix.path
     }
 
     /// The user's home directory, `$HOME` first.
     ///
-    /// corelibs Foundation's `NSHomeDirectory()` reads the passwd entry and ignores `$HOME`, where
-    /// Darwin's honours it — so without this, `HOME=… mcs …` would mean different things on the two
-    /// platforms. Takes the environment as a parameter so it can be tested as a pure function.
+    /// Foundation's `NSHomeDirectory()` resolves the passwd entry on Darwin and corelibs alike and
+    /// consults `$HOME` only when there is none, so `HOME=… mcs …` used to be ignored on every
+    /// platform. Preferring a non-empty `$HOME` is what makes containers, `sudo -H`-style launchers
+    /// and test sandboxes work. Takes the environment as a parameter so it can be tested as a pure
+    /// function.
     static func defaultHomeDirectory(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
@@ -84,6 +91,17 @@ struct Environment {
             return NSHomeDirectory()
         }
         return home
+    }
+
+    /// Expands a leading `~` against `homeDirectory`, not the passwd entry Foundation's
+    /// `expandingTildeInPath` reads — otherwise a `~/…` pack path or doctor check would resolve
+    /// under a different home than `~/.mcs` whenever `$HOME` is overridden.
+    func expandingTilde(_ path: String) -> String {
+        if path == "~" {
+            return homeDirectory.path
+        }
+        guard path.hasPrefix("~/") else { return path }
+        return homeDirectory.appendingPathComponent(String(path.dropFirst(2))).path
     }
 
     /// Where Homebrew installs itself when no `brew` is on PATH to ask.

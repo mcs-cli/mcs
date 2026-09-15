@@ -109,6 +109,22 @@ struct PackSourceResolverTests {
         #expect(url.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
     }
 
+    @Test("A tilde path resolves under the injected home, not the passwd entry")
+    func tildeResolvesUnderInjectedHome() throws {
+        let home = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let pack = home.appendingPathComponent("packs/ios")
+        try FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
+
+        let resolver = PackSourceResolver(environment: Environment(home: home))
+        let result = try resolver.resolve("~/packs/ios")
+        guard case let .localPath(url) = result else {
+            Issue.record("Expected .localPath, got \(result)")
+            return
+        }
+        #expect(url.standardizedFileURL.path == pack.standardizedFileURL.path)
+    }
+
     @Test("file:// prefix is stripped and treated as local path")
     func fileScheme() throws {
         let tmpDir = try makeTmpDir()

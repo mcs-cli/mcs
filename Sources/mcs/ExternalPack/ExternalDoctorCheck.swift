@@ -105,6 +105,7 @@ struct ExternalFileExistsCheck: ScopedPathCheck {
     let path: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -132,6 +133,7 @@ struct ExternalDirectoryExistsCheck: ScopedPathCheck {
     let path: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -161,6 +163,7 @@ struct ExternalFileContainsCheck: ScopedPathCheck {
     let pattern: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -192,6 +195,7 @@ struct ExternalFileNotContainsCheck: ScopedPathCheck {
     let pattern: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -517,7 +521,8 @@ enum ExternalDoctorCheckFactory {
                 section: section,
                 path: path,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .directoryExists:
@@ -532,7 +537,8 @@ enum ExternalDoctorCheckFactory {
                 section: section,
                 path: path,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .fileContains:
@@ -550,7 +556,8 @@ enum ExternalDoctorCheckFactory {
                 path: path,
                 pattern: pattern,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .fileNotContains:
@@ -568,7 +575,8 @@ enum ExternalDoctorCheckFactory {
                 path: path,
                 pattern: pattern,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .shellScript:
@@ -640,6 +648,7 @@ protocol ScopedPathCheck: DoctorCheck {
     var path: String { get }
     var scope: ExternalDoctorCheckScope { get }
     var projectRoot: URL? { get }
+    var environment: Environment { get }
 }
 
 enum PathResolveResult {
@@ -652,7 +661,7 @@ extension ScopedPathCheck {
     func resolvePath() -> PathResolveResult {
         switch scope {
         case .global:
-            return .resolved(expandTilde(path))
+            return .resolved(environment.expandingTilde(path))
         case .project:
             guard let root = projectRoot else { return .noProjectRoot }
             guard let safe = PathContainment.safePath(relativePath: path, within: root) else {
@@ -745,14 +754,4 @@ extension SettingsReadingCheck {
         }
         return SettingsProbe(match: nil, readErrors: readErrors, anyFileExisted: anyFileExisted)
     }
-}
-
-// MARK: - Helpers
-
-/// Expand `~` at the start of a path to the user's home directory.
-func expandTilde(_ path: String) -> String {
-    if path.hasPrefix("~/") {
-        return NSString(string: path).expandingTildeInPath
-    }
-    return path
 }

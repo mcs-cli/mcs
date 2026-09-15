@@ -56,7 +56,7 @@ struct AddPack: LockedCommand {
     func perform() throws {
         let ctx = PackCommandContext()
 
-        let resolver = PackSourceResolver()
+        let resolver = PackSourceResolver(environment: ctx.env)
         let packSource: PackSource
         do {
             packSource = try resolver.resolve(source)

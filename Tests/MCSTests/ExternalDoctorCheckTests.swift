@@ -117,6 +117,27 @@ struct ExternalDoctorCheckTests {
         }
     }
 
+    @Test("A global-scoped tilde path resolves under the injected home")
+    func fileExistsResolvesTildeAgainstInjectedHome() throws {
+        let home = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "content".write(to: home.appendingPathComponent(".marker"), atomically: true, encoding: .utf8)
+
+        let check = ExternalFileExistsCheck(
+            name: "marker",
+            section: "Files",
+            path: "~/.marker",
+            scope: .global,
+            projectRoot: nil,
+            environment: Environment(home: home)
+        )
+        if case .pass = check.check() {
+            // expected
+        } else {
+            Issue.record("Expected .pass against the injected home, got \(check.check())")
+        }
+    }
+
     @Test("File exists check fails for missing file")
     func fileExistsFail() {
         let check = ExternalFileExistsCheck(

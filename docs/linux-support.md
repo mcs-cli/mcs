@@ -125,7 +125,7 @@ Legend: `verified` — run on Linux and observed; `verified (with a difference)`
 | `mcs cleanup` | supported | verified | Found and deleted a `CLAUDE.local.md.backup.*` file, with and without `--force`. |
 | `mcs check-updates` + SessionStart hook | supported | verified (with a difference) | `check-updates`, `--json` and `--hook` all run; `mcs config set update-check-cli true` registered `mcs check-updates --hook` in `~/.claude/settings.json` and the cooldown file was written. The upgrade instruction differs: `brew upgrade` on macOS, download the release tarball on Linux. |
 | `mcs config` | supported | verified | `list` / `get` / `set` against `~/.mcs/config.yaml`. |
-| `$HOME` override | supported | verified (with a difference) | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, so `HOME=… mcs …` behaves the same on both platforms. One gap: a `~` typed in a pack path or a pack's doctor `path:` is still expanded from the passwd entry on Linux — see known limitations. |
+| `$HOME` override | supported (behavior change) | verified | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, on both platforms — including a `~` typed in a pack path or a pack's doctor `path:`. Previously `$HOME` was ignored everywhere (ADR D12). |
 | File lock (`flock`) | supported | verified | Two concurrent syncs: the second exited 1 with "Another mcs process is running". |
 | Lockfile (`mcs.lock.yaml`) | supported | verified | Written after sync with `generate-lockfile true`; `mcs sync --lock` consumed it. |
 | Terminal colours / width | supported | verified | ANSI colour and the wrapped/re-rendered picker observed under a PTY; colours suppressed when stdout is a pipe. |
@@ -299,12 +299,14 @@ users have no Homebrew at all.
 
 **Decisions.**
 
-1. **The prefix derivation no longer resolves symlinks.** It takes two components up from
-   `$PREFIX/bin/brew`. Homebrew's installer creates `$PREFIX/bin/brew -> ../Homebrew/bin/brew` on
-   Linux *and on Intel macOS*; only arm64 macOS has a real file there. Resolving first yielded
-   `$PREFIX/Homebrew`, whose `bin` holds only `brew`, so `pathWithBrew` prepended an empty directory
-   and hid `$PREFIX/bin`, where every formula's symlink lives — breaking the PATH-first probe that
-   `brew:` components rest on. This is also a latent fix for Intel macOS.
+1. **The prefix derivation resolves symlinks, then strips a trailing `Homebrew` component.**
+   Homebrew's installer creates `$PREFIX/bin/brew -> ../Homebrew/bin/brew` on Linux *and on Intel
+   macOS*; only arm64 macOS has a real file there. Resolving alone therefore yields the repository
+   checkout, `$PREFIX/Homebrew`, whose `bin` holds only `brew`, and `pathWithBrew` prepended that
+   useless directory. Not resolving at all would instead break a shim — `~/.local/bin/brew` pointing
+   at the real install with `$PREFIX/bin` off PATH — by reporting the shim's directory as the prefix.
+   Resolve-then-strip handles arm64, Intel, Linuxbrew and shims alike. `brewPrefix` feeds only
+   `pathWithBrew`; formula detection walks `Homebrew.allPrefixes`.
 2. **The fallback prefix and `allPrefixes` are platform-aware.** Linux gets
    `/home/linuxbrew/.linuxbrew` and `~/.linuxbrew`. No `brew --prefix` subprocess is spawned.
 3. **`Homebrew.provides` does not change.** It probes PATH under the name with any tap qualifier
@@ -373,30 +375,30 @@ new way for a Linux problem to hold up macOS users, and it is why `test-linux` r
 
 ### D12 — The home directory comes from `$HOME`, falling back to the passwd entry
 
-**Context.** Every path mcs owns hangs off one home directory. corelibs Foundation's
-`NSHomeDirectory()` reads the passwd entry and ignores `$HOME`; Darwin's honours it. So on Linux a
+**Context.** Every path mcs owns hangs off one home directory. Foundation's `NSHomeDirectory()`
+resolves the passwd entry first on Darwin and corelibs alike, and consults `$HOME` only when there
+is no passwd entry (`CFFIXED_USER_HOME`, when set, replaces both). So on *every* platform a
 `HOME=… mcs …` invocation — what a container, a CI runner and `sudo -H` all set up — silently wrote
-to the real user's `~/.claude`, `~/.mcs` and global gitignore.
+to the real user's `~/.claude`, `~/.mcs` and global gitignore. Verified on macOS with a compiled
+probe: `HOME=/tmp/x` still returned the passwd home.
 
-**Options considered.** (a) Leave it and document the divergence. (b) Prefer a non-empty `$HOME`,
-falling back to `NSHomeDirectory()`. (c) Route the two tilde-expansion sites through the same helper
-as well.
+**Options considered.** (a) Leave it and document it. (b) Prefer a non-empty `$HOME`, falling back
+to `NSHomeDirectory()`. (c) Also route the two tilde-expansion sites through the same home.
 
-**Decision: (b).** It is a no-op on macOS, where `NSHomeDirectory()` already prefers `$HOME`, and it
-makes the two platforms agree. `Environment.defaultHomeDirectory(environment:)` takes the
-environment as a parameter so it can be tested as a pure function — swift-testing runs in parallel,
-so a test that called `setenv` would leak into every other test in flight. `Homebrew.allPrefixes`
-uses the same helper, so the single-user Linuxbrew prefix cannot drift from it.
+**Decision: (b) and (c).** This is a deliberate behavior change on macOS as much as on Linux: an
+invocation whose `$HOME` differs from the passwd home — `sudo` with `env_keep`, a launchd agent, a
+sandboxed test — now reads and writes under `$HOME`. `Environment.defaultHomeDirectory(environment:)`
+takes the environment as a parameter so it can be tested as a pure function — swift-testing runs in
+parallel, so a test that called `setenv` would leak into every other test in flight.
+`Homebrew.allPrefixes` uses the same helper, so the single-user Linuxbrew prefix cannot drift from
+it. The two places that expand a tilde a *user* typed — a path given to `mcs pack add`, and a pack's
+doctor `path:` — go through `Environment.expandingTilde(_:)` rather than Foundation's
+`expandingTildeInPath`, so `~/pack` and `~/.mcs` can never name different homes.
 
-**Why not (c).** The two places that expand a tilde a *user* typed — a path given to `mcs pack add`
-and a pack's doctor `path:` — go through Foundation's `expandingTildeInPath`, which has the same
-divergence. Routing them through the helper means parsing `~`, `~/…` and `~user/…` at both sites,
-i.e. a third shared helper and its own tests, for a case that only appears when `$HOME` disagrees
-with the passwd home. The gap is listed under known limitations instead.
-
-**Consequences.** One footnote on Darwin: `NSHomeDirectory()` consults `CFFIXED_USER_HOME` before
-`$HOME`, while this helper checks `$HOME` first — they disagree only when both are set and differ,
-which in practice means CoreFoundation's own test harnesses.
+**Consequences.** `HOME=<dir> mcs …` is now a working sandbox for the whole binary. A `$HOME` that
+points at a missing directory is not validated; `mcs sync --global` creates the tree, `mcs doctor`
+reports everything under it as missing with the path shown. `~user/…` is not expanded — neither
+site ever accepted it.
 
 ## 6. Known limitations
 
@@ -423,12 +425,6 @@ which in practice means CoreFoundation's own test harnesses.
   is left in place.
 - **`techpack.yaml` cannot mark a component macOS-only.** A pack declaring `brew: mas` will run on
   Linux and fail that component with a clear message. See D8's rejected options.
-- **A literal `~` in a user-supplied path ignores `$HOME` on Linux.** `mcs` resolves its own home
-  through `Environment.defaultHomeDirectory()`, which prefers `$HOME`, but the two places that
-  expand a tilde typed by a user — a path passed to `mcs pack add`, and a pack's doctor `path:` —
-  go through Foundation's `expandingTildeInPath`, which reads the passwd entry on corelibs and the
-  `$HOME` value on Darwin. This only shows up when `$HOME` differs from the passwd home, e.g. under
-  `sudo -H` or in a container. Pass an absolute path there if you override `$HOME`.
 - **The test suite runs serially on Linux (`swift test --no-parallel`).** corelibs Foundation opens
   files for writing without `O_CLOEXEC` — measured with `strace` on both its atomic path
   (`openat(…, ".dat.nosyncXXXX", O_RDWR|O_CREAT|O_EXCL, 0666)`) and its non-atomic one

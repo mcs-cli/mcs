@@ -130,10 +130,26 @@ struct EnvironmentTests {
         #expect(env.mcsDirectory.path == "/sandbox/home/.mcs")
     }
 
+    @Test("The default initializer wires the resolved home through")
+    func defaultInitUsesDefaultHomeDirectory() {
+        #expect(Environment().homeDirectory.path == Environment.defaultHomeDirectory())
+    }
+
+    @Test("A leading tilde expands against the environment's home, not the passwd entry")
+    func expandingTildeUsesEnvironmentHome() {
+        let env = Environment(home: URL(fileURLWithPath: "/sandbox/home"))
+
+        #expect(env.expandingTilde("~") == "/sandbox/home")
+        #expect(env.expandingTilde("~/packs/ios") == "/sandbox/home/packs/ios")
+        #expect(env.expandingTilde("/abs/path") == "/abs/path")
+        #expect(env.expandingTilde("relative/~/x") == "relative/~/x")
+        #expect(env.expandingTilde("~other/x") == "~other/x")
+    }
+
     // MARK: - Homebrew prefix
 
-    @Test("brewPrefix keeps the symlinked entry point's own prefix")
-    func brewPrefixDoesNotFollowSymlinks() throws {
+    @Test("brewPrefix strips the Homebrew repository component the installer's symlink resolves to")
+    func brewPrefixStripsRepositoryCheckout() throws {
         let home = try makeTmpHome()
         defer { try? FileManager.default.removeItem(at: home) }
 
@@ -149,8 +165,30 @@ struct EnvironmentTests {
             withDestinationPath: "../Homebrew/bin/brew"
         )
 
-        // Resolving the symlink first would yield <prefix>/Homebrew, whose bin holds only brew.
+        // Resolving alone yields <prefix>/Homebrew, whose bin holds only brew.
         #expect(Environment.brewPrefix(forBrewPath: prefixBin.appendingPathComponent("brew").path) == prefix.path)
+    }
+
+    @Test("brewPrefix follows a shim symlink back to the real prefix")
+    func brewPrefixFollowsShim() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // A user-made ~/.local/bin/brew -> <prefix>/bin/brew with <prefix>/bin off PATH: the
+        // prefix formulae link into is the target's, not the shim's.
+        let prefix = home.appendingPathComponent("opt/homebrew")
+        let prefixBin = prefix.appendingPathComponent("bin")
+        let shimBin = home.appendingPathComponent(".local/bin")
+        try FileManager.default.createDirectory(at: prefixBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: shimBin, withIntermediateDirectories: true)
+        try Data().write(to: prefixBin.appendingPathComponent("brew"))
+        try FileManager.default.createSymbolicLink(
+            atPath: shimBin.appendingPathComponent("brew").path,
+            withDestinationPath: prefixBin.appendingPathComponent("brew").path
+        )
+
+        let expected = prefix.resolvingSymlinksInPath().path
+        #expect(Environment.brewPrefix(forBrewPath: shimBin.appendingPathComponent("brew").path) == expected)
     }
 
     @Test("brewPrefix handles a real file at $PREFIX/bin/brew (arm64 macOS shape)")
