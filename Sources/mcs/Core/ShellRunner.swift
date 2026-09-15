@@ -315,28 +315,26 @@ struct ShellRunner: ShellRunning {
                 break
             }
 
-            // A descriptor that errored or was closed under us never becomes readable, so poll(2)
-            // would keep returning immediately with no branch taken. stdin is dropped rather than
-            // fatal — poll(2) skips negative fds, so the loop carries on draining the PTY — while
-            // an errored PTY means the command is gone, so it ends the bridge. POLLHUP is
-            // deliberately in neither mask: a hung-up descriptor can still have buffered data,
-            // which the reads below drain.
-            if fds[0].revents & Int16(POLLERR | POLLNVAL) != 0 {
-                fds[0].fd = -1
-            }
+            // An errored PTY means the command is gone, so it ends the bridge.
             if fds[1].revents & Int16(POLLERR | POLLNVAL) != 0 {
                 break bridgeLoop
             }
 
-            // Terminal → PTY (user typing, including password input)
+            // Terminal → PTY (user typing, including password input). Readable data is drained
+            // first — a hung-up pipe can still carry buffered bytes — and only a descriptor with
+            // nothing to read and nothing coming (hangup, error, closed) is dropped. Dropping it
+            // matters: poll(2) reports POLLHUP/POLLERR whether or not they were requested, so
+            // leaving the fd in the set would make poll return immediately, forever, with no
+            // branch taken. poll(2) skips negative fds, so the loop carries on draining the PTY.
             if fds[0].revents & Int16(POLLIN) != 0 {
                 let n = read(STDIN_FILENO, &buf, buf.count)
                 if n <= 0 {
-                    // stdin EOF — stop monitoring, let PTY drain remaining output
                     fds[0].fd = -1
                 } else {
                     writeAll(fd: ptyFD, buf: buf, count: n)
                 }
+            } else if fds[0].revents & Int16(POLLHUP | POLLERR | POLLNVAL) != 0 {
+                fds[0].fd = -1
             }
 
             // PTY → Terminal (command output, prompts, progress bars)

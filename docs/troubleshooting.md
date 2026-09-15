@@ -68,7 +68,7 @@ claude --version
 
 **Symptom**: every command-based check says "not found" on a machine where the tools are clearly present.
 
-**Cause**: mcs resolves command names through `/usr/bin/which`. If that binary is missing — it is absent on NixOS, and Debian has been retiring it — every resolution returns nothing, so mcs reports an empty machine instead of erroring.
+**Cause**: mcs resolves command names through `/usr/bin/which`. If that binary is missing — it is absent on NixOS, and Debian has been retiring it — every resolution returns nothing: `mcs sync` and `mcs update` refuse to run (they report Claude Code as missing even when it is installed) and `mcs doctor` reports everything as not found.
 
 **Fix**: install it (`apt-get install debianutils`, or your distribution's equivalent) and re-run `mcs doctor`.
 
@@ -78,7 +78,7 @@ claude --version
 
 **Fix**: the tarball contains a bare binary, not an installer. Put it somewhere on your `PATH`:
 ```bash
-install -m 0755 mcs ~/.local/bin/mcs
+install -D -m 0755 mcs ~/.local/bin/mcs
 ```
 If the binary is found but fails to start with an error about `libstdc++.so.6`, install it — the released binary links the Swift runtime statically but still needs the C++ runtime (`apt-get install -y libstdc++6`).
 

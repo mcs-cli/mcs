@@ -33,7 +33,7 @@ brew install mcs-cli/tap/mcs
 
 ```bash
 tar -xzf mcs-<version>-linux-x86_64.tar.gz
-install -m 0755 mcs ~/.local/bin/mcs
+install -D -m 0755 mcs ~/.local/bin/mcs
 ```
 
 Supported platforms: macOS 13+ and Linux (glibc, x86_64). See

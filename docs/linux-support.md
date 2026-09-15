@@ -62,7 +62,7 @@ Download the tarball for the release you want from
 
 ```bash
 tar -xzf mcs-<version>-linux-x86_64.tar.gz
-install -m 0755 mcs ~/.local/bin/mcs
+install -D -m 0755 mcs ~/.local/bin/mcs
 mcs --version
 ```
 
@@ -455,12 +455,17 @@ import Glibc
 
 Three rules keep this from spreading:
 
-1. **Platform knowledge lives in five places only** — `Core/TerminalAttributes.swift`,
-   `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift` and
-   `Core/ClaudePrerequisite.swift`. Everything else calls into them. If a sixth file needs a `#if`,
-   that is a sign the value belongs in one of these. `ClaudePrerequisite` is on the list because
-   what differs there is *control flow*, not a value: macOS offers a Homebrew install of Claude
-   Code and Linux has no cask to offer, so there is no constant to move into `Constants`.
+1. **Platform-dependent values and control flow live in five places only** —
+   `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`,
+   `Core/Constants.swift` and `Core/ClaudePrerequisite.swift`. Everything else calls into them. If
+   a sixth file needs a `#if` around a *value or a branch*, that is a sign it belongs in one of
+   these. `ClaudePrerequisite` is on the list because what differs there is *control flow*, not a
+   value: macOS offers a Homebrew install of Claude Code and Linux has no cask to offer, so there
+   is no constant to move into `Constants`.
+   The import chain above is the one `#if` this rule does not cover: a file that calls libc
+   directly (`ShellRunner`, `CLIOutput`, `FileLock`, `GlobMatcher`, and `FileLockTests`) or picks
+   the SHA-256 module (`FileHasher`, `SettingsHasher`, `SectionValidator`) carries it at the top,
+   per D4. It selects the same API from a different module and encodes no platform behaviour.
 2. **A `#if` is for a value or API that genuinely differs**, never for making a diagnostic go away.
    The same applies to `_ =`, `try?`, `@unchecked` and `nonisolated(unsafe)`: fix the cause. When a
    Foundation method is `@discardableResult` on Darwin and not on Linux, use the result — it always
