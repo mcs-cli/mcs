@@ -401,7 +401,7 @@ struct SyncCommandGuardTests {
 
         let resultCwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .resolvingSymlinksInPath()
-        #expect(resultCwd == env.homeDirectory.resolvingSymlinksInPath())
+        #expect(resultCwd.path == env.homeDirectory.resolvingSymlinksInPath().path)
     }
 
     @Test("Guard triggers for nested paths like ~/.claude/skills")

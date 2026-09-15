@@ -24,7 +24,11 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: sourcesDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: sourcesDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        // Compared as paths, not URLs: corelibs Foundation flags a directory URL produced by
+        // deletingLastPathComponent() with a trailing slash that standardizedFileURL does not
+        // strip, so two URLs for the same directory are unequal on Linux. The product compares
+        // paths for the same reason (PathContainment, Environment.isInsideClaudeHome).
+        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
     }
 
     @Test("Finds project root via CLAUDE.local.md")
@@ -41,7 +45,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
     }
 
     @Test("Returns nil when no project root found")
@@ -77,7 +81,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
     }
 
     @Test("Prefers .git over CLAUDE.local.md at same level")
@@ -95,7 +99,7 @@ struct ProjectDetectorTests {
         )
 
         let root = ProjectDetector.findProjectRoot(from: tmpDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
     }
 }
 
