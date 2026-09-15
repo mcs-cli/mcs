@@ -4,11 +4,17 @@ import Foundation
 ///
 /// Returns `true` if Claude CLI is available (either already installed or successfully installed).
 /// Returns `false` if the user declines installation or installation fails.
+///
+/// `brewInstalled` and `confirmInstall` default to the real filesystem check and the real prompt;
+/// tests pass both so every macOS branch runs without a Homebrew on the host or a terminal on
+/// stdin.
 @discardableResult
 func ensureClaudeCLI(
     shell: any ShellRunning,
     environment: Environment,
-    output: CLIOutput
+    output: CLIOutput,
+    brewInstalled: Bool? = nil,
+    confirmInstall: (() -> Bool)? = nil
 ) -> Bool {
     if shell.commandExists(Constants.CLI.claudeCommand) {
         return true
@@ -19,12 +25,13 @@ func ensureClaudeCLI(
 
     #if canImport(Darwin)
     let brew = Homebrew(shell: shell, environment: environment)
-    guard brew.isInstalled else {
+    guard brewInstalled ?? brew.isInstalled else {
         printManualClaudeInstallInstructions(output)
         return false
     }
 
-    guard output.askYesNo("Install Claude Code via Homebrew?", default: true) else {
+    let confirm = confirmInstall ?? { output.askYesNo("Install Claude Code via Homebrew?", default: true) }
+    guard confirm() else {
         printManualClaudeInstallInstructions(output)
         return false
     }
@@ -54,9 +61,8 @@ func ensureClaudeCLI(
 /// shell, or writing into npm's global prefix, is a trust decision that belongs to the user.
 private func printManualClaudeInstallInstructions(_ output: CLIOutput) {
     output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
-    #if canImport(Darwin)
-    // macOS has already been offered the Homebrew cask, so the docs link is the whole answer.
-    #else
+    #if !canImport(Darwin)
+    // On macOS the caller owns the Homebrew route; here the manual ones are all there is.
     output.plain("    curl -fsSL https://claude.ai/install.sh | bash")
     output.plain("    npm install -g @anthropic-ai/claude-code")
     #endif
