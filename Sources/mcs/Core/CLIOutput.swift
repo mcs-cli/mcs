@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Shared, mutable tally of warnings emitted through a `CLIOutput`.
 ///
@@ -11,7 +10,7 @@ import os
 /// `Sendable` so `CLIOutput` stays `Sendable` (it's captured in isolated
 /// closures, e.g. via `ScriptRunner`); the lock supplies that guarantee.
 final class WarningCounter: Sendable {
-    private let lock = OSAllocatedUnfairLock(initialState: 0)
+    private let lock = Locked(0)
 
     var count: Int {
         lock.withLock { $0 }
