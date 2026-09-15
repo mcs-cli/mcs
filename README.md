@@ -28,7 +28,8 @@
 brew install mcs-cli/tap/mcs
 ```
 
-**Linux** (x86_64, glibc 2.35+) — download the release tarball:
+**Linux** (x86_64, glibc 2.35+) — download the release tarball from
+[the latest release](https://github.com/mcs-cli/mcs/releases/latest):
 
 ```bash
 tar -xzf mcs-<version>-linux-x86_64.tar.gz

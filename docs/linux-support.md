@@ -17,11 +17,12 @@ how each one was verified; six features behave differently from macOS, and the m
 | Architecture | x86_64. No aarch64 artifact is published yet. |
 | libc | glibc. musl is untested; there is no `canImport(Musl)` branch. |
 | glibc floor | 2.35 — the published binary is built on Ubuntu 22.04. |
-| Tested on | Ubuntu 24.04 (development) and the `ubuntu-latest` GitHub runner (CI). |
+| Tested on | Ubuntu 24.04 (development); the `ubuntu-latest` GitHub runner once this PR's CI has run. |
 | Other distributions | Any glibc ≥ 2.35 distribution is expected to work. **Nothing is claimed about Fedora, Alpine or NixOS** — they have not been tested. |
 
-CI runs `swift build` and the full test suite on Linux for every pull request, alongside the two
-macOS jobs. Lint runs on macOS only: SwiftFormat and SwiftLint give the same verdicts on both, so a
+CI is configured to run `swift build`, the full test suite and the release build on Linux for every
+pull request, alongside the two macOS jobs; the Linux job lands with this change, so its first run is
+this PR's. Lint runs on macOS only: SwiftFormat and SwiftLint give the same verdicts on both, so a
 second run would only add version skew.
 
 ## 2. Prerequisites
@@ -35,11 +36,19 @@ second run would only add version skew.
 | `/bin/bash` | running `shell:` components and pack scripts | every mainstream distribution |
 | `libstdc++.so.6` | the published binary links against it dynamically | most distributions; minimal containers need `apt-get install -y libstdc++6` |
 
-**If `/usr/bin/which` is missing** (it is absent on NixOS, and Debian has been retiring it), mcs does
-not error — it reports an empty machine. `ShellRunner.resolvedPath` returns `nil` for *every*
-command, so `Homebrew.provides`, the Claude Code prerequisite and every command-based doctor check
-report "not found". The symptom is that `mcs doctor` says nothing is installed on a machine where
-everything is. See ADR D9 for why this is documented rather than worked around.
+**If `/usr/bin/which` is missing** (it is absent on NixOS, and Debian has been retiring it),
+`ShellRunner.resolvedPath` returns `nil` for *every* command, so `Homebrew.provides`, the Claude Code
+prerequisite and every command-based doctor check report "not found". Measured with `which` masked
+on a machine where Claude Code is genuinely installed:
+
+| Command | Result |
+|---|---|
+| `mcs sync` | **exits 1 and does nothing** — "Claude Code CLI not found", then the install instructions |
+| `mcs update` | **exits 1 and does nothing** — same message |
+| `mcs doctor` | exits 0, reporting everything as missing |
+
+So the two commands that change anything refuse to run and tell the user to install software they
+already have. See ADR D9 for why this is documented rather than worked around.
 
 Homebrew is **optional** on Linux. Without it, `brew:` components are verified through `PATH` only
 and cannot be installed by mcs — see the `brew:` row in section 4 and ADR D8.
@@ -230,6 +239,14 @@ import Glibc
 SwiftGlibc — see D5. No `canImport(Musl)` branch is added: nothing here builds for musl, and an
 untested branch is worse than no branch.
 
+**Consequence beyond the imports.** Four Foundation methods are `@discardableResult` on Darwin and
+not on Linux, so their results had to be used rather than dropped. Three sites now require the file
+to exist before treating it as a directory, which is behaviour-identical. The fourth is a small
+**macOS-visible change**: `GitignoreManager`'s bootstrap used `createFile(atPath:contents:)`, whose
+`false` return was ignored, and now writes through `Data` — so a failure to create the global
+gitignore throws out of `ensureFileExists()` instead of passing silently and failing later at the
+read.
+
 ### D5 — `forkpty()` is called from Glibc; no C shim, no `posix_openpt` rewrite
 
 **Context.** `ShellRunner.runInteractive` allocates a real PTY so `sudo` can read a password. The
@@ -326,8 +343,14 @@ check would then print a permanently-passing line in every `mcs doctor` run on *
 touching doctor mandates an integration test. Three files and a test, for a condition that does not
 occur on the platforms mcs ships for.
 
-**Consequences.** The failure mode is documented in section 2 rather than detected: with no `which`,
-mcs reports an empty machine instead of erroring.
+**Consequences.** The failure mode is documented in section 2 rather than detected, and it is worse
+than "reports an empty machine": `mcs sync` and `mcs update` refuse to run and blame a missing Claude
+Code CLI that is in fact installed. That is a bad failure, and it is why the decision is documented
+prominently rather than left implicit — but it does not change the arithmetic, because the doctor
+check considered in (c) would not have helped either. `mcs doctor` is the one command that still
+completes, so a user who runs it sees a `✗ which` line; a user who runs `sync` gets the misleading
+error and never reaches doctor. Detecting it where it actually bites means a check in `sync`'s
+prerequisite path, which is a different change from the one (c) proposed.
 
 ### D10 — No Subprocess 1.0, no tools-version bump, macOS 13 floor stays
 
@@ -338,9 +361,49 @@ against an async API, push `async` through `ParsableCommand.run()`, and require 
 story — a rewrite of the process layer in the middle of a port, for no benefit to this goal. The
 platforms list stays `[.macOS(.v13)]`; Linux needs no entry.
 
+### D11 — One release, two artifacts
+
+The release workflow builds the macOS universal binary and the Linux x86_64 binary in parallel and
+publishes both from a single job, so one `SHA256SUMS` covers them and the Homebrew tap is updated
+once. **Consequence: the release is now all-or-nothing across platforms** — a Linux build or test
+failure blocks the macOS tarball, the GitHub release and the tap update, which could not happen
+before. That is the intended trade (a half-published release is worse than a late one), but it is a
+new way for a Linux problem to hold up macOS users, and it is why `test-linux` runs before
+`build-linux` rather than after the release is cut.
+
+### D12 — The home directory comes from `$HOME`, falling back to the passwd entry
+
+**Context.** Every path mcs owns hangs off one home directory. corelibs Foundation's
+`NSHomeDirectory()` reads the passwd entry and ignores `$HOME`; Darwin's honours it. So on Linux a
+`HOME=… mcs …` invocation — what a container, a CI runner and `sudo -H` all set up — silently wrote
+to the real user's `~/.claude`, `~/.mcs` and global gitignore.
+
+**Options considered.** (a) Leave it and document the divergence. (b) Prefer a non-empty `$HOME`,
+falling back to `NSHomeDirectory()`. (c) Route the two tilde-expansion sites through the same helper
+as well.
+
+**Decision: (b).** It is a no-op on macOS, where `NSHomeDirectory()` already prefers `$HOME`, and it
+makes the two platforms agree. `Environment.defaultHomeDirectory(environment:)` takes the
+environment as a parameter so it can be tested as a pure function — swift-testing runs in parallel,
+so a test that called `setenv` would leak into every other test in flight. `Homebrew.allPrefixes`
+uses the same helper, so the single-user Linuxbrew prefix cannot drift from it.
+
+**Why not (c).** The two places that expand a tilde a *user* typed — a path given to `mcs pack add`
+and a pack's doctor `path:` — go through Foundation's `expandingTildeInPath`, which has the same
+divergence. Routing them through the helper means parsing `~`, `~/…` and `~user/…` at both sites,
+i.e. a third shared helper and its own tests, for a case that only appears when `$HOME` disagrees
+with the passwd home. The gap is listed under known limitations instead.
+
+**Consequences.** One footnote on Darwin: `NSHomeDirectory()` consults `CFFIXED_USER_HOME` before
+`$HOME`, while this helper checks `$HOME` first — they disagree only when both are set and differ,
+which in practice means CoreFoundation's own test harnesses.
+
 ## 6. Known limitations
 
-- **x86_64 only.** No aarch64 Linux tarball is published yet.
+- **x86_64 only, by decision rather than by obstacle.** GitHub does offer `ubuntu-24.04-arm` and
+  `ubuntu-22.04-arm` runners, so an aarch64 tarball is buildable today; it is deliberately left as a
+  follow-up so this port does not widen into a second artifact, its own naming and its own smoke
+  test.
 - **glibc ≥ 2.35**, because the release binary is built on Ubuntu 22.04. musl is untested.
 - **The binary is ~95 MB and needs `libstdc++6`.** `--static-swift-stdlib` links the *Swift* runtime
   statically only; `ldd` still shows `libstdc++.so.6`, `libgcc_s.so.1`, `libm`, `libc` and

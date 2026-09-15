@@ -79,7 +79,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/remove`
 - `ClaudePrerequisite.swift` — Claude Code CLI availability check; macOS offers a Homebrew install, Linux prints the native-installer and npm commands
 - `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
-- `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
+- `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit on Darwin, swift-crypto on Linux (used by `PackTrustManager` and `ComponentExecutor`)
 - `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
 - `Locked.swift` — `NSLock`-backed value box with the `withLock { $0 }` shape of the Darwin-only `OSAllocatedUnfairLock` (`Synchronization.Mutex` is macOS 15+, above the macOS 13 floor)
 - `TerminalAttributes.swift` — termios helpers for the raw-mode picker; `c_cc` is indexed through the platform's own `VMIN`/`VTIME` and flag masks are widened through `tcflag_t`

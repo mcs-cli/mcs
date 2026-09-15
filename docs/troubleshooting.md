@@ -12,7 +12,7 @@ mcs doctor --global  # Check globally-configured packs only
 
 ### Homebrew not installed
 
-**Symptom**: `mcs sync` prints `Homebrew not found — install <package> ...` and the package is not installed.
+**Symptom**: `mcs sync` prints `Homebrew not found — ...` and the package is not installed. The rest of the line differs by platform: macOS points at <https://brew.sh>, Linux names your system package manager.
 
 **Fix on macOS**: install Homebrew, then re-run `mcs sync`:
 ```bash
