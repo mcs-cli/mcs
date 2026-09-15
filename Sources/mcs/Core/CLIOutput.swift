@@ -267,10 +267,12 @@ struct CLIOutput {
             renderYesNo(prompt: prompt, selected: selected)
 
             while true {
-                // End of input is Ctrl-D by another name, so it takes the same exit.
+                // Unlike the text fallback, this path only runs when stdin *was* a terminal, so
+                // end of input here is a hangup, not an unattended run — and the default may be
+                // the destructive answer. No is safe at every call site.
                 guard let byte = readByte() else {
-                    write("\n")
-                    return defaultValue
+                    reportInputClosed()
+                    return false
                 }
 
                 switch byte {
@@ -413,7 +415,7 @@ struct CLIOutput {
 
             while true {
                 guard let byte = readByte() else {
-                    write("\n")
+                    reportInputClosed()
                     return cursor
                 }
 
@@ -549,7 +551,7 @@ struct CLIOutput {
 
             while true {
                 guard let byte = readByte() else {
-                    write("\n")
+                    reportInputClosed()
                     return collectSelected(from: groups)
                 }
 
@@ -704,15 +706,23 @@ struct CLIOutput {
         write(output)
     }
 
-    /// One byte from stdin, or `nil` at end of input.
+    /// Leaves a line in scrollback saying why the prompt ended without a key — the pickers return
+    /// a value either way, and without this the transcript shows only the question.
+    private func reportInputClosed() {
+        write("\n")
+        warn("Input closed before the prompt was answered.")
+    }
+
+    /// One byte from `fd`, or `nil` at end of input.
     ///
     /// Optional because the pickers below loop until they recognise a key: on EOF or a read error
     /// no key will ever arrive, and a zero byte matches no case, so returning one would spin at
     /// 100% CPU until the process is killed. Reachable whenever stdin closes under a raw-mode
     /// prompt — a hung-up terminal in a `nohup`/`setsid` wrapper that ignores SIGHUP, for instance.
-    private func readByte() -> UInt8? {
+    /// The descriptor is a parameter so the EOF path can be driven from a pipe under test.
+    func readByte(from fd: Int32 = STDIN_FILENO) -> UInt8? {
         var byte: UInt8 = 0
-        guard read(STDIN_FILENO, &byte, 1) > 0 else { return nil }
+        guard read(fd, &byte, 1) > 0 else { return nil }
         return byte
     }
 
