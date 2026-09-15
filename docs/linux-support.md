@@ -52,6 +52,7 @@ Legend: `verified` — run on Linux and observed; `verified (with a difference)`
 | Lockfile (`mcs.lock.yaml`) | supported | verified | Written after sync with `generate-lockfile true`; `mcs sync --lock` consumed it. |
 | Terminal colours / width | supported | verified | ANSI colour and the wrapped/re-rendered picker observed under a PTY; colours suppressed when stdout is a pipe. |
 | Claude Code prerequisite | supported | verified (with a difference) | With `claude` off PATH, Linux prints the native-installer and npm commands and returns false. macOS still offers the Homebrew install; `claude-code` is a cask and Linuxbrew has no casks. |
+| Release artifact | `.tar.gz` (universal) | verified (with a difference) | `swift build -c release --static-swift-stdlib` produces one 95 MB binary; the tarball holds exactly one file and `./mcs --version` prints the version. `ldd` still shows `libstdc++.so.6`, `libgcc_s.so.1`, `libm`, `libc` and `ld-linux`. |
 | Telemetry | removed | removed | Deleted outright — see ADR D1. |
 
 ## 5. Decisions (ADR entries)
