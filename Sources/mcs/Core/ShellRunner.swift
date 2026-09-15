@@ -207,8 +207,10 @@ struct ShellRunner: ShellRunning {
 
         // After fork() only async-signal-safe calls are legal, so the child has no way to report
         // an allocation failure, and a force-unwrap there would trap through the Swift runtime.
-        // Every C string the child needs is therefore allocated and checked here, in the parent.
-        // (Glibc types `strdup` as returning an optional; Darwin implicitly unwraps it.)
+        // Every C string the child needs is therefore allocated and checked here, in the parent —
+        // a nil in the middle of argv or envp would otherwise truncate the vector at execve, which
+        // stops at the first NULL. (Glibc types `strdup` as returning an optional; Darwin
+        // implicitly unwraps it.)
         guard let executablePath = strdup(executable) else {
             return ShellResult(
                 exitCode: 1, stdout: "", stderr: "Could not allocate the command path for \(executable)"
@@ -216,6 +218,15 @@ struct ShellRunner: ShellRunning {
         }
         let argv: [UnsafeMutablePointer<CChar>?] = [executablePath] + arguments.map { strdup($0) } + [nil]
         defer { argv.compactMap(\.self).forEach { free($0) } } // frees executablePath too — it is argv[0]
+
+        // dropLast() skips the NULL terminator each vector deliberately ends with.
+        guard !argv.dropLast().contains(where: { $0 == nil }),
+              !envp.dropLast().contains(where: { $0 == nil })
+        else {
+            return ShellResult(
+                exitCode: 1, stdout: "", stderr: "Could not allocate the command line for \(executable)"
+            )
+        }
 
         // Pre-convert workingDirectory to a C string before fork so the child
         // doesn't need to invoke Swift's String-to-CString bridge (not fork-safe).
@@ -305,11 +316,16 @@ struct ShellRunner: ShellRunning {
             }
 
             // A descriptor that errored or was closed under us never becomes readable, so poll(2)
-            // would keep returning immediately with no branch taken. poll(2) skips negative fds,
-            // so dropping it here lets the loop carry on draining the PTY. POLLHUP is deliberately
-            // not included: a hung-up stdin can still have buffered data, which the read drains.
+            // would keep returning immediately with no branch taken. stdin is dropped rather than
+            // fatal — poll(2) skips negative fds, so the loop carries on draining the PTY — while
+            // an errored PTY means the command is gone, so it ends the bridge. POLLHUP is
+            // deliberately in neither mask: a hung-up descriptor can still have buffered data,
+            // which the reads below drain.
             if fds[0].revents & Int16(POLLERR | POLLNVAL) != 0 {
                 fds[0].fd = -1
+            }
+            if fds[1].revents & Int16(POLLERR | POLLNVAL) != 0 {
+                break bridgeLoop
             }
 
             // Terminal → PTY (user typing, including password input)
