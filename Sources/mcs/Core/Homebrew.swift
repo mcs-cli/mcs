@@ -2,8 +2,15 @@ import Foundation
 
 /// Manages Homebrew package installation and service management.
 struct Homebrew {
-    /// Both Homebrew prefix paths — arm64 and x86_64.
-    static let allPrefixes = ["/opt/homebrew", "/usr/local"]
+    /// Every prefix Homebrew installs itself at on this platform: both macOS architectures, or
+    /// Linuxbrew's multi-user and single-user locations.
+    static var allPrefixes: [String] {
+        #if canImport(Darwin)
+        ["/opt/homebrew", "/usr/local"]
+        #else
+        ["/home/linuxbrew/.linuxbrew", NSHomeDirectory() + "/.linuxbrew"]
+        #endif
+    }
 
     let shell: any ShellRunning
     let environment: Environment
@@ -54,6 +61,29 @@ struct Homebrew {
     @discardableResult
     func uninstall(_ name: String) -> ShellResult {
         shell.run(environment.brewPath, arguments: ["uninstall", name])
+    }
+
+    /// What to tell the user about `package` when Homebrew is not installed.
+    ///
+    /// With no `brew` there is nothing `mcs sync` can do, so the advice must not point back at it
+    /// — that loop has no exit. On Linux, Homebrew is the unusual case: the package almost
+    /// certainly comes from the distribution's own package manager, so that is what is named.
+    static func manualInstallAdvice(for package: String) -> String {
+        #if canImport(Darwin)
+        "Homebrew not found — install it from https://brew.sh, then re-run 'mcs sync' to get \(package)"
+        #else
+        "Homebrew not found — install \(package) with your system package manager"
+            + " (apt, dnf, pacman, …) or install Homebrew from https://brew.sh"
+        #endif
+    }
+
+    /// The counterpart of `manualInstallAdvice(for:)` for a package mcs wanted to remove.
+    static func manualUninstallAdvice(for package: String) -> String {
+        #if canImport(Darwin)
+        "Homebrew not found — remove '\(package)' yourself if nothing else needs it"
+        #else
+        "Homebrew not found — remove '\(package)' with your system package manager if nothing else needs it"
+        #endif
     }
 
     /// Detects the Homebrew formula that provides a command by reading the immediate

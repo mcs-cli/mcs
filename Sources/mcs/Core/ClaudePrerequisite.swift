@@ -1,6 +1,6 @@
 import Foundation
 
-/// Verify that the Claude Code CLI is available, offering to install via Homebrew if missing.
+/// Verify that the Claude Code CLI is available, offering an install where mcs can perform one.
 ///
 /// Returns `true` if Claude CLI is available (either already installed or successfully installed).
 /// Returns `false` if the user declines installation or installation fails.
@@ -17,14 +17,15 @@ func ensureClaudeCLI(
     output.error("Claude Code CLI not found.")
     output.plain("  mcs requires the Claude Code CLI to function.")
 
+    #if canImport(Darwin)
     let brew = Homebrew(shell: shell, environment: environment)
     guard brew.isInstalled else {
-        output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
+        printManualClaudeInstallInstructions(output)
         return false
     }
 
     guard output.askYesNo("Install Claude Code via Homebrew?", default: true) else {
-        output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
+        printManualClaudeInstallInstructions(output)
         return false
     }
 
@@ -39,6 +40,22 @@ func ensureClaudeCLI(
     if !result.stderr.isEmpty {
         output.dimmed(String(result.stderr.prefix(200)))
     }
-    output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
+    printManualClaudeInstallInstructions(output)
     return false
+    #else
+    // `claude-code` is a Homebrew *cask*, and Linuxbrew has no casks, so offering the brew install
+    // would fail on exactly the machines that have brew. Print what does work instead.
+    printManualClaudeInstallInstructions(output)
+    return false
+    #endif
+}
+
+/// How to install Claude Code by hand. mcs never runs these itself — piping an installer into a
+/// shell, or writing into npm's global prefix, is a trust decision that belongs to the user.
+private func printManualClaudeInstallInstructions(_ output: CLIOutput) {
+    output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
+    #if !canImport(Darwin)
+    output.plain("    curl -fsSL https://claude.ai/install.sh | bash")
+    output.plain("    npm install -g @anthropic-ai/claude-code")
+    #endif
 }

@@ -602,7 +602,7 @@ struct UpdateChecker {
             if let cli = result.cliUpdate {
                 output.warn(
                     "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                        + "To update, \(Constants.MCSRepo.upgradeInstruction)."
                 )
             }
             if !result.packUpdates.isEmpty {
@@ -635,7 +635,7 @@ struct UpdateChecker {
         if let cli = result.cliUpdate {
             lines.append(
                 "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion))."
-                    + " The user should run: brew upgrade \(Constants.MCSRepo.brewFormula)"
+                    + " To update, the user should \(Constants.MCSRepo.upgradeInstruction)."
             )
         }
         if !result.packUpdates.isEmpty {

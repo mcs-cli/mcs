@@ -614,3 +614,37 @@ struct DoctorSummaryWarningCountTests {
         #expect(withGhost.warnings == baseline.warnings + 1)
     }
 }
+
+// MARK: - Brew Guidance
+
+struct BrewPackageCheckGuidanceTests {
+    @Test("A brew package whose formula name is also a command on PATH passes")
+    func formulaNameMatchingCommandPasses() {
+        // `git` stands in for that whole class: the PATH probe is provenance-blind, so any
+        // installer satisfies the declaration. This is the only shape that works on a Linux box
+        // with no Homebrew.
+        let check = BrewPackageCheck(name: "git", section: "Dependencies", package: "git")
+        #expect(!check.check().isFailOrWarn)
+    }
+
+    @Test("The fix for a missing package never advertises a command that cannot work")
+    func fixDoesNotPointAtSyncWhenBrewIsAbsent() {
+        let package = "mcs-nonexistent-formula-for-tests"
+        let check = BrewPackageCheck(name: package, section: "Dependencies", package: package)
+        #expect(check.check().isFailOrWarn)
+
+        guard case let .notFixable(message) = check.fix() else {
+            Issue.record("Installing a package is sync's job, so the fix must be .notFixable")
+            return
+        }
+
+        // Asserted against whichever machine runs this: with brew present `mcs sync` really can
+        // install the package, without it that advice is a loop with no exit.
+        if FileManager.default.fileExists(atPath: Environment().brewPath) {
+            #expect(message.contains("mcs sync"))
+        } else {
+            #expect(!message.contains("mcs sync"))
+            #expect(message.contains(package))
+        }
+    }
+}

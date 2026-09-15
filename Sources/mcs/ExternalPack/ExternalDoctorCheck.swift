@@ -81,7 +81,9 @@ struct ExternalCommandExistsCheck: DoctorCheck {
 
     func fix() -> FixResult {
         guard let fixCommand else {
-            return .notFixable("Run 'mcs sync' to install dependencies")
+            // The pack declares no fix, and nothing here knows which component — if any — would
+            // install this command, so pointing at 'mcs sync' would be a guess that often no-ops.
+            return .notFixable("Install '\(command)' and make sure it is on PATH")
         }
         let result = scriptRunner.runCommand(fixCommand)
         if result.succeeded {

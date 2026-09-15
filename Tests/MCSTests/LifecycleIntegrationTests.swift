@@ -21,11 +21,14 @@ private struct LifecycleTestBed {
         try? FileManager.default.removeItem(at: home)
     }
 
-    func makeConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
+    func makeConfigurator(
+        registry: TechPackRegistry = TechPackRegistry(),
+        shell: (any ShellRunning)? = nil
+    ) -> Configurator {
         Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false),
-            shell: ShellRunner(environment: env),
+            shell: shell ?? ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
             claudeCLI: mockCLI
@@ -45,12 +48,13 @@ private struct LifecycleTestBed {
 
     func makeGlobalSyncConfigurator(
         registry: TechPackRegistry = TechPackRegistry(),
-        warningCounter: WarningCounter? = nil
+        warningCounter: WarningCounter? = nil,
+        shell: (any ShellRunning)? = nil
     ) -> Configurator {
         Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter),
-            shell: ShellRunner(environment: env),
+            shell: shell ?? ShellRunner(environment: env),
             registry: registry,
             strategy: GlobalSyncStrategy(environment: env),
             claudeCLI: mockCLI
@@ -3183,5 +3187,39 @@ struct BrewPackageDoctorTests {
         let summary = try runner.run()
         #expect(summary.warnings == 0)
         #expect(summary.issues == 0)
+    }
+
+    /// The Linux happy path in one assertion: a `brew:` component whose command is on PATH is
+    /// satisfied without Homebrew existing at all, which is what makes `brew:` usable on a machine
+    /// that has no brew. Global scope, because that is where `configure` installs brew packages
+    /// inline. The package name is deliberately one no machine has, so the mocked PATH hit — not
+    /// the real machine — is what decides the outcome.
+    @Test("A brew package satisfied on PATH spawns no brew subprocess")
+    func pathSatisfiedBrewPackageSpawnsNoSubprocess() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let package = "mcs-nonexistent-formula-for-tests"
+        let shell = MockShellRunner(environment: bed.env)
+        shell.commandExistsResult = true
+
+        let pack = MockTechPack(
+            identifier: "brew-pack",
+            displayName: "Brew Pack",
+            components: [bed.brewComponent(pack: "brew-pack", id: "tool", package: package)]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry, shell: shell)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(shell.commandExistsCalls.contains(package))
+        #expect(
+            !shell.runCalls.contains { $0.executable == bed.env.brewPath },
+            "a PATH hit must settle the question without asking brew"
+        )
+
+        let state = try ProjectState(stateFile: bed.env.globalStateFile)
+        #expect(state.configuredPacks.contains("brew-pack"))
     }
 }

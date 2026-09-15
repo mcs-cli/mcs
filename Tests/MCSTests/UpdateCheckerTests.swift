@@ -107,6 +107,19 @@ struct UpdateCheckerCacheTests {
         #expect(checker.loadCache() == nil)
     }
 
+    @Test("The upgrade instruction matches how mcs is distributed on this platform")
+    func upgradeInstructionIsPlatformAppropriate() {
+        let instruction = Constants.MCSRepo.upgradeInstruction
+        #if canImport(Darwin)
+        #expect(instruction.contains("brew upgrade"))
+        #expect(instruction.contains(Constants.MCSRepo.brewFormula))
+        #else
+        // The Linux artifact is a release tarball, so brew is the wrong place to send the user.
+        #expect(!instruction.contains("brew"))
+        #expect(instruction.contains(Constants.MCSRepo.releasesURL))
+        #endif
+    }
+
     @Test("invalidateCache deletes the cache file")
     func invalidateCache() throws {
         let tmpDir = try makeTmpDir()

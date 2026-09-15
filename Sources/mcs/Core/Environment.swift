@@ -52,19 +52,38 @@ struct Environment {
 
         if let resolvedBrew = Self.resolvedBrewPath {
             brewPath = resolvedBrew
-            brewPrefix = URL(fileURLWithPath: resolvedBrew)
-                .resolvingSymlinksInPath()
-                .deletingLastPathComponent().deletingLastPathComponent().path
+            brewPrefix = Self.brewPrefix(forBrewPath: resolvedBrew)
         } else {
-            #if arch(arm64)
-            brewPrefix = "/opt/homebrew"
-            #else
-            brewPrefix = "/usr/local"
-            #endif
+            brewPrefix = Self.defaultBrewPrefix
             brewPath = "\(brewPrefix)/bin/brew"
         }
 
         gitPath = Self.resolvedGitPath
+    }
+
+    /// The Homebrew prefix implied by the path `brew` was found at.
+    ///
+    /// Two components up from `$PREFIX/bin/brew`, deliberately *without* resolving symlinks:
+    /// Linuxbrew and Intel macOS install `bin/brew` as a symlink into `$PREFIX/Homebrew/bin/brew`,
+    /// and resolving it first would yield `$PREFIX/Homebrew`, whose `bin` holds only `brew` —
+    /// hiding `$PREFIX/bin`, where every formula's symlink lives, from `pathWithBrew`.
+    static func brewPrefix(forBrewPath path: String) -> String {
+        URL(fileURLWithPath: path)
+            .deletingLastPathComponent().deletingLastPathComponent().path
+    }
+
+    /// Where Homebrew installs itself when no `brew` is on PATH to ask.
+    static var defaultBrewPrefix: String {
+        #if canImport(Darwin)
+        #if arch(arm64)
+        "/opt/homebrew"
+        #else
+        "/usr/local"
+        #endif
+        #else
+        // Linuxbrew's documented multi-user prefix; unlike macOS it does not vary by architecture.
+        "/home/linuxbrew/.linuxbrew"
+        #endif
     }
 
     /// Directory where external tech pack checkouts live (`~/.mcs/packs/`).

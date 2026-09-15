@@ -154,6 +154,20 @@ enum Constants {
 
         /// The Homebrew formula name for mcs.
         static let brewFormula = "mcs-cli/tap/mcs"
+
+        /// How the user upgrades mcs on this platform. Only macOS ships through the tap; the
+        /// Linux artifact is a release tarball, so telling a Linux user to run `brew upgrade`
+        /// would send them somewhere mcs did not come from.
+        static var upgradeInstruction: String {
+            #if canImport(Darwin)
+            "brew upgrade \(brewFormula)"
+            #else
+            "download the latest release from \(releasesURL)"
+            #endif
+        }
+
+        /// Where the release tarballs are published.
+        static let releasesURL = "https://github.com/mcs-cli/mcs/releases/latest"
     }
 
     // MARK: - Plugins

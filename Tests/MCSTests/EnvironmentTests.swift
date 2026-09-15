@@ -104,4 +104,57 @@ struct EnvironmentTests {
 
         #expect(!env.isInsideClaudeHome(env.homeDirectory))
     }
+
+    // MARK: - Homebrew prefix
+
+    @Test("brewPrefix keeps the symlinked entry point's own prefix")
+    func brewPrefixDoesNotFollowSymlinks() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // The shape Linuxbrew and Intel macOS install: $PREFIX/bin/brew -> ../Homebrew/bin/brew.
+        let prefix = home.appendingPathComponent("prefix")
+        let repositoryBin = prefix.appendingPathComponent("Homebrew/bin")
+        let prefixBin = prefix.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: repositoryBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: prefixBin, withIntermediateDirectories: true)
+        try Data().write(to: repositoryBin.appendingPathComponent("brew"))
+        try FileManager.default.createSymbolicLink(
+            atPath: prefixBin.appendingPathComponent("brew").path,
+            withDestinationPath: "../Homebrew/bin/brew"
+        )
+
+        // Resolving the symlink first would yield <prefix>/Homebrew, whose bin holds only brew.
+        #expect(Environment.brewPrefix(forBrewPath: prefixBin.appendingPathComponent("brew").path) == prefix.path)
+    }
+
+    @Test("brewPrefix handles a real file at $PREFIX/bin/brew (arm64 macOS shape)")
+    func brewPrefixForRealFile() {
+        #expect(Environment.brewPrefix(forBrewPath: "/opt/homebrew/bin/brew") == "/opt/homebrew")
+    }
+
+    @Test("The fallback prefix is the platform's own default")
+    func defaultBrewPrefixPerPlatform() {
+        #if canImport(Darwin)
+        #if arch(arm64)
+        #expect(Environment.defaultBrewPrefix == "/opt/homebrew")
+        #else
+        #expect(Environment.defaultBrewPrefix == "/usr/local")
+        #endif
+        #else
+        #expect(Environment.defaultBrewPrefix == "/home/linuxbrew/.linuxbrew")
+        #endif
+    }
+
+    @Test("pathWithBrew prepends the prefix bin directory exactly once")
+    func pathWithBrewPrependsOnce() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let path = env.pathWithBrew
+        let brewBin = "\(env.brewPrefix)/bin"
+        #expect(path.contains(brewBin))
+        #expect(path.components(separatedBy: brewBin).count == 2, "brew bin must appear exactly once")
+    }
 }
