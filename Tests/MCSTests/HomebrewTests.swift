@@ -35,7 +35,7 @@ struct HomebrewTests {
 
     // MARK: - Guidance when Homebrew is absent
 
-    @Test("Install advice names the package and never sends the user back to 'mcs sync'")
+    @Test("Install advice names the package and the platform's way to get it")
     func manualInstallAdviceIsActionable() {
         let advice = Homebrew.manualInstallAdvice(for: "ripgrep")
         #expect(advice.contains("ripgrep"))

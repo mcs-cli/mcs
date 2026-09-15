@@ -74,7 +74,7 @@ struct ExternalDoctorCheckTests {
         }
     }
 
-    @Test("Command exists fix returns notFixable when no fix command")
+    @Test("Command exists fix returns notFixable naming the command when no fix command")
     func commandExistsNoFix() {
         let check = ExternalCommandExistsCheck(
             name: "test",
@@ -85,11 +85,11 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.fix()
-        if case .notFixable = result {
-            // expected
-        } else {
+        guard case let .notFixable(message) = result else {
             Issue.record("Expected .notFixable, got \(result)")
+            return
         }
+        #expect(message.contains("'nonexistent'"))
     }
 
     // MARK: - ExternalFileExistsCheck

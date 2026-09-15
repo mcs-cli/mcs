@@ -639,12 +639,14 @@ struct BrewPackageCheckGuidanceTests {
         }
 
         // Asserted against whichever machine runs this: with brew present `mcs sync` really can
-        // install the package, without it that advice is a loop with no exit.
+        // install the package; without it the hint must name the package and where to get brew or
+        // the package (the Darwin text still ends in `mcs sync`, after installing brew).
         if FileManager.default.fileExists(atPath: Environment().brewPath) {
             #expect(message.contains("mcs sync"))
         } else {
-            #expect(!message.contains("mcs sync"))
+            #expect(message == Homebrew.manualInstallAdvice(for: package))
             #expect(message.contains(package))
+            #expect(message.contains("brew.sh") || message.contains("system package manager"))
         }
     }
 }
