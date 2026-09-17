@@ -48,6 +48,27 @@ mcs doctor
 
 That's it. Your MCP servers, plugins, hooks, skills, commands, agents, settings, and templates are all in place.
 
+### One-file bootstrap
+
+Prefer a declarative setup? Drop a `mcs.yaml` at the project root and run `mcs bootstrap`:
+
+```yaml
+# ./mcs.yaml
+schemaVersion: 1
+packs:
+  - source: mcs-cli/dev
+    ref: main
+    values:
+      BRANCH_PREFIX: feature
+  - source: mcs-cli/memory
+```
+
+```bash
+mcs bootstrap
+```
+
+Bootstrap adds any missing packs, seeds prompt answers from `values`, and syncs the project. See [`mcs bootstrap`](docs/cli.md#mcs-bootstrap) for the full reference.
+
 ---
 
 ## The Problem

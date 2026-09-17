@@ -1756,7 +1756,7 @@ struct HookMetadataLifecycleTests {
 
         // Enable update checks in config
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: bed.env.mcsConfigFile)
 
         // Sync with a minimal pack
@@ -1789,8 +1789,7 @@ struct HookMetadataLifecycleTests {
 
         // Disable update checks in config
         var config = MCSConfig()
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
         try config.save(to: bed.env.mcsConfigFile)
 
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
@@ -1824,7 +1823,7 @@ struct HookMetadataLifecycleTests {
 
         // Enable → hook appears in global settings.json
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: bed.env.mcsConfigFile)
 
         UpdateChecker.syncHook(config: config, env: bed.env, output: output)
@@ -1835,8 +1834,7 @@ struct HookMetadataLifecycleTests {
         #expect(commands1.contains(UpdateChecker.hookCommand))
 
         // Disable → hook removed from global settings.json
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
 
         UpdateChecker.syncHook(config: config, env: bed.env, output: output)
 
@@ -2249,7 +2247,7 @@ struct GlobalPackBlockingLifecycleTests {
         // is blocked because it is global and not yet configured here. Drive the real
         // filter, not a copy of it — a reimplementation here would keep passing even
         // if `performProject` stopped calling it.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [shared, projectOnly],
             globallyInstalled: globallyInstalled,
             previouslyConfigured: bed.projectState().configuredPacks,
@@ -2284,7 +2282,7 @@ struct GlobalPackBlockingLifecycleTests {
         // The regression guard: blocking by bare identity here would drop the pack
         // from the desired set, and `configure(confirmRemovals: false)` would
         // unconfigure it without a prompt.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [shared],
             globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
             previouslyConfigured: bed.projectState().configuredPacks,
@@ -2308,7 +2306,7 @@ struct GlobalPackBlockingLifecycleTests {
         let pack = MockTechPack(identifier: "ios", displayName: "iOS")
         // `ProjectState.load` returns early for a missing file rather than throwing,
         // so an untouched global scope yields an empty set and nothing is filtered.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [pack],
             globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
             previouslyConfigured: [],
@@ -2331,7 +2329,7 @@ struct GlobalPackBlockingLifecycleTests {
         // Returning an empty pack list instead of throwing would make `configure`
         // converge on an empty desired set and unconfigure the whole project.
         #expect(throws: (any Error).self) {
-            try SyncCommand.filterGloballyBlocked(
+            try ConfiguratorSupport.filterGloballyBlocked(
                 [shared],
                 globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
                 previouslyConfigured: [],

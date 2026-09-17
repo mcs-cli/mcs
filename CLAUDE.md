@@ -21,6 +21,9 @@ mcs sync --all                   # Apply all registered packs without prompts
 mcs sync --dry-run               # Preview what would change
 mcs sync --customize             # Per-pack component selection
 mcs sync --global                # Sync global scope (MCP servers, brew, plugins to ~/.claude/)
+mcs bootstrap                    # Apply ./mcs.yaml — install declared packs and reconcile project authoritatively
+mcs bootstrap --dry-run          # Preview what would change
+mcs bootstrap --yes              # Skip the confirmation prompt when packs would be removed
 mcs update                       # Fetch latest pack versions and re-apply across every configured scope
 mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope
@@ -120,6 +123,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ### Commands (`Sources/mcs/Commands/`)
 - `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global` flags. `guardClaudeHomeCwd()` at the top of `perform()` rejects/redirects runs from `~/.claude` or `$HOME` to prevent silent corruption of the global scope
+- `BootstrapCommand.swift` — `mcs bootstrap` reads `./mcs.yaml` and reconciles the current project authoritatively; installs missing packs via `PackAdder`, updates refs via `PackUpdater`, seeds `ProjectState.resolvedValues`, then calls `Configurator.configure(confirmRemovals: !yes)`
 - `DoctorCommand.swift` — health checks with optional --fix and --pack filter
 - `CleanupCommand.swift` — backup file management with --force flag
 - `PackCommand.swift` — `mcs pack add/remove/list/update/validate` subcommands; uses `PackSourceResolver` for 3-tier input detection (URL schemes → filesystem paths → GitHub shorthand)
@@ -199,6 +203,7 @@ swiftlint --fix
 
 - **Pure engine, zero bundled content**: `mcs` ships no templates, hooks, settings, or skills — all features come from external packs users add via `mcs pack add`
 - **`mcs sync` is the primary command**: per-project multi-select of registered packs, fully idempotent convergence (add/remove/update), per-project artifact placement. `--global` flag handles global-scope install
+- **`mcs bootstrap` is project-only and authoritative**: reads `./mcs.yaml` (fixed filename, cwd only) and reconciles the current project's pack set to match the file exactly. Never touches the global scope. Composes existing primitives — `PackAdder` for installs, `PackUpdater` for ref changes, `Configurator.configure(confirmRemovals:)` for the authoritative sync with a removal-confirmation gate. `PackRef.scope` in the schema is reserved for a future release; v1 rejects any value other than `"project"`
 - **Per-project artifacts**: skills, hooks, commands, and `settings.local.json` go to `<project>/.claude/`; only brew packages and plugins are global
 - **MCP scope defaults to `local`**: per-user, per-project isolation via `claude mcp add -s local` (stored in `~/.claude.json` keyed by project path)
 - **Convergent sync**: `ProjectState` records per-pack `PackArtifactRecord` (MCP servers, files, template sections, hook commands, settings keys, settings hash, brew packages, plugins, gitignore entries, file hashes); re-running converges to desired state by diffing previous vs. selected packs. `mcs pack remove` discovers all scopes via `ProjectIndex` and runs the same `unconfigurePack()` convergence for each

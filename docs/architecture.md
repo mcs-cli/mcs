@@ -9,8 +9,9 @@ Package.swift                    # swift-tools-version: 6.0, macOS 13+
 Sources/mcs/
     CLI.swift                    # @main entry, version, subcommand registration
     Core/                        # Shared infrastructure
-    Commands/                    # CLI subcommands (sync, doctor, cleanup, pack, export, check-updates, config)
+    Commands/                    # CLI subcommands (sync, bootstrap, doctor, cleanup, pack, export, check-updates, config)
     Sync/                        # Convergence engine, project configuration, installation logic
+    Bootstrap/                   # Declarative mcs.yaml loader + shared pack-add pipeline (BootstrapFile, PackAdder)
     Export/                      # Export wizard (ConfigurationDiscovery, ManifestBuilder, PackWriter)
     TechPack/                    # Tech pack protocol, component model, dependency resolver
     Templates/                   # Template engine and section-based file composition
@@ -179,6 +180,17 @@ The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack 
 1. **Selection**: interactive multi-select, `--pack <name>`, or `--all`
 2. **Component install**: brew packages, MCP servers (user scope), plugins
 3. **Record state**: update `~/.mcs/global-state.json`
+
+### Bootstrap (`mcs bootstrap`)
+
+`BootstrapCommand` reads a declarative `./mcs.yaml` at the command's cwd and composes existing primitives — it never re-implements install or sync logic:
+
+1. **Load & validate** (`Bootstrap/BootstrapFile.swift`): schema version, non-empty `packs`, unique `source`, reserved `scope`.
+2. **Reconcile the registry**: for each `source`, check `PackRegistryFile`. Not registered → `PackAdder.add` (shared with `mcs pack add`). Same source + same ref → silent no-op. Same source + different ref → `PackUpdater.updateGitPack`. Different source → `PackAdder.add` with `duplicatePolicy: .autoAccept` and a warning.
+3. **Seed prompt priors**: merge each pack's `values` into `ProjectState.resolvedValues`. The sync engine's existing prior-reuse path (`Configurator.resolveAllValues`) picks them up silently.
+4. **Authoritative sync**: build `desiredIdentifiers` from the file, filter through `SyncCommand.filterGloballyBlocked`, and call `Configurator.configure(packs: desired, confirmRemovals: !yes, excludedComponents: ...)` with `ProjectSyncStrategy`. The removal-confirmation gate inside `Configurator.configure` is bootstrap's `--yes` switch.
+
+The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it.
 
 ## Dependency Resolution
 

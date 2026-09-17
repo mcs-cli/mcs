@@ -26,6 +26,57 @@ mcs sync --global                # Install to global scope (~/.claude/)
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
 
+## `mcs bootstrap`
+
+Apply a declarative `mcs.yaml` from the current directory. Bootstrap installs any packs the file declares, seeds prompt values, and makes the project's configured pack set match the file exactly.
+
+```bash
+mcs bootstrap                    # Read ./mcs.yaml and reconcile this project to it
+mcs bootstrap --dry-run          # Preview what would change
+mcs bootstrap --yes              # Skip the confirmation prompt when packs would be removed
+```
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview without making changes. For un-registered packs, prints `would fetch <source>@<ref>` without cloning. |
+| `-y, --yes` | Skip the confirmation prompt when the file authoritatively removes packs from the project. |
+
+**File format (`./mcs.yaml`)**
+
+```yaml
+schemaVersion: 1
+packs:
+  - source: mcs-cli/dev              # git URL, GitHub shorthand, or local path
+    ref: main                        # optional (git only)
+    values:                          # optional: seeds prompt priors
+      BRANCH_PREFIX: feature
+  - source: mcs-cli/memory
+```
+
+- `source` is required. `ref`, `values`, and `scope` are optional.
+- `values` seeds `ProjectState.resolvedValues` so declared prompt answers do not re-prompt. Any prompt not seeded here falls through to normal interactive resolution.
+- `scope` is reserved for a future release; v1 accepts only `project` (or omitted).
+
+**Semantics**
+
+- **Project scope only.** Bootstrap never touches the global scope; use `mcs sync --global` for that.
+- **Authoritative.** The pack set in `mcs.yaml` is exactly what ends up configured in the project. Any pack previously configured but not listed is unconfigured (with a confirmation prompt unless `--yes` is passed).
+- **Idempotent.** Re-running converges — no work if nothing changed.
+- **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason.
+- **Trust prompt stays interactive** in v1. Non-interactive trust auto-accept is planned for a future release.
+
+**Duplicate identifier handling**
+
+| Existing entry | New entry | Behaviour |
+|---|---|---|
+| Same `sourceURL` + same `ref` | matches file | silent no-op |
+| Same `sourceURL` + different `ref` | matches file | `PackUpdater` moves the checkout |
+| Different `sourceURL` | matches file | auto-replace with warning naming both URLs |
+
+**Dry-run limitation**
+
+`--dry-run` cannot fully preview a sync for a pack that has not yet been fetched — v1 prints the intended add operation without cloning. Fetch-and-preview is planned for a future release.
+
 ## `mcs update`
 
 Refresh already-configured packs across every scope they're installed in. Fetches the latest pack contents (with trust verification) and re-applies the existing pack set in both the global scope and the current project's scope.
@@ -251,8 +302,7 @@ mcs config set <key> <value>     # Set a value (true/false)
 
 | Key | Description | Default |
 |-----|-------------|---------|
-| `update-check-packs` | Automatically check for tech pack updates on session start | `false` |
-| `update-check-cli` | Automatically check for new mcs versions on session start | `false` |
+| `update-check` | Show tech-pack and mcs CLI update notifications on session start (opt-out) | `true` |
 
 These keys control a `SessionStart` hook in `~/.claude/settings.json` that runs `mcs check-updates` when you start a Claude Code session. The hook's output is injected into Claude's context so Claude can inform you about available updates.
 

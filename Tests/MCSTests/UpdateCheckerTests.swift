@@ -1147,7 +1147,7 @@ struct UpdateCheckerHookTests {
         try "{}".write(to: env.claudeSettings, atomically: true, encoding: .utf8)
 
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         let output = CLIOutput()
 
         UpdateChecker.syncHook(config: config, env: env, output: output)
@@ -1173,8 +1173,7 @@ struct UpdateCheckerHookTests {
         try initial.save(to: env.claudeSettings)
 
         var config = MCSConfig()
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
         let output = CLIOutput()
 
         UpdateChecker.syncHook(config: config, env: env, output: output)

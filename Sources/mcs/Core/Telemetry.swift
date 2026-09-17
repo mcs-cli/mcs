@@ -15,6 +15,7 @@ enum MCSAnalytics {
     /// Type-safe command names for telemetry signals.
     enum Command: String {
         case sync
+        case bootstrap
         case update
         case doctor
         case cleanup

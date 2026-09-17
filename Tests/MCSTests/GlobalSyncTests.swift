@@ -233,6 +233,7 @@ struct GlobalSettingsCompositionTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
+        try disableUpdateCheck(home: tmpDir)
         let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
@@ -851,6 +852,7 @@ struct GlobalUnconfigurePackTests {
         let tmpDir = try makeGlobalTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
+        try disableUpdateCheck(home: tmpDir)
         let configurator = makeGlobalSyncConfigurator(home: tmpDir)
 
         let packDir = tmpDir.appendingPathComponent("pack/hooks")
@@ -1242,7 +1244,7 @@ struct GlobalHookInjectionTests {
 
         let env = Environment(home: tmpDir)
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: env.mcsConfigFile)
 
         // Create empty settings.json so the strategy can load it
@@ -1265,7 +1267,7 @@ struct GlobalHookInjectionTests {
 
         let env = Environment(home: tmpDir)
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: env.mcsConfigFile)
 
         // Pre-populate settings with the hook
@@ -1293,8 +1295,7 @@ struct GlobalHookInjectionTests {
 
         let env = Environment(home: tmpDir)
         var config = MCSConfig()
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
         try config.save(to: env.mcsConfigFile)
 
         // Pre-populate settings with the hook
