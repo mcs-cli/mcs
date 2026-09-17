@@ -127,7 +127,7 @@ Use `mcs pack validate` to check your pack for structural errors and best practi
 
 ## 🛡️ Safety & Trust
 
-`mcs` is designed to be non-destructive and transparent. Timestamped backups before modifying user content, `--dry-run` to preview changes, section markers to preserve your edits in `CLAUDE.local.md`, and SHA-256 trust verification for pack scripts. Lockfiles (`mcs.lock.yaml`) pin pack versions for reproducible environments.
+`mcs` is designed to be non-destructive and transparent. Timestamped backups before modifying user content, `--dry-run` to preview changes, section markers to preserve your edits in `CLAUDE.local.md`, and SHA-256 trust verification for pack scripts.
 
 📖 **Full details:** [Architecture > Safety & Trust](docs/architecture.md#safety--trust)
 

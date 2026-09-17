@@ -7,13 +7,11 @@ struct MCSConfig: Codable {
     var updateCheckPacks: Bool?
     var updateCheckCLI: Bool?
     var telemetry: Bool?
-    var generateLockfile: Bool?
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case updateCheckPacks = "update-check-packs"
         case updateCheckCLI = "update-check-cli"
         case telemetry
-        case generateLockfile = "generate-lockfile"
     }
 
     /// Whether telemetry is enabled. Defaults to `true` when unconfigured (`nil`).
@@ -29,19 +27,6 @@ struct MCSConfig: Codable {
     /// Whether neither key has been configured yet (first-run state).
     var isUnconfigured: Bool {
         updateCheckPacks == nil && updateCheckCLI == nil
-    }
-
-    /// Whether `mcs sync` should write `mcs.lock.yaml`. Opt-in — users must explicitly enable
-    /// reproducibility since most projects don't commit the lockfile.
-    var isLockfileGenerationEnabled: Bool {
-        generateLockfile == true
-    }
-
-    /// Whether the user has never made a choice about lockfile generation (upgrade path).
-    /// Distinct from `!isLockfileGenerationEnabled`, which also returns true for explicit opt-out.
-    /// Used to decide whether to show the migration hint when a lockfile exists but is being ignored.
-    var isLockfileGenerationUnset: Bool {
-        generateLockfile == nil
     }
 
     // MARK: - Known Keys
@@ -67,11 +52,6 @@ struct MCSConfig: Codable {
             key: CodingKeys.telemetry.rawValue,
             description: "Enable anonymous usage telemetry",
             defaultValue: "true"
-        ),
-        ConfigKey(
-            key: CodingKeys.generateLockfile.rawValue,
-            description: "Write mcs.lock.yaml after each sync (pin pack commits for reproducible setups)",
-            defaultValue: "false"
         ),
     ]
 
@@ -107,7 +87,6 @@ struct MCSConfig: Codable {
         case CodingKeys.updateCheckPacks.rawValue: updateCheckPacks
         case CodingKeys.updateCheckCLI.rawValue: updateCheckCLI
         case CodingKeys.telemetry.rawValue: telemetry
-        case CodingKeys.generateLockfile.rawValue: generateLockfile
         default: nil
         }
     }
@@ -123,9 +102,6 @@ struct MCSConfig: Codable {
             return true
         case CodingKeys.telemetry.rawValue:
             telemetry = value
-            return true
-        case CodingKeys.generateLockfile.rawValue:
-            generateLockfile = value
             return true
         default:
             return false
