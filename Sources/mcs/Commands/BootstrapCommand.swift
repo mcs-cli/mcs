@@ -103,17 +103,24 @@ struct BootstrapCommand: LockedCommand {
         let bootstrapOptions = PackAdder.Options(showNextSteps: false)
 
         var bySourceURL: [String: PackRegistryFile.PackEntry] = [:]
-        for entry in try ctx.loadRegistry().packs {
-            bySourceURL[entry.sourceURL] = entry
+        do {
+            for entry in try ctx.loadRegistry().packs {
+                bySourceURL[entry.sourceURL] = entry
+            }
+        } catch {
+            ctx.output.error("Failed to read pack registry: \(error.localizedDescription)")
+            throw ExitCode.failure
         }
 
         var identifiers: [String] = []
+        var installedThisRun: [String] = []
         for pack in file.packs {
             let packSource: PackSource
             do {
                 packSource = try resolver.resolve(pack.source)
             } catch {
                 ctx.output.error("Failed to resolve '\(pack.source)': \(error.localizedDescription)")
+                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
                 throw ExitCode.failure
             }
 
@@ -131,39 +138,66 @@ struct BootstrapCommand: LockedCommand {
             }
 
             // Local packs stay in-place; nothing to fetch or refresh when re-declared.
+            // PackAdder emits the "--ref is ignored" warning on fresh local adds; the
+            // already-registered branch handles it here since PackAdder never sees it.
             if case .localPath = packSource, let existing {
+                if pack.ref != nil {
+                    ctx.output.warn("'\(pack.source)': --ref is ignored for local packs")
+                }
                 ctx.output.dimmed("  \(pack.source) already registered (local pack)")
                 identifiers.append(existing.identifier)
                 continue
             }
 
-            if let existing {
-                let reconciled = try reconcileExistingGitPack(
-                    existing: existing,
-                    pack: pack,
-                    ctx: ctx
-                )
-                bySourceURL[reconciled.sourceURL] = reconciled
-                identifiers.append(reconciled.identifier)
-            } else {
-                let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
-                switch outcome {
-                case let .installed(entry):
-                    bySourceURL[entry.sourceURL] = entry
-                    identifiers.append(entry.identifier)
-                case .declined:
-                    ctx.output.error("Bootstrap aborted: pack '\(pack.source)' was not added.")
-                    throw ExitCode.failure
-                case .previewed:
-                    // PackAdder only returns .previewed when Options.preview is true;
-                    // bootstrap never sets that flag.
-                    ctx.output.error("Unexpected preview outcome for '\(pack.source)'.")
-                    throw ExitCode.failure
+            do {
+                if let existing {
+                    let reconciled = try reconcileExistingGitPack(
+                        existing: existing,
+                        pack: pack,
+                        ctx: ctx
+                    )
+                    identifiers.append(reconciled.identifier)
+                    installedThisRun.append(reconciled.identifier)
+                } else {
+                    let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
+                    switch outcome {
+                    case let .installed(entry):
+                        identifiers.append(entry.identifier)
+                        installedThisRun.append(entry.identifier)
+                    case .declined:
+                        ctx.output.error("Bootstrap aborted: pack '\(pack.source)' was not added.")
+                        reportPartialInstall(
+                            installed: installedThisRun, failedAt: pack.source, output: ctx.output
+                        )
+                        throw ExitCode.failure
+                    case .previewed:
+                        // PackAdder only returns .previewed when Options.preview is true;
+                        // bootstrap never sets that flag.
+                        ctx.output.error("Unexpected preview outcome for '\(pack.source)'.")
+                        throw ExitCode.failure
+                    }
                 }
+            } catch {
+                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
+                throw error
             }
         }
 
         return identifiers
+    }
+
+    /// Summarize which packs are already installed when bootstrap aborts mid-loop, so users
+    /// know what state re-running finds and where to resume from.
+    private func reportPartialInstall(installed: [String], failedAt source: String, output: CLIOutput) {
+        guard !installed.isEmpty else { return }
+        output.plain("")
+        output.info(
+            "\(installed.count) pack(s) already registered before the failure on '\(source)':"
+        )
+        for id in installed {
+            output.plain("  - \(id)")
+        }
+        output.plain("  Re-run 'mcs bootstrap' after fixing '\(source)' to continue.")
     }
 
     /// Handle a git pack that is already registered — either a same-ref no-op or a
@@ -230,23 +264,42 @@ struct BootstrapCommand: LockedCommand {
         output: CLIOutput
     ) throws {
         guard file.packs.contains(where: { !($0.values?.isEmpty ?? true) }) else { return }
-        let seeds = file.packs.flatMap { pack in
-            (pack.values ?? [:]).map { ($0.key, $0.value) }
+
+        // Fold in manifest order; warn if a later pack overwrites an earlier pack's value
+        // for the same key so the divergence is visible instead of silent.
+        var merged: [String: String] = [:]
+        var seedCount = 0
+        for pack in file.packs {
+            for (key, value) in pack.values ?? [:] {
+                seedCount += 1
+                if let previous = merged[key], previous != value {
+                    let file = BootstrapFile.defaultFilename
+                    output.warn(
+                        "Duplicate prompt key '\(key)' across packs in \(file) — using '\(value)' (was '\(previous)')"
+                    )
+                }
+                merged[key] = value
+            }
         }
+
         if dryRun {
-            output.dimmed("  would seed \(seeds.count) prompt value(s) into project state")
+            output.dimmed("  would seed \(seedCount) prompt value(s) into project state")
             return
         }
 
         var current = state.resolvedValues ?? [:]
-        for (key, value) in seeds {
+        for (key, value) in merged {
             current[key] = value
         }
         state.setResolvedValues(current)
+        // Failing to persist priors is not recoverable: the declarative contract is that
+        // sync will not re-prompt for these keys, and that depends on the priors reaching
+        // disk. Surface the failure and abort.
         do {
             try state.save()
         } catch {
-            output.warn("Could not seed prompt values: \(error.localizedDescription)")
+            output.error("Failed to seed prompt values: \(error.localizedDescription)")
+            throw ExitCode.failure
         }
     }
 
@@ -259,7 +312,10 @@ struct BootstrapCommand: LockedCommand {
     /// `--prune` opts into authoritative behavior — declared IDs become the exact
     /// desired set, and `Configurator.configure(confirmRemovals: !yes)` prompts
     /// before removing anything.
-    private func runSync(
+    ///
+    /// Exposed as `internal` so integration tests can exercise the additive-vs-prune
+    /// branching without spinning up the whole command via ArgumentParser + cwd.
+    func runSync(
         projectRoot: URL,
         desiredIdentifiers: [String],
         projectState: ProjectState,
@@ -289,18 +345,11 @@ struct BootstrapCommand: LockedCommand {
 
         // Additive default: union declared with the packs already configured here so
         // nothing gets unconfigured. `--prune` collapses back to authoritative.
-        let effectiveIDs: [String] = {
-            guard !prune else { return desiredIdentifiers }
-            var seen = Set<String>()
-            var result: [String] = []
-            for id in desiredIdentifiers where seen.insert(id).inserted {
-                result.append(id)
-            }
-            for id in extras.sorted() {
-                result.append(id)
-            }
-            return result
-        }()
+        // `desiredIdentifiers` is already unique — `BootstrapFile.validate()` rejects
+        // duplicate sources and `installPacks` emits one identifier per source.
+        let effectiveIDs = prune
+            ? desiredIdentifiers
+            : desiredIdentifiers + extras.sorted()
 
         let resolvedPacks: [any TechPack] = effectiveIDs.compactMap { registry.pack(for: $0) }
         let unknown = Set(effectiveIDs).subtracting(resolvedPacks.map(\.identifier))
@@ -366,7 +415,6 @@ struct BootstrapCommand: LockedCommand {
 
 extension PackSource {
     /// String form used as the registry `sourceURL`.
-    /// Git URLs use their URL; local packs use their absolute path.
     var referenceURL: String {
         switch self {
         case let .gitURL(url): url

@@ -81,8 +81,8 @@ struct MCSConfigTests {
         #expect(config.updateCheck == false)
     }
 
-    @Test("Legacy pair where either key is true migrates to unset (default-on)")
-    func migratesLegacyMixedToUnset() throws {
+    @Test("Legacy pair where either key is false preserves the opt-out")
+    func migratesLegacyMixedFalsePreservesOptOut() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -93,8 +93,63 @@ struct MCSConfigTests {
         """.write(to: path, atomically: true, encoding: .utf8)
 
         let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+        #expect(!config.isUpdateCheckEnabled)
+    }
+
+    @Test("Legacy packs-only false preserves the opt-out")
+    func migratesLegacyPacksOnlyFalse() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Legacy cli-only false preserves the opt-out")
+    func migratesLegacyCLIOnlyFalse() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-cli: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Legacy pair both true migrates to unset (default-on)")
+    func migratesLegacyBothTrueToUnset() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try """
+        update-check-packs: true
+        update-check-cli: true
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
         #expect(config.updateCheck == nil)
         #expect(config.isUpdateCheckEnabled)
+    }
+
+    @Test("Legacy migration rewrites the file so the notice fires once")
+    func migrationRewritesFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        _ = MCSConfig.load(from: path)
+        let rewritten = try String(contentsOf: path, encoding: .utf8)
+        #expect(rewritten.contains("update-check: false"))
+        #expect(!rewritten.contains("update-check-packs"))
+        #expect(!rewritten.contains("update-check-cli"))
     }
 
     @Test("New key on disk wins over legacy keys when both are present")

@@ -8,6 +8,9 @@ struct MCSConfig: Codable {
     /// notifications are opt-out; explicit `false` removes it.
     var updateCheck: Bool?
     var telemetry: Bool?
+    /// Set during decoding when either legacy `update-check-*` key was present so callers
+    /// can surface a one-time migration notice. Not persisted.
+    private(set) var didMigrateLegacyUpdateCheck: Bool = false
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case updateCheck = "update-check"
@@ -32,13 +35,18 @@ struct MCSConfig: Codable {
             return
         }
 
-        // Migrate from the two-key era. `nil` on the new key preserves the opt-out default;
-        // migration only fires when the user *explicitly* disabled both legacy keys.
+        // Migrate from the two-key era. Any explicit `false` on either legacy key preserves
+        // the opt-out; both `true` or missing leaves the field `nil` (default-on). Callers
+        // that read config from disk surface `didMigrateLegacyUpdateCheck` once so the flip
+        // is visible instead of silent.
         let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
         let legacyPacks = try legacy.decodeIfPresent(Bool.self, forKey: .updateCheckPacks)
         let legacyCLI = try legacy.decodeIfPresent(Bool.self, forKey: .updateCheckCLI)
-        if legacyPacks == false, legacyCLI == false {
-            updateCheck = false
+        if legacyPacks != nil || legacyCLI != nil {
+            didMigrateLegacyUpdateCheck = true
+            if legacyPacks == false || legacyCLI == false {
+                updateCheck = false
+            }
         }
     }
 
@@ -77,10 +85,25 @@ struct MCSConfig: Codable {
     // MARK: - Persistence
 
     /// Load config from disk. Returns empty config if file is missing.
-    /// Warns via `output` if the file exists but is corrupt.
+    /// Warns via `output` if the file exists but is corrupt, or when a legacy
+    /// two-key `update-check-*` file is migrated. The migration is rewritten back
+    /// to disk so the notice fires at most once per machine.
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
         do {
-            return try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
+            let loaded = try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
+            if loaded.didMigrateLegacyUpdateCheck {
+                let newValue = loaded.updateCheck.map(String.init(describing:)) ?? "unset"
+                output?.warn(
+                    "Migrated deprecated 'update-check-packs' / 'update-check-cli' → 'update-check' = \(newValue)."
+                )
+                output?.plain("  Run 'mcs config list' to review.")
+                do {
+                    try loaded.save(to: path)
+                } catch {
+                    output?.warn("Could not persist migrated config: \(error.localizedDescription)")
+                }
+            }
+            return loaded
         } catch let error as DecodingError {
             output?.warn("Config file is corrupt (\(path.lastPathComponent)): \(error.localizedDescription)")
             return MCSConfig()

@@ -1,15 +1,11 @@
 import Foundation
 
-/// Declarative bootstrap manifest (`mcs.yaml`) that describes a project's full pack set.
-///
-/// The file is intentionally fixed to `./mcs.yaml` at the command's cwd so the project
-/// scope stays unambiguous — bootstrap always applies to the folder that contains the file.
+/// Declarative bootstrap manifest whose fixed location (`./mcs.yaml` at cwd) keeps
+/// project scope unambiguous — bootstrap always applies to the folder holding the file.
 struct BootstrapFile: Codable, Equatable {
-    /// Bumped whenever the on-disk schema gains a breaking change.
-    /// v1 is the only currently-accepted version.
+    /// Bumped when the on-disk schema gains a breaking change.
     static let currentSchemaVersion = 1
 
-    /// Fixed filename resolved relative to the command's cwd.
     static let defaultFilename = "mcs.yaml"
 
     var schemaVersion: Int
@@ -23,8 +19,8 @@ struct BootstrapFile: Codable, Equatable {
         /// Prompt priors keyed by prompt `key`. Seeded into `ProjectState.resolvedValues`
         /// so the sync engine reuses them silently without re-prompting.
         var values: [String: String]?
-        /// Reserved. v1 accepts only `"project"` (or omitted). Present so a future
-        /// `global` scope can be added without a breaking schema change.
+        /// Reserved. v1 accepts only `"project"` (or omitted); the field exists so a future
+        /// `global` scope can land as a non-breaking schema addition.
         var scope: String?
     }
 }

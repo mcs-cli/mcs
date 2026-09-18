@@ -34,7 +34,6 @@ struct PackAdder {
 
     // MARK: - Entry Point
 
-    /// Add a pack from either a git source or a local path.
     func add(source: PackSource, ref: String?, options: Options) throws -> Outcome {
         switch source {
         case let .gitURL(url):
@@ -102,7 +101,13 @@ struct PackAdder {
             return .declined
         }
 
-        let collisions = detectCollisions(manifest: manifest, registryData: registryData)
+        let collisions: [PackCollision]
+        do {
+            collisions = try detectCollisions(manifest: manifest, registryData: registryData)
+        } catch {
+            fetcher.removeQuietly(packPath: fetchResult.localPath)
+            throw error
+        }
         if !collisions.isEmpty, !acceptCollisions(policy: options.duplicatePolicy) {
             fetcher.removeQuietly(packPath: fetchResult.localPath)
             ctx.output.info("Pack not added.")
@@ -203,7 +208,7 @@ struct PackAdder {
             return .declined
         }
 
-        let collisions = detectCollisions(manifest: manifest, registryData: registryData)
+        let collisions = try detectCollisions(manifest: manifest, registryData: registryData)
         if !collisions.isEmpty, !acceptCollisions(policy: options.duplicatePolicy) {
             ctx.output.info("Pack not added.")
             return .declined
@@ -257,11 +262,16 @@ struct PackAdder {
     private func detectCollisions(
         manifest: ExternalPackManifest,
         registryData: PackRegistryFile.RegistryData
-    ) -> [PackCollision] {
-        let existing: [PackRegistryFile.CollisionInput] = registryData.packs.map { entry in
+    ) throws -> [PackCollision] {
+        // A registry entry we cannot inspect is a hole in the collision safety net: a fresh
+        // install that would have clashed with the broken pack passes validation, and both
+        // packs then race for the same destination on the next sync. Abort loudly so the
+        // user repairs the registry (via `mcs doctor` / `mcs pack remove`) before proceeding.
+        let existing: [PackRegistryFile.CollisionInput] = try registryData.packs.map { entry in
             guard let packPath = entry.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
-                ctx.output.warn("Pack '\(entry.identifier)' has an unsafe localPath — skipping collision check")
-                return .empty(identifier: entry.identifier)
+                ctx.output.error("Pack '\(entry.identifier)' has an unsafe localPath — refusing to install with an unverifiable registry")
+                ctx.output.plain("  Run 'mcs pack remove \(entry.identifier)' and re-add the pack, or edit \(ctx.env.packsRegistry.path).")
+                throw ExitCode.failure
             }
             let manifestURL = packPath.appendingPathComponent(Constants.ExternalPacks.manifestFilename)
             let existingManifest: ExternalPackManifest
@@ -269,8 +279,16 @@ struct PackAdder {
                 existingManifest = try ExternalPackManifest.load(from: manifestURL)
             } catch {
                 let reason = error.localizedDescription
-                ctx.output.warn("Could not load manifest for '\(entry.identifier)': \(reason) — collision detection may be incomplete")
-                return .empty(identifier: entry.identifier)
+                ctx.output.error(
+                    "Could not load manifest for registered pack '\(entry.identifier)': \(reason)"
+                )
+                ctx.output.plain(
+                    "  Refusing to install without a full collision check."
+                )
+                ctx.output.plain(
+                    "  Run 'mcs pack remove \(entry.identifier)' or repair the pack, then retry."
+                )
+                throw ExitCode.failure
             }
             return PackRegistryFile.CollisionInput(from: existingManifest)
         }
@@ -289,7 +307,9 @@ struct PackAdder {
 
     /// Returns `true` when the caller should proceed, `false` to abort.
     /// `autoAccept` short-circuits the `askYesNo` prompt so bootstrap stays non-interactive.
-    private func resolveDuplicate(
+    /// Exposed as `internal` so tests can pin the policy branches without threading a
+    /// real fetcher through the full add pipeline.
+    func resolveDuplicate(
         manifest: ExternalPackManifest,
         sourceURL: String,
         registryData: PackRegistryFile.RegistryData,
@@ -318,7 +338,7 @@ struct PackAdder {
 
     /// Prompt on collision when policy requires it. `autoAccept` returns `true`
     /// after the warning is already printed by `detectCollisions`.
-    private func acceptCollisions(policy: DuplicatePolicy) -> Bool {
+    func acceptCollisions(policy: DuplicatePolicy) -> Bool {
         switch policy {
         case .prompt:
             ctx.output.askYesNo("Continue anyway?", default: false)

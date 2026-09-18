@@ -3181,3 +3181,114 @@ struct BrewPackageDoctorTests {
         #expect(summary.issues == 0)
     }
 }
+
+// MARK: - Bootstrap: additive-vs-prune convergence
+
+struct BootstrapIntegrationTests {
+    /// Build a pair of packs, seed both into the project's configured set via a first
+    /// `Configurator.configure`, and hand back everything BootstrapCommand.runSync needs.
+    private func seedTwoPackProject(
+        bed: LifecycleTestBed
+    ) throws -> (packA: MockTechPack, packB: MockTechPack, registry: TechPackRegistry) {
+        let settingsA = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_A_KEY": "valueA" } }
+        """)
+        let settingsB = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_B_KEY": "valueB" } }
+        """)
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [bed.settingsComponent(pack: "pack-a", id: "settings", source: settingsA)]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [bed.settingsComponent(pack: "pack-b", id: "settings", source: settingsB)]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        return (packA, packB, registry)
+    }
+
+    @Test("Additive default preserves a previously-configured pack absent from mcs.yaml")
+    func additiveDefaultKeepsExtras() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Bootstrap declares only pack-a; pack-b is an extra.
+        let command = try BootstrapCommand.parse([])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packA.identifier))
+        #expect(after.configuredPacks.contains(seeded.packB.identifier))
+
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_A_KEY"] as? String == "valueA")
+        #expect(envDict["PACK_B_KEY"] as? String == "valueB")
+    }
+
+    @Test("--prune removes packs configured in the project but absent from mcs.yaml")
+    func pruneRemovesExtras() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packA.identifier))
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_A_KEY"] as? String == "valueA")
+        #expect(envDict["PACK_B_KEY"] == nil)
+    }
+
+    @Test("Additive re-add of only the declared pack is a no-op — extras untouched")
+    func additiveNoOpWhenExtrasStillDeclared() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let command = try BootstrapCommand.parse([])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier, seeded.packB.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == Set([seeded.packA.identifier, seeded.packB.identifier]))
+    }
+}

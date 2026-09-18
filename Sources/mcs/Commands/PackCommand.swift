@@ -15,6 +15,14 @@ struct PackCommandContext {
         MCSAnalytics.initialize(env: env, output: output)
     }
 
+    /// Injectable initializer used by tests to point the context at a sandbox home.
+    init(env: Environment, output: CLIOutput, shell: ShellRunner, registry: PackRegistryFile) {
+        self.env = env
+        self.output = output
+        self.shell = shell
+        self.registry = registry
+    }
+
     func loadRegistry() throws -> PackRegistryFile.RegistryData {
         do {
             return try registry.load()
