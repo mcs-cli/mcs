@@ -7,12 +7,18 @@ struct PackCommandContext {
     let shell: ShellRunner
     let registry: PackRegistryFile
 
-    init() {
+    /// Standard entry point for pack commands. `initializeTelemetry: false` is for
+    /// dry-run and other read-only paths: `MCSAnalytics.initialize` writes a
+    /// first-run marker under `~/.mcs` on its first invocation, so a documented
+    /// no-change preview must not trigger it.
+    init(initializeTelemetry: Bool = true) {
         env = Environment()
         output = CLIOutput()
         shell = ShellRunner(environment: env)
         registry = PackRegistryFile(path: env.packsRegistry)
-        MCSAnalytics.initialize(env: env, output: output)
+        if initializeTelemetry {
+            MCSAnalytics.initialize(env: env, output: output)
+        }
     }
 
     /// Injectable initializer used by tests to point the context at a sandbox home.

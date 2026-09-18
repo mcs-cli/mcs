@@ -21,14 +21,20 @@ struct BootstrapCommand: LockedCommand {
     }
 
     func perform() throws {
-        let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.bootstrap) }
+        // Dry-run must not mutate `~/.mcs` state or trigger the Homebrew install prompt
+        // for Claude Code — both would violate the no-changes contract on a preview.
+        let ctx = PackCommandContext(initializeTelemetry: !dryRun)
+        defer {
+            if !dryRun { MCSAnalytics.trackCommand(.bootstrap) }
+        }
 
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         try guardCwd(cwd: cwd, env: ctx.env, output: ctx.output)
 
-        guard ensureClaudeCLI(shell: ctx.shell, environment: ctx.env, output: ctx.output) else {
-            throw ExitCode.failure
+        if !dryRun {
+            guard ensureClaudeCLI(shell: ctx.shell, environment: ctx.env, output: ctx.output) else {
+                throw ExitCode.failure
+            }
         }
 
         let filePath = cwd.appendingPathComponent(BootstrapFile.defaultFilename)
@@ -43,7 +49,7 @@ struct BootstrapCommand: LockedCommand {
         ctx.output.header("Bootstrap")
         ctx.output.plain("")
         ctx.output.info(label: "File", filePath.path)
-        ctx.output.info(label: "Packs", file.packs.map(\.source).joined(separator: ", "))
+        ctx.output.info(label: "Packs", file.packs.map { redactSourceForDisplay($0.source) }.joined(separator: ", "))
 
         let desiredIdentifiers = try installPacks(file: file, ctx: ctx)
 
@@ -126,12 +132,18 @@ struct BootstrapCommand: LockedCommand {
         // path). Two entries that differ as strings can resolve to the same URL, and
         // the loop would re-fetch and race against itself. Track canonical URLs here.
         var seenCanonicalURLs: Set<String> = []
+        // Two entries with different sources can still resolve to the same manifest
+        // `identifier`. With `.autoAccept`, the second `PackAdder.add` would replace
+        // the first checkout and registry entry silently. Track identifiers so the
+        // second one errors instead of shadowing the first.
+        var seenIdentifiers: Set<String> = []
         for pack in file.packs {
+            let displaySource = redactSourceForDisplay(pack.source)
             let packSource: PackSource
             do {
                 packSource = try resolver.resolve(pack.source)
             } catch {
-                ctx.output.error("Failed to resolve '\(pack.source)': \(error.localizedDescription)")
+                ctx.output.error("Failed to resolve '\(displaySource)': \(error.localizedDescription)")
                 reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
                 throw ExitCode.failure
             }
@@ -139,7 +151,8 @@ struct BootstrapCommand: LockedCommand {
             let sourceURL = packSource.referenceURL
             if !seenCanonicalURLs.insert(sourceURL).inserted {
                 ctx.output.error(
-                    "Pack '\(pack.source)' resolves to '\(sourceURL)', already declared in this file."
+                    "Pack '\(displaySource)' resolves to '\(redactSourceForDisplay(sourceURL))'"
+                        + ", already declared in this file."
                 )
                 reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
                 throw ExitCode.failure
@@ -148,10 +161,24 @@ struct BootstrapCommand: LockedCommand {
 
             if dryRun {
                 if let existing {
-                    ctx.output.dimmed("  already registered: \(pack.source)")
+                    ctx.output.dimmed("  already registered: \(displaySource)")
+                    try trackIdentifier(
+                        existing.identifier,
+                        source: pack.source,
+                        seen: &seenIdentifiers,
+                        installed: installedThisRun,
+                        ctx: ctx
+                    )
                     identifiers.append(existing.identifier)
                 } else {
-                    ctx.output.info("  would fetch: \(pack.source)\(pack.ref.map { "@\($0)" } ?? "")")
+                    let isLocal = if case .localPath = packSource {
+                        true
+                    } else {
+                        false
+                    }
+                    let verb = isLocal ? "would register (local)" : "would fetch"
+                    let refSuffix = isLocal ? "" : (pack.ref.map { "@\($0)" } ?? "")
+                    ctx.output.info("  \(verb): \(displaySource)\(refSuffix)")
                 }
                 continue
             }
@@ -161,9 +188,16 @@ struct BootstrapCommand: LockedCommand {
             // already-registered branch handles it here since PackAdder never sees it.
             if case .localPath = packSource, let existing {
                 if pack.ref != nil {
-                    ctx.output.warn("'\(pack.source)': --ref is ignored for local packs")
+                    ctx.output.warn("'\(displaySource)': --ref is ignored for local packs")
                 }
-                ctx.output.dimmed("  \(pack.source) already registered (local pack)")
+                ctx.output.dimmed("  \(displaySource) already registered (local pack)")
+                try trackIdentifier(
+                    existing.identifier,
+                    source: pack.source,
+                    seen: &seenIdentifiers,
+                    installed: installedThisRun,
+                    ctx: ctx
+                )
                 identifiers.append(existing.identifier)
                 continue
             }
@@ -175,23 +209,41 @@ struct BootstrapCommand: LockedCommand {
                         pack: pack,
                         ctx: ctx
                     )
+                    try trackIdentifier(
+                        reconciled.identifier,
+                        source: pack.source,
+                        seen: &seenIdentifiers,
+                        installed: installedThisRun,
+                        ctx: ctx
+                    )
                     identifiers.append(reconciled.identifier)
                     installedThisRun.append(reconciled.identifier)
                 } else {
                     let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
                     switch outcome {
                     case let .installed(entry):
+                        // Detection happens post-add: the collision-safety net can't run
+                        // upfront without a pre-flight fetch. If we do fire, the second
+                        // pack has already overwritten the first — the error tells the
+                        // user so they can fix mcs.yaml and re-run.
+                        try trackIdentifier(
+                            entry.identifier,
+                            source: pack.source,
+                            seen: &seenIdentifiers,
+                            installed: installedThisRun,
+                            ctx: ctx
+                        )
                         identifiers.append(entry.identifier)
                         installedThisRun.append(entry.identifier)
                     case .declined:
-                        ctx.output.error("Bootstrap aborted: pack '\(pack.source)' was not added.")
+                        ctx.output.error("Bootstrap aborted: pack '\(displaySource)' was not added.")
                         throw ExitCode.failure
                     case .previewed:
                         // PackAdder only returns .previewed when Options.preview is true;
                         // bootstrap never sets that flag. Belt-and-suspenders: crash in debug
                         // if that assumption ever changes so the miss is caught in tests.
                         assertionFailure("PackAdder returned .previewed but bootstrap never sets Options.preview")
-                        ctx.output.error("Unexpected preview outcome for '\(pack.source)'.")
+                        ctx.output.error("Unexpected preview outcome for '\(displaySource)'.")
                         throw ExitCode.failure
                     }
                 }
@@ -204,18 +256,39 @@ struct BootstrapCommand: LockedCommand {
         return identifiers
     }
 
+    /// Reject the current entry when an earlier one in the same bootstrap already
+    /// produced this identifier. Prints a partial-install epilogue and throws so
+    /// the user can deduplicate `mcs.yaml` and re-run.
+    private func trackIdentifier(
+        _ identifier: String,
+        source: String,
+        seen: inout Set<String>,
+        installed: [String],
+        ctx: PackCommandContext
+    ) throws {
+        guard !seen.insert(identifier).inserted else { return }
+        ctx.output.error(
+            "Two entries in \(BootstrapFile.defaultFilename) resolve to the same pack"
+                + " identifier '\(identifier)'. The second declaration would overwrite the first."
+        )
+        ctx.output.plain("  Remove the duplicate declaration or point one at a different pack.")
+        reportPartialInstall(installed: installed, failedAt: source, output: ctx.output)
+        throw ExitCode.failure
+    }
+
     /// Summarize which packs are already installed when bootstrap aborts mid-loop, so users
     /// know what state re-running finds and where to resume from.
     private func reportPartialInstall(installed: [String], failedAt source: String, output: CLIOutput) {
         guard !installed.isEmpty else { return }
+        let displaySource = redactSourceForDisplay(source)
         output.plain("")
         output.info(
-            "\(installed.count) pack(s) already registered before the failure on '\(source)':"
+            "\(installed.count) pack(s) already registered before the failure on '\(displaySource)':"
         )
         for id in installed {
             output.plain("  - \(id)")
         }
-        output.plain("  Re-run 'mcs bootstrap' after fixing '\(source)' to continue.")
+        output.plain("  Re-run 'mcs bootstrap' after fixing '\(displaySource)' to continue.")
     }
 
     /// Handle a git pack that is already registered — either a same-ref no-op or a
@@ -227,7 +300,8 @@ struct BootstrapCommand: LockedCommand {
         ctx: PackCommandContext
     ) throws -> PackRegistryFile.PackEntry {
         if existing.ref == pack.ref {
-            ctx.output.dimmed("  \(pack.source) already registered\(pack.ref.map { "@\($0)" } ?? "")")
+            let display = redactSourceForDisplay(pack.source)
+            ctx.output.dimmed("  \(display) already registered\(pack.ref.map { "@\($0)" } ?? "")")
             return existing
         }
 
@@ -286,10 +360,12 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Prompt priors
 
-    /// Merge the bootstrap file's `values` into `state.resolvedValues`. The sync engine
-    /// reuses these as priors, so declared values do not re-prompt. Keys not declared by
-    /// any pack still land as priors and satisfy the undeclared-placeholder scan in
-    /// `Configurator.resolveAllValues`.
+    /// Merge the bootstrap file's `values` into `state.resolvedValues`. Values whose
+    /// key matches a prompt declared by one of the resolved packs are reused silently
+    /// on sync. Keys that no pack declares (either because the key is a typo or because
+    /// the pack references it only as a `__PLACEHOLDER__` in a file) currently fall
+    /// through to the undeclared-placeholder scan and re-prompt — tracked in the
+    /// follow-up issue for `values:` handling of undeclared placeholders.
     private func seedPromptValues(
         file: BootstrapFile,
         state: inout ProjectState,
@@ -429,11 +505,18 @@ struct BootstrapCommand: LockedCommand {
             throw ExitCode.failure
         }
 
+        // Under --prune, the sync's `packs` argument doesn't have to hold the
+        // "keep" set — it just has to *not* hold anything we want removed. If every
+        // declared pack is already globally installed and the project still has
+        // extras, filterGloballyBlocked would normally refuse; here we want the
+        // prune pass to run against the empty declared set so the extras converge
+        // away as Configurator.configure removals.
         let filteredPacks = try ConfiguratorSupport.filterGloballyBlocked(
             resolvedPacks,
             globallyInstalled: globalState.configuredPacks,
             previouslyConfigured: previouslyConfigured,
-            output: output
+            output: output,
+            allowEmpty: prune
         )
 
         let configurator = Configurator(
@@ -492,4 +575,23 @@ extension PackSource {
         case let .localPath(path): path.path
         }
     }
+}
+
+// MARK: - Source display
+
+/// Redact userinfo (`user:pass@`) from a URL-shaped source before it reaches the
+/// terminal. HTTPS clone URLs for private repos commonly carry a token in the
+/// userinfo component, and every bootstrap diagnostic ends up in CI logs.
+///
+/// Non-URL sources (GitHub shorthand `user/repo`, SSH `git@host:...`, absolute
+/// paths) do not carry userinfo and pass through unchanged.
+func redactSourceForDisplay(_ source: String) -> String {
+    guard var comps = URLComponents(string: source),
+          comps.user != nil || comps.password != nil
+    else {
+        return source
+    }
+    comps.user = nil
+    comps.password = nil
+    return comps.string ?? source
 }

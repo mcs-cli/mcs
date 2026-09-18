@@ -15,7 +15,8 @@ enum ConfiguratorSupport {
         _ packs: [any TechPack],
         globallyInstalled: Set<String>,
         previouslyConfigured: Set<String>,
-        output: CLIOutput
+        output: CLIOutput,
+        allowEmpty: Bool = false
     ) throws -> [any TechPack] {
         let blocked = globallyBlockedIDs(
             candidates: packs.map(\.identifier),
@@ -36,8 +37,13 @@ enum ConfiguratorSupport {
 
         let remaining = packs.filter { !blocked.contains($0.identifier) }
         // Callers guarantee `packs` is non-empty, but filtering can leave it empty.
-        // Syncing an empty desired set would unconfigure every pack in the project.
+        // For an additive caller, syncing an empty desired set would unconfigure the
+        // whole project — refuse. For a caller that has already computed an
+        // authoritative desired set (e.g. `mcs bootstrap --prune` where the extras
+        // it wants removed live outside this list), `allowEmpty` says the empty
+        // result is legitimate and the caller will drive the removal itself.
         guard !remaining.isEmpty else {
+            if allowEmpty { return [] }
             output.error("All requested packs are already installed globally. Nothing to sync.")
             throw ExitCode.failure
         }

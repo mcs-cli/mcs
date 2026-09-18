@@ -207,3 +207,48 @@ struct BootstrapFileTests {
         }
     }
 }
+
+// MARK: - Source redaction
+
+/// `redactSourceForDisplay` guards against leaking userinfo (`user:token@`) from
+/// clone URLs into CI logs. Every terminal-facing sink in `BootstrapCommand`
+/// runs through it, so a regression that reintroduces raw interpolation would
+/// expose credentials — pin the redaction contract directly.
+struct BootstrapSourceRedactionTests {
+    @Test("HTTPS URL with embedded credentials strips user and password")
+    func stripsUserinfoFromHTTPS() {
+        let redacted = redactSourceForDisplay("https://user:secret@github.com/org/repo.git")
+        #expect(!redacted.contains("secret"))
+        #expect(!redacted.contains("user"))
+        #expect(redacted.contains("github.com/org/repo.git"))
+    }
+
+    @Test("HTTPS URL with only a token as user strips the token")
+    func stripsTokenOnlyUserinfo() {
+        let redacted = redactSourceForDisplay("https://ghp_abc123token@github.com/org/repo.git")
+        #expect(!redacted.contains("ghp_abc123token"))
+        #expect(redacted.contains("github.com/org/repo.git"))
+    }
+
+    @Test("SSH URL passes through unchanged")
+    func sshURLIsPreserved() {
+        let source = "git@github.com:org/repo.git"
+        #expect(redactSourceForDisplay(source) == source)
+    }
+
+    @Test("GitHub shorthand passes through unchanged")
+    func githubShorthandIsPreserved() {
+        #expect(redactSourceForDisplay("user/repo") == "user/repo")
+    }
+
+    @Test("Absolute local path passes through unchanged")
+    func absolutePathIsPreserved() {
+        #expect(redactSourceForDisplay("/Users/dev/repos/pack") == "/Users/dev/repos/pack")
+    }
+
+    @Test("Plain HTTPS URL without credentials passes through unchanged")
+    func cleanHTTPSIsPreserved() {
+        let source = "https://github.com/org/repo.git"
+        #expect(redactSourceForDisplay(source) == source)
+    }
+}
