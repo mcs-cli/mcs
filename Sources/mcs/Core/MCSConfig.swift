@@ -86,10 +86,9 @@ struct MCSConfig: Codable {
 
     /// Load config from disk. Returns empty config if file is missing.
     /// Warns via `output` if the file exists but is corrupt, or when a legacy
-    /// two-key `update-check-*` file is migrated. The migration is rewritten back
-    /// to disk so the notice fires at most once per machine — a persist failure
-    /// leaves the old two-key form in place, and the notice will re-fire on the
-    /// next load until the write succeeds.
+    /// two-key `update-check-*` file is migrated. Load never writes to disk —
+    /// callers on write-safe paths (not dry-run, not silent readers like
+    /// `SessionStart` hooks) invoke `persistMigrationIfNeeded` afterwards.
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
         do {
             let loaded = try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
@@ -99,11 +98,6 @@ struct MCSConfig: Codable {
                     "Migrated deprecated 'update-check-packs' / 'update-check-cli' → 'update-check' = \(newValue)."
                 )
                 output?.plain("  Run 'mcs config list' to review.")
-                do {
-                    try loaded.save(to: path)
-                } catch {
-                    output?.warn("Could not persist migrated config: \(error.localizedDescription)")
-                }
             }
             return loaded
         } catch let error as DecodingError {
@@ -121,6 +115,19 @@ struct MCSConfig: Codable {
     /// Save config to disk, creating parent directories if needed.
     func save(to path: URL) throws {
         try YAMLFile.save(self, to: path)
+    }
+
+    /// Persist the config iff `load` rewrote legacy keys. No-op otherwise.
+    /// Callers on write-safe paths (non-dry-run, non-hook) invoke this after load
+    /// so the migration is durable. A persist failure warns and leaves the old
+    /// keys on disk; the notice re-fires on the next load until the write succeeds.
+    func persistMigrationIfNeeded(to path: URL, output: CLIOutput? = nil) {
+        guard didMigrateLegacyUpdateCheck else { return }
+        do {
+            try save(to: path)
+        } catch {
+            output?.warn("Could not persist migrated config: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Key Access

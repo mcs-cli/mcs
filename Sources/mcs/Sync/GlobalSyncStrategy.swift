@@ -226,8 +226,10 @@ struct GlobalSyncStrategy: SyncStrategy {
             output: output
         )
 
-        // Re-inject first-party update check hook if enabled
-        let config = MCSConfig.load(from: environment.mcsConfigFile, output: output)
+        // Re-inject first-party update check hook if enabled. No `output` here:
+        // the command entry point has already surfaced any migration notice, and
+        // persisting it is deferred to the same entry point's non-dry-run gate.
+        let config = MCSConfig.load(from: environment.mcsConfigFile)
         if config.isUpdateCheckEnabled {
             if UpdateChecker.addHook(to: &settings) { hasContent = true }
         }

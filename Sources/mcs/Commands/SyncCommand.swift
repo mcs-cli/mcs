@@ -56,6 +56,9 @@ struct SyncCommand: LockedCommand {
         }
 
         if !dryRun {
+            // Persist the legacy-key migration only when we're actually mutating things —
+            // dry-run must not touch the file.
+            config.persistMigrationIfNeeded(to: env.mcsConfigFile, output: output)
             // Ensure the update check hook lives in global settings.json (not project-scoped)
             UpdateChecker.syncHook(config: config, env: env, output: output)
 

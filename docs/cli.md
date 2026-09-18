@@ -61,12 +61,12 @@ packs:
 
 **Semantics**
 
-- **Project scope only.** Bootstrap never touches the global scope; use `mcs sync --global` for that.
+- **Project-scoped convergence.** Bootstrap's pack set applies to the current project; use `mcs sync --global` to manage packs in `~/.claude/`. Like `mcs sync`, bootstrap does refresh the shared user-level update-check hook in `~/.claude/settings.json` on non-dry-run runs — that hook is per-user, not per-project.
 - **Additive by default.** Packs listed in `mcs.yaml` are installed / updated; any pack configured in the project but not listed is preserved. After sync, a note lists any such extras so the divergence stays visible.
 - **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set — extras are unconfigured. A confirmation prompt lists what will be removed (skip with `--yes`).
 - **Idempotent.** Re-running converges — no work if nothing changed.
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason. When bootstrap aborts partway through, an epilogue lists which packs already registered — re-run after fixing the failing entry to continue.
-- **Trust prompt stays interactive** in v1. Non-interactive trust auto-accept is planned for a future release. **CI note:** a first run against a fresh pack still needs a TTY for the trust prompt. Pre-populate the pack registry (run `mcs bootstrap` once on a developer machine and commit the resulting `~/.mcs/registry.yaml` sidecar, or pre-provision `~/.mcs/packs/` in your image) so subsequent CI runs skip trust and proceed non-interactively.
+- **Trust prompt stays interactive** in v1. Non-interactive trust auto-accept is planned for a future release. **CI note:** a first run against a fresh pack still needs a TTY for the trust prompt. Pre-seed the runner's `$HOME` so that `~/.mcs/packs/<identifier>/` and `~/.mcs/registry.yaml` already exist when bootstrap runs (for example, materialize them at image build time or restore from a cached workspace). Do not commit `~/.mcs/registry.yaml` into the repository as a sidecar: bootstrap reads it from the user's home only, never from the project, and `PackEntry.sourceURL` stores the raw source URL, which can leak embedded credentials for private clones.
 
 **Duplicate identifier handling**
 

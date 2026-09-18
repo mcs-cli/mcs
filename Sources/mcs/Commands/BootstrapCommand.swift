@@ -70,6 +70,7 @@ struct BootstrapCommand: LockedCommand {
 
         if !dryRun {
             let config = MCSConfig.load(from: ctx.env.mcsConfigFile, output: ctx.output)
+            config.persistMigrationIfNeeded(to: ctx.env.mcsConfigFile, output: ctx.output)
             UpdateChecker.syncHook(config: config, env: ctx.env, output: ctx.output)
             UpdateChecker.checkAndPrint(env: ctx.env, shell: ctx.shell, output: ctx.output)
         }
@@ -120,6 +121,11 @@ struct BootstrapCommand: LockedCommand {
 
         var identifiers: [String] = []
         var installedThisRun: [String] = []
+        // `BootstrapFile.validate` dedups on raw source strings, but PackSourceResolver
+        // canonicalizes (`user/repo` → `https://github.com/user/repo.git`, `file://…` →
+        // path). Two entries that differ as strings can resolve to the same URL, and
+        // the loop would re-fetch and race against itself. Track canonical URLs here.
+        var seenCanonicalURLs: Set<String> = []
         for pack in file.packs {
             let packSource: PackSource
             do {
@@ -131,6 +137,13 @@ struct BootstrapCommand: LockedCommand {
             }
 
             let sourceURL = packSource.referenceURL
+            if !seenCanonicalURLs.insert(sourceURL).inserted {
+                ctx.output.error(
+                    "Pack '\(pack.source)' resolves to '\(sourceURL)', already declared in this file."
+                )
+                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
+                throw ExitCode.failure
+            }
             let existing = bySourceURL[sourceURL]
 
             if dryRun {
@@ -345,7 +358,11 @@ struct BootstrapCommand: LockedCommand {
         shell: ShellRunner,
         registry: TechPackRegistry
     ) throws {
-        if SyncCommand.scopeIsBlockedByUnloadablePack(
+        // --prune is the authoritative-removal path: the user has explicitly asked to
+        // converge the scope, so an unloadable configured pack is what --prune exists
+        // to clean up. The downstream `declaredUnresolved` check still blocks a
+        // declared pack that fails to load, so bad declarations don't sneak through.
+        if !prune, SyncCommand.scopeIsBlockedByUnloadablePack(
             configured: projectState.configuredPacks, registry: registry, output: output
         ) {
             return

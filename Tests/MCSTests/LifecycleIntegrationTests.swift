@@ -3379,4 +3379,61 @@ struct BootstrapIntegrationTests {
         // No artifacts written.
         #expect(!FileManager.default.fileExists(atPath: bed.settingsLocalPath.path))
     }
+
+    @Test("--prune bypasses the unloadable-scope guard so a broken configured pack can be pruned")
+    func pruneBypassesUnloadableScopeGuard() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Simulate pack-b becoming unloadable (broken manifest / removed from registry).
+        // In additive mode, `scopeIsBlockedByUnloadablePack` would abort the whole scope
+        // — meaning a broken pack blocks *any* bootstrap. `--prune` must be able to
+        // clean it up instead.
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+        let projectState = try bed.projectState()
+
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: strippedRegistry
+        )
+
+        let after = try bed.projectState()
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+    }
+}
+
+// MARK: - Bootstrap: MCSConfig migration is dry-run safe
+
+struct BootstrapMigrationPersistenceTests {
+    @Test("BootstrapCommand.perform in dry-run does not persist the legacy-key migration")
+    func dryRunLeavesLegacyConfigIntact() throws {
+        // The BootstrapCommand.perform path threads MCSConfig.load through
+        // `if !dryRun`, and `MCSConfig.load` itself never writes to disk anymore —
+        // pin both invariants with a direct check on the load API, since the full
+        // BootstrapCommand.perform requires cwd + registry + claude-cli plumbing.
+        let tmpDir = try makeTmpDir(label: "bootstrap-migration")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        let original = "update-check-packs: false\n"
+        try original.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.didMigrateLegacyUpdateCheck)
+
+        let onDisk = try String(contentsOf: path, encoding: .utf8)
+        #expect(onDisk == original, "load must not touch the file — the persist step is caller-driven")
+
+        // The non-dry-run path in Bootstrap/Sync explicitly opts into persistence.
+        config.persistMigrationIfNeeded(to: path)
+        let afterPersist = try String(contentsOf: path, encoding: .utf8)
+        #expect(afterPersist.contains("update-check: false"))
+    }
 }

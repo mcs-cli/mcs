@@ -42,7 +42,11 @@ enum MCSAnalytics {
     static func initialize(env: Environment, output: CLIOutput) {
         guard !enabled else { return }
 
-        let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
+        // No `output`: telemetry initializes before the main command has a chance to
+        // print its own headers, and the migration warning belongs to whichever
+        // command is about to write the migrated config to disk (Sync, Bootstrap,
+        // Config). This read only checks `isTelemetryEnabled`.
+        let config = MCSConfig.load(from: env.mcsConfigFile)
         guard config.isTelemetryEnabled else { return }
 
         showFirstRunNoticeIfNeeded(env: env, output: output)

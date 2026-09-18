@@ -137,8 +137,8 @@ struct MCSConfigTests {
         #expect(config.isUpdateCheckEnabled)
     }
 
-    @Test("Legacy migration rewrites the file so the notice fires once")
-    func migrationRewritesFile() throws {
+    @Test("Load alone never rewrites the file — dry-run and hook readers must not mutate disk")
+    func loadDoesNotRewriteFile() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -146,10 +146,40 @@ struct MCSConfigTests {
         try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
 
         _ = MCSConfig.load(from: path)
+        let untouched = try String(contentsOf: path, encoding: .utf8)
+        #expect(untouched.contains("update-check-packs"))
+        #expect(!untouched.contains("update-check: false"))
+    }
+
+    @Test("persistMigrationIfNeeded rewrites the file so the notice fires once")
+    func persistMigrationRewritesFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        config.persistMigrationIfNeeded(to: path)
         let rewritten = try String(contentsOf: path, encoding: .utf8)
         #expect(rewritten.contains("update-check: false"))
         #expect(!rewritten.contains("update-check-packs"))
         #expect(!rewritten.contains("update-check-cli"))
+    }
+
+    @Test("persistMigrationIfNeeded is a no-op when nothing was migrated")
+    func persistMigrationNoOpOnModernFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check: true\n".write(to: path, atomically: true, encoding: .utf8)
+        let before = try String(contentsOf: path, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        config.persistMigrationIfNeeded(to: path)
+        let after = try String(contentsOf: path, encoding: .utf8)
+        #expect(after == before)
     }
 
     @Test("New key on disk wins over legacy keys when both are present")
