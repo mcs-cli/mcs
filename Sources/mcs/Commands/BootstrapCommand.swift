@@ -100,7 +100,13 @@ struct BootstrapCommand: LockedCommand {
     ) throws -> [String] {
         let resolver = PackSourceResolver()
         let adder = PackAdder(ctx: ctx)
-        let bootstrapOptions = PackAdder.Options(showNextSteps: false)
+        // Bootstrap is non-interactive by design: mcs.yaml already expresses the user's
+        // intent, so identifier duplicates and artifact collisions must not fall through
+        // to askYesNo (which blocks in CI and defeats the declarative contract).
+        let bootstrapOptions = PackAdder.Options(
+            duplicatePolicy: .autoAccept,
+            showNextSteps: false
+        )
 
         var bySourceURL: [String: PackRegistryFile.PackEntry] = [:]
         do {
@@ -166,13 +172,12 @@ struct BootstrapCommand: LockedCommand {
                         installedThisRun.append(entry.identifier)
                     case .declined:
                         ctx.output.error("Bootstrap aborted: pack '\(pack.source)' was not added.")
-                        reportPartialInstall(
-                            installed: installedThisRun, failedAt: pack.source, output: ctx.output
-                        )
                         throw ExitCode.failure
                     case .previewed:
                         // PackAdder only returns .previewed when Options.preview is true;
-                        // bootstrap never sets that flag.
+                        // bootstrap never sets that flag. Belt-and-suspenders: crash in debug
+                        // if that assumption ever changes so the miss is caught in tests.
+                        assertionFailure("PackAdder returned .previewed but bootstrap never sets Options.preview")
                         ctx.output.error("Unexpected preview outcome for '\(pack.source)'.")
                         throw ExitCode.failure
                     }
@@ -232,12 +237,15 @@ struct BootstrapCommand: LockedCommand {
 
         switch result {
         case .alreadyUpToDate:
+            // Reached here means `existing.ref != pack.ref` (same-ref returns above), but
+            // `updateGitPack` reports `.alreadyUpToDate` on SHA equality alone — the ref
+            // label may still have moved (e.g. `main` → a tag on HEAD). Persist so
+            // re-runs converge instead of re-attempting the same update forever.
+            try persistRegistryEntry(target, ctx: ctx)
             ctx.output.success("\(target.displayName): already up to date")
             return target
         case let .updated(entry, diff):
-            var latest = try ctx.loadRegistry()
-            ctx.registry.register(entry, in: &latest)
-            try ctx.registry.save(latest)
+            try persistRegistryEntry(entry, ctx: ctx)
             ctx.output.success("\(entry.displayName): \(existing.shortSHA) → \(entry.shortSHA)")
             if let diff {
                 ctx.output.packChangeSummary(diff, indent: "    ")
@@ -252,6 +260,17 @@ struct BootstrapCommand: LockedCommand {
         }
     }
 
+    /// Write a single pack entry into the on-disk registry. Reads the registry, applies
+    /// the register, saves — the small triple that both reconcile branches need.
+    private func persistRegistryEntry(
+        _ entry: PackRegistryFile.PackEntry,
+        ctx: PackCommandContext
+    ) throws {
+        var latest = try ctx.loadRegistry()
+        ctx.registry.register(entry, in: &latest)
+        try ctx.registry.save(latest)
+    }
+
     // MARK: - Prompt priors
 
     /// Merge the bootstrap file's `values` into `state.resolvedValues`. The sync engine
@@ -263,10 +282,10 @@ struct BootstrapCommand: LockedCommand {
         state: inout ProjectState,
         output: CLIOutput
     ) throws {
-        guard file.packs.contains(where: { !($0.values?.isEmpty ?? true) }) else { return }
-
-        // Fold in manifest order; warn if a later pack overwrites an earlier pack's value
-        // for the same key so the divergence is visible instead of silent.
+        // Fold in manifest order; warn when a later pack overrides an earlier pack's
+        // value for the same key so the divergence is visible. Values themselves stay
+        // out of the log: bootstrap `values` commonly hold MCP env vars (API keys,
+        // tokens), and a CI log is a common secret-exfil path.
         var merged: [String: String] = [:]
         var seedCount = 0
         for pack in file.packs {
@@ -275,12 +294,14 @@ struct BootstrapCommand: LockedCommand {
                 if let previous = merged[key], previous != value {
                     let file = BootstrapFile.defaultFilename
                     output.warn(
-                        "Duplicate prompt key '\(key)' across packs in \(file) — using '\(value)' (was '\(previous)')"
+                        "Duplicate prompt key '\(key)' across packs in \(file)"
+                            + " — using the later value (values hidden; prompts may hold secrets)"
                     )
                 }
                 merged[key] = value
             }
         }
+        guard !merged.isEmpty else { return }
 
         if dryRun {
             output.dimmed("  would seed \(seedCount) prompt value(s) into project state")
@@ -352,11 +373,41 @@ struct BootstrapCommand: LockedCommand {
             : desiredIdentifiers + extras.sorted()
 
         let resolvedPacks: [any TechPack] = effectiveIDs.compactMap { registry.pack(for: $0) }
-        let unknown = Set(effectiveIDs).subtracting(resolvedPacks.map(\.identifier))
-        for id in unknown.sorted() {
-            output.warn("Pack '\(id)' failed to load — skipping")
+        let resolvedIDs = Set(resolvedPacks.map(\.identifier))
+        let unresolved = Set(effectiveIDs).subtracting(resolvedIDs)
+
+        // Declared IDs that fail to load are hard errors either way. An extra that no
+        // longer resolves is only safe to skip under --prune; otherwise
+        // Configurator.configure would treat it as a deselection and silently
+        // unconfigure it.
+        let declaredUnresolved = unresolved.intersection(declaredIDs)
+        let extrasUnresolved = unresolved.subtracting(declaredIDs)
+
+        for id in declaredUnresolved.sorted() {
+            output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
         }
+        for id in extrasUnresolved.sorted() {
+            if prune {
+                output.warn("Pack '\(id)' has no registry entry — will be unconfigured (--prune).")
+            } else {
+                output.error("Pack '\(id)' is configured in this project but missing from the registry.")
+                output.plain("  Re-add it with 'mcs pack add', or run 'mcs bootstrap --prune' to remove it.")
+            }
+        }
+        if !declaredUnresolved.isEmpty || (!prune && !extrasUnresolved.isEmpty) {
+            throw ExitCode.failure
+        }
+
         guard !resolvedPacks.isEmpty else {
+            if dryRun {
+                // Fresh project whose manifest is only new packs — `installPacks` in
+                // dry-run mode does not fetch, so there are no registered identifiers
+                // to preview beyond the "would fetch:" lines already printed. Not a
+                // failure.
+                output.plain("")
+                output.info("No previously-registered packs to preview. Run without --dry-run to fetch and sync.")
+                return
+            }
             output.error("No packs from \(BootstrapFile.defaultFilename) could be loaded.")
             throw ExitCode.failure
         }
@@ -384,10 +435,13 @@ struct BootstrapCommand: LockedCommand {
         if dryRun {
             try configurator.dryRun(packs: filteredPacks)
         } else {
+            // seedPromptValues already answered every declared prompt — the
+            // interactive Y/n gate would contradict that. New prompts still execute.
             try configurator.configure(
                 packs: filteredPacks,
                 confirmRemovals: !yes,
-                excludedComponents: projectState.allExcludedComponents
+                excludedComponents: projectState.allExcludedComponents,
+                reusePriorValuesSilently: true
             )
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")

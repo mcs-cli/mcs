@@ -14,6 +14,9 @@ struct PackUpdater {
     /// outage and a trust-decline must be distinguishable so callers can choose an exit code
     /// (a systemic failure should be non-zero; a user trust-decline is a zero-exit outcome).
     enum UpdateResult {
+        /// SHA equality is the sole trigger. A caller that mutated the input
+        /// `entry.ref` before calling must persist the entry itself; this case
+        /// does not carry the ref change through the registry.
         case alreadyUpToDate
         /// `diff` is `nil` when the pre-update snapshot could not be taken (e.g. the *previous*
         /// manifest no longer decodes) — distinct from an empty `PackDiff`, which means the

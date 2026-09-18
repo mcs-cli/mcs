@@ -73,8 +73,17 @@ extension BootstrapFile {
         } catch {
             throw BootstrapFileError.parseFailed(underlying: error.localizedDescription)
         }
-        guard let file = decoded else {
+        guard var file = decoded else {
             throw BootstrapFileError.parseFailed(underlying: "file is empty")
+        }
+
+        // Normalize before validation so blank/duplicate checks and later resolution
+        // agree on one canonical form. Without this a quoted source like `" user/repo "`
+        // passes validation on the trimmed value but is later handed untrimmed to
+        // PackSourceResolver.
+        for i in file.packs.indices {
+            file.packs[i].source = file.packs[i].source
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         try file.validate()
@@ -96,15 +105,14 @@ extension BootstrapFile {
 
         var seen: Set<String> = []
         for pack in packs {
-            let source = pack.source.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !source.isEmpty else {
+            guard !pack.source.isEmpty else {
                 throw BootstrapFileError.blankSource
             }
-            if !seen.insert(source).inserted {
-                throw BootstrapFileError.duplicateSource(source)
+            if !seen.insert(pack.source).inserted {
+                throw BootstrapFileError.duplicateSource(pack.source)
             }
             if let scope = pack.scope, scope != "project" {
-                throw BootstrapFileError.reservedScope(source: source, scope: scope)
+                throw BootstrapFileError.reservedScope(source: pack.source, scope: scope)
             }
         }
     }

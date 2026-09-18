@@ -87,7 +87,9 @@ struct MCSConfig: Codable {
     /// Load config from disk. Returns empty config if file is missing.
     /// Warns via `output` if the file exists but is corrupt, or when a legacy
     /// two-key `update-check-*` file is migrated. The migration is rewritten back
-    /// to disk so the notice fires at most once per machine.
+    /// to disk so the notice fires at most once per machine — a persist failure
+    /// leaves the old two-key form in place, and the notice will re-fire on the
+    /// next load until the write succeeds.
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
         do {
             let loaded = try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()

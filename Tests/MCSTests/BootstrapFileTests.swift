@@ -171,4 +171,39 @@ struct BootstrapFileTests {
         let file = try BootstrapFile.load(from: path)
         #expect(file.packs[0].scope == "project")
     }
+
+    @Test("Source is normalized (trimmed) so validation and installation see the same value")
+    func normalizesSourceWhitespace() throws {
+        let tmp = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        // Quoted source with surrounding whitespace — must not survive as-is.
+        // Prior behavior: validation trimmed, storage did not — install then failed
+        // as a missing path.
+        let path = try write("""
+        schemaVersion: 1
+        packs:
+          - source: "  user/repo  "
+        """, to: tmp)
+
+        let file = try BootstrapFile.load(from: path)
+        #expect(file.packs[0].source == "user/repo")
+    }
+
+    @Test("Trimming happens before duplicate detection, so quoted/spaced duplicates are caught")
+    func duplicateDetectionUsesTrimmedValue() throws {
+        let tmp = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let path = try write("""
+        schemaVersion: 1
+        packs:
+          - source: user/repo
+          - source: "  user/repo  "
+        """, to: tmp)
+
+        #expect(throws: BootstrapFileError.duplicateSource("user/repo")) {
+            _ = try BootstrapFile.load(from: path)
+        }
+    }
 }

@@ -3291,4 +3291,92 @@ struct BootstrapIntegrationTests {
         let after = try bed.projectState()
         #expect(after.configuredPacks == Set([seeded.packA.identifier, seeded.packB.identifier]))
     }
+
+    @Test("Additive mode rejects an extra whose registry entry is gone (would otherwise silently uninstall)")
+    func additiveBlocksUnresolvableExtra() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Simulate pack-b removed from the registry between runs (e.g. `mcs pack remove`
+        // ran out of band). pack-b is still in projectState.configuredPacks as an extra.
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse([])
+        let projectState = try bed.projectState()
+
+        // Additive default must NOT silently unconfigure pack-b just because the
+        // registry cannot resolve it — that is the exact "filter-then-configure
+        // uninstalls" pattern the guard defends against.
+        #expect(throws: (any Error).self) {
+            try command.runSync(
+                projectRoot: bed.project,
+                desiredIdentifiers: [seeded.packA.identifier],
+                projectState: projectState,
+                env: bed.env,
+                output: CLIOutput(colorsEnabled: false),
+                shell: ShellRunner(environment: bed.env),
+                registry: strippedRegistry
+            )
+        }
+
+        // pack-b's artifacts (the settings env entry) must still be on disk — nothing
+        // ran through unconfigurePack.
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packB.identifier))
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_B_KEY"] as? String == "valueB")
+    }
+
+    @Test("--prune allows an extra whose registry entry is gone through to removal")
+    func pruneAllowsUnresolvableExtraThrough() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+        let projectState = try bed.projectState()
+
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: strippedRegistry
+        )
+
+        let after = try bed.projectState()
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_B_KEY"] == nil)
+    }
+
+    @Test("dry-run on a fresh project with no registered packs is a no-op, not a failure")
+    func dryRunEmptyResolvedIsNoop() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Fresh project — no packs configured, no packs in `desiredIdentifiers`
+        // (installPacks in dry-run mode does not append IDs for new packs).
+        let command = try BootstrapCommand.parse(["--dry-run"])
+        let projectState = try bed.projectState()
+        let emptyRegistry = TechPackRegistry(packs: [])
+
+        // Must not throw. Prior behavior threw "No packs could be loaded", defeating
+        // the preview flow on a fresh manifest.
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: emptyRegistry
+        )
+
+        // No artifacts written.
+        #expect(!FileManager.default.fileExists(atPath: bed.settingsLocalPath.path))
+    }
 }
