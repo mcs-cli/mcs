@@ -3,8 +3,7 @@ import Foundation
 
 /// Refresh-only orchestration: fetch latest pack contents (with trust verification),
 /// then re-apply the existing configured set in both the global scope and the current
-/// project's scope. Does not add or remove packs (use `mcs sync`). Lockfile writes are
-/// gated by `generate-lockfile`.
+/// project's scope. Does not add or remove packs (use `mcs sync`).
 struct UpdateCommand: LockedCommand {
     static let configuration = CommandConfiguration(
         commandName: "update",
@@ -86,25 +85,23 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
-        let blockedProjects = try runReapplyPhase(
-            runs: runs,
-            skippedPackIDs: updatePhase.skipped,
-            registry: techPackRegistry,
-            env: env,
-            shell: shell,
-            output: output
-        )
-
-        try runLockfilePhase(
-            runs: runs, blockedProjects: blockedProjects, env: env, shell: shell, output: output
-        )
+        for run in runs {
+            try Self.reapplyScope(
+                run,
+                skippedPackIDs: updatePhase.skipped,
+                registry: techPackRegistry,
+                dryRun: dryRun,
+                env: env,
+                shell: shell,
+                output: output
+            )
+        }
 
         if !dryRun {
             UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
         }
 
-        // Reapply already ran for the packs that succeeded; signal failure last so a partial
-        // outage still re-applies the healthy packs.
+        // Fail after reapply so healthy packs still converge.
         if PackUpdater.shouldExitNonZero(
             failedCount: updatePhase.failed.count,
             attemptedCount: updatePhase.attempted,
@@ -309,41 +306,15 @@ struct UpdateCommand: LockedCommand {
         let attempted: Int
     }
 
-    /// Converge every scope, returning the project paths left untouched so the lockfile phase
-    /// does not record commits whose artifacts were never applied.
-    private func runReapplyPhase(
-        runs: [UpdateScopeResolver.ScopeRun],
-        skippedPackIDs: Set<String>,
-        registry: TechPackRegistry,
-        env: Environment,
-        shell: ShellRunner,
-        output: CLIOutput
-    ) throws -> Set<URL> {
-        var blockedProjects: Set<URL> = []
-        for run in runs {
-            let blocked = try Self.reapplyScope(
-                run,
-                skippedPackIDs: skippedPackIDs,
-                registry: registry,
-                dryRun: dryRun,
-                env: env,
-                shell: shell,
-                output: output
-            )
-            if blocked, let projectPath = run.projectPath {
-                blockedProjects.insert(projectPath)
-            }
-        }
-        return blockedProjects
-    }
-
     /// Print one scope's header, resolve its configured packs, and converge the scope onto them.
-    /// Returns `true` when the scope was left untouched.
+    /// Returns `true` when the scope was left untouched — production discards it, but
+    /// integration tests read it to assert on the "did we bail on this scope?" signal.
     ///
     /// `static` so tests can drive the real re-apply — `UpdateCommand` builds its own
     /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
     /// The list must stay the scope's own configured set: `Configurator.configure` treats it
     /// as the complete desired state and unconfigures anything missing, with no prompt here.
+    @discardableResult
     static func reapplyScope(
         _ run: UpdateScopeResolver.ScopeRun,
         skippedPackIDs: Set<String>,
@@ -408,34 +379,5 @@ struct UpdateCommand: LockedCommand {
             )
         }
         return false
-    }
-
-    private func runLockfilePhase(
-        runs: [UpdateScopeResolver.ScopeRun],
-        blockedProjects: Set<URL>,
-        env: Environment,
-        shell: ShellRunner,
-        output: CLIOutput
-    ) throws {
-        guard !dryRun else { return }
-
-        let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
-        let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
-
-        for run in runs where !run.isGlobal {
-            guard let projectPath = run.projectPath else { continue }
-
-            if config.isLockfileGenerationEnabled {
-                // The registry already holds the new SHAs, so a lockfile for a scope that never
-                // converged would describe a configuration that is not on disk.
-                if blockedProjects.contains(projectPath) {
-                    output.warn("Skipped mcs.lock.yaml for \(run.label) — the scope did not converge.")
-                } else {
-                    try lockOps.writeLockfile(at: projectPath)
-                }
-            } else if config.isLockfileGenerationUnset {
-                try lockOps.reportDrift(at: projectPath)
-            }
-        }
     }
 }

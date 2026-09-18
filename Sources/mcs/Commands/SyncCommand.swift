@@ -19,9 +19,6 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
-    @Flag(name: .shortAndLong, help: "Checkout locked pack versions from mcs.lock.yaml before syncing")
-    var lock = false
-
     @Flag(name: .shortAndLong, help: "Customize which components to include per pack")
     var customize = false
 
@@ -56,7 +53,7 @@ struct SyncCommand: LockedCommand {
         if effectiveGlobal {
             try performGlobal(env: env, output: output, shell: shell, registry: registry)
         } else {
-            try performProject(env: env, output: output, shell: shell, registry: registry, config: config)
+            try performProject(env: env, output: output, shell: shell, registry: registry)
         }
 
         if !dryRun {
@@ -119,8 +116,7 @@ struct SyncCommand: LockedCommand {
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
-        registry loadedRegistry: TechPackRegistry,
-        config: MCSConfig
+        registry: TechPackRegistry
     ) throws {
         let projectPath = effectiveTargetURL
 
@@ -129,18 +125,6 @@ struct SyncCommand: LockedCommand {
                 path: projectPath.path,
                 reason: "Directory does not exist"
             )
-        }
-
-        let lockOps = LockfileOperations(environment: env, output: output, shell: shell)
-
-        // The caller's registry predates this checkout, so a pack that failed to load at the old
-        // commit may be fine at the locked one — and the guard below would refuse the repair.
-        let registry: TechPackRegistry
-        if lock {
-            try lockOps.checkoutLockedCommits(at: projectPath)
-            registry = TechPackRegistry.loadWithExternalPacks(environment: env, output: output)
-        } else {
-            registry = loadedRegistry
         }
 
         let configurator = Configurator(
@@ -164,8 +148,6 @@ struct SyncCommand: LockedCommand {
 
         let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
 
-        // Before any branch, including --dry-run. Returning here also skips the lockfile work
-        // below, which would otherwise record a state the project was never converged onto.
         if Self.scopeIsBlockedByUnloadablePack(
             configured: previouslyConfigured, registry: registry, output: output
         ) {
@@ -195,15 +177,6 @@ struct SyncCommand: LockedCommand {
                 globallyInstalledPacks: globallyInstalledPacks
             )
         }
-
-        switch Self.lockfileAction(dryRun: dryRun, config: config) {
-        case .write:
-            try lockOps.writeLockfile(at: projectPath)
-        case .reportDrift:
-            try lockOps.reportDrift(at: projectPath)
-        case .skip:
-            break
-        }
     }
 
     /// Whether this scope must skip convergence because a pack it has configured failed to load.
@@ -225,23 +198,6 @@ struct SyncCommand: LockedCommand {
         output.plain("  Run 'mcs pack update <pack>' to re-trust or repair it,")
         output.plain("  or 'mcs pack remove <pack>' to remove it and its artifacts.")
         return true
-    }
-
-    /// Lockfile action at the end of a project sync.
-    /// Explicit opt-out (`generate-lockfile: false`) stays silent — the user has made a choice
-    /// and drift warnings would half-respect it. Only the never-configured (`nil`) state gets a
-    /// drift nudge, since those users likely have a stale lockfile from the auto-generation era.
-    enum LockfileAction: Equatable {
-        case write
-        case reportDrift
-        case skip
-    }
-
-    static func lockfileAction(dryRun: Bool, config: MCSConfig) -> LockfileAction {
-        guard !dryRun else { return .skip }
-        if config.isLockfileGenerationEnabled { return .write }
-        if config.isLockfileGenerationUnset { return .reportDrift }
-        return .skip
     }
 
     // MARK: - Global Pack Blocking

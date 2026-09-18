@@ -165,56 +165,6 @@ struct MCSConfigTests {
         #expect(!config.isTelemetryEnabled)
     }
 
-    @Test("isLockfileGenerationEnabled defaults to false when nil")
-    func isLockfileGenerationEnabledNil() {
-        let config = MCSConfig()
-        #expect(!config.isLockfileGenerationEnabled)
-    }
-
-    @Test("isLockfileGenerationEnabled returns true when explicitly true")
-    func isLockfileGenerationEnabledTrue() {
-        var config = MCSConfig()
-        config.generateLockfile = true
-        #expect(config.isLockfileGenerationEnabled)
-    }
-
-    @Test("isLockfileGenerationEnabled returns false when explicitly false")
-    func isLockfileGenerationEnabledFalse() {
-        var config = MCSConfig()
-        config.generateLockfile = false
-        #expect(!config.isLockfileGenerationEnabled)
-    }
-
-    @Test("isLockfileGenerationUnset is true only when nil")
-    func isLockfileGenerationUnsetTriState() {
-        var config = MCSConfig()
-        #expect(config.isLockfileGenerationUnset, "nil should be unset")
-
-        config.generateLockfile = false
-        #expect(!config.isLockfileGenerationUnset, "explicit false is a choice, not unset")
-
-        config.generateLockfile = true
-        #expect(!config.isLockfileGenerationUnset, "explicit true is a choice, not unset")
-    }
-
-    @Test("generate-lockfile key round-trips through save/load for all tri-state values")
-    func lockfileKeyRoundtrip() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        for value in [nil, true, false] as [Bool?] {
-            let path = tmpDir.appendingPathComponent("config-\(String(describing: value)).yaml")
-            var config = MCSConfig()
-            config.generateLockfile = value
-            try config.save(to: path)
-
-            let reloaded = MCSConfig.load(from: path)
-            #expect(reloaded.generateLockfile == value, "value \(String(describing: value)) must survive round-trip")
-            #expect(reloaded.isLockfileGenerationUnset == (value == nil))
-            #expect(reloaded.isLockfileGenerationEnabled == (value == true))
-        }
-    }
-
     // MARK: - Key Access
 
     @Test("value(forKey:) returns correct values")
@@ -223,12 +173,10 @@ struct MCSConfigTests {
         config.updateCheckPacks = true
         config.updateCheckCLI = false
         config.telemetry = true
-        config.generateLockfile = true
 
         #expect(config.value(forKey: "update-check-packs") == true)
         #expect(config.value(forKey: "update-check-cli") == false)
         #expect(config.value(forKey: "telemetry") == true)
-        #expect(config.value(forKey: "generate-lockfile") == true)
         #expect(config.value(forKey: "unknown-key") == nil)
     }
 
@@ -247,10 +195,6 @@ struct MCSConfigTests {
         let telemetrySet = config.setValue(false, forKey: "telemetry")
         #expect(telemetrySet)
         #expect(config.telemetry == false)
-
-        let lockfileSet = config.setValue(true, forKey: "generate-lockfile")
-        #expect(lockfileSet)
-        #expect(config.generateLockfile == true)
 
         let unknownSet = config.setValue(true, forKey: "unknown-key")
         #expect(!unknownSet)
