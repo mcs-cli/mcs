@@ -67,7 +67,7 @@ packs:
 mcs bootstrap
 ```
 
-Bootstrap adds any missing packs, seeds prompt answers from `values`, and syncs the project. See [`mcs bootstrap`](docs/cli.md#mcs-bootstrap) for the full reference.
+Bootstrap adds any missing packs, seeds prompt answers from `values`, and syncs the project. Add `--trust-all` to approve packs without the interactive trust prompt, for any run with no terminal to answer it. See [`mcs bootstrap`](docs/cli.md#mcs-bootstrap) for the full reference.
 
 ---
 

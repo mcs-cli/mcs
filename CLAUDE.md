@@ -25,6 +25,7 @@ mcs bootstrap                    # Apply ./mcs.yaml — install declared packs (
 mcs bootstrap --prune            # Also remove packs configured here but absent from mcs.yaml
 mcs bootstrap --dry-run          # Preview what would change
 mcs bootstrap --prune --yes      # Prune without the removal-confirmation prompt (CI)
+mcs bootstrap --trust-all        # Approve pack trust prompts automatically (no TTY needed)
 mcs update                       # Fetch latest pack versions and re-apply across every configured scope
 mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope

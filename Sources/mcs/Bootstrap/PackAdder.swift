@@ -19,6 +19,7 @@ struct PackAdder {
         var duplicatePolicy: DuplicatePolicy = .prompt
         var preview: Bool = false
         var showNextSteps: Bool = true
+        var trustPolicy: PackTrustManager.TrustPolicy = .prompt
     }
 
     enum Outcome {
@@ -124,7 +125,11 @@ struct PackAdder {
 
         let trustedHashes: [String: String]?
         do {
-            trustedHashes = try verifyTrust(manifest: manifest, packPath: fetchResult.localPath)
+            trustedHashes = try verifyTrust(
+                manifest: manifest,
+                packPath: fetchResult.localPath,
+                policy: options.trustPolicy
+            )
         } catch {
             fetcher.removeQuietly(packPath: fetchResult.localPath)
             ctx.output.error("Trust verification failed: \(error.localizedDescription)")
@@ -223,7 +228,7 @@ struct PackAdder {
 
         let trustedHashes: [String: String]?
         do {
-            trustedHashes = try verifyTrust(manifest: manifest, packPath: path)
+            trustedHashes = try verifyTrust(manifest: manifest, packPath: path, policy: options.trustPolicy)
         } catch {
             ctx.output.error("Trust verification failed: \(error.localizedDescription)")
             throw ExitCode.failure
@@ -349,9 +354,10 @@ struct PackAdder {
 
     private func verifyTrust(
         manifest: ExternalPackManifest,
-        packPath: URL
+        packPath: URL,
+        policy: PackTrustManager.TrustPolicy
     ) throws -> [String: String]? {
-        let trustManager = PackTrustManager(output: ctx.output)
+        let trustManager = PackTrustManager(output: ctx.output, policy: policy)
         let items = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
         guard trustManager.promptForTrust(
             manifest: manifest,

@@ -35,6 +35,7 @@ mcs bootstrap                    # Read ./mcs.yaml, install declared packs, keep
 mcs bootstrap --prune            # Also remove packs configured here but absent from mcs.yaml
 mcs bootstrap --dry-run          # Preview what would change
 mcs bootstrap --prune --yes      # Prune without the removal-confirmation prompt (CI)
+mcs bootstrap --trust-all        # Trust declared packs without prompting
 ```
 
 | Flag | Description |
@@ -42,6 +43,7 @@ mcs bootstrap --prune --yes      # Prune without the removal-confirmation prompt
 | `--dry-run` | Preview without making changes. For un-registered packs, prints `would fetch <source>@<ref>` without cloning. |
 | `--prune` | Remove packs configured in this project but absent from `mcs.yaml`. Prompts before removing unless `--yes` is passed. |
 | `-y, --yes` | Skip the removal-confirmation prompt. Only meaningful with `--prune`. |
+| `--trust-all` | Approve each declared pack's executable content without prompting, so bootstrap needs no TTY. No-op with `--dry-run`, which returns before any pack is fetched. |
 
 **File format (`./mcs.yaml`)**
 
@@ -66,7 +68,8 @@ packs:
 - **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set — extras are unconfigured. A confirmation prompt lists what will be removed (skip with `--yes`).
 - **Idempotent.** Re-running converges — no work if nothing changed.
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason. When bootstrap aborts partway through, an epilogue lists which packs already registered — re-run after fixing the failing entry to continue.
-- **Trust prompt stays interactive** in v1. Non-interactive trust auto-accept is planned for a future release. **CI note:** a first run against a fresh pack still needs a TTY for the trust prompt. Pre-seed the runner's `$HOME` so that `~/.mcs/packs/<identifier>/` and `~/.mcs/registry.yaml` already exist when bootstrap runs (for example, materialize them at image build time or restore from a cached workspace). Do not commit `~/.mcs/registry.yaml` into the repository as a sidecar: bootstrap reads it from the user's home only, never from the project, and `PackEntry.sourceURL` stores the raw source URL, which can leak embedded credentials for private clones.
+- **Trust prompts need a TTY unless `--trust-all` is passed.** Both trust surfaces bootstrap can reach — adding a pack it has never seen, and advancing a pack's `ref:` to a revision with changed scripts — end at an interactive confirmation. Without a terminal that confirmation reads as "no" and bootstrap aborts, so any unattended run against a fresh pack needs `--trust-all`.
+- **`--trust-all` grants code execution without review.** It approves every shell command, MCP server, hook, command file, and doctor script the declared packs ship, all of which run with your privileges and most on every Claude Code session. One warning line per pack names what was granted; that log line is the only record. Point `mcs.yaml` at sources you control or have already reviewed, and prefer a `ref:` naming a tag over a branch so the content a run trusts is not a moving target.
 
 **Duplicate identifier handling**
 
@@ -127,13 +130,13 @@ Add a tech pack from a git URL, GitHub shorthand, or local path.
 mcs pack add <source>            # Git URL, GitHub shorthand, or local path
 mcs pack add user/repo           # GitHub shorthand → https://github.com/user/repo.git
 mcs pack add /path/to/pack       # Local pack (read in-place, no clone)
-mcs pack add <url> --ref <tag>   # Pin to a specific tag, branch, or commit
+mcs pack add <url> --ref <tag>   # Pin to a specific tag or branch
 mcs pack add <url> --preview     # Preview pack contents without installing
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-r, --ref <tag>` | Pin to a specific git tag, branch, or commit (git packs only). |
+| `-r, --ref <tag>` | Pin to a specific git tag or branch (git packs only). Commit SHAs are not supported — the pack is cloned with `git clone --branch`, which only resolves branch and tag names. |
 | `-p, --preview` | Preview the pack's contents without installing. |
 
 Source resolution order: URL schemes → filesystem paths → GitHub shorthand.

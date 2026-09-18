@@ -3,7 +3,17 @@ import Foundation
 /// Manages the trust lifecycle for external packs — analyzing executable content,
 /// prompting for user approval, and verifying script integrity before execution.
 struct PackTrustManager {
+    /// How `promptForTrust` reaches its answer.
+    ///
+    /// `autoAccept` exists for a declarative run whose file already states the intent and
+    /// which has no terminal to answer the prompt with.
+    enum TrustPolicy {
+        case prompt
+        case autoAccept
+    }
+
     let output: CLIOutput
+    var policy: TrustPolicy = .prompt
 
     // MARK: - Analyze
 
@@ -144,6 +154,11 @@ struct PackTrustManager {
             return true
         }
 
+        if policy == .autoAccept {
+            output.warn("Trusting '\(manifest.displayName)' without review: \(Self.itemSummary(items))")
+            return true
+        }
+
         output.plain("")
         output.header("Pack '\(manifest.displayName)' requests these permissions:")
 
@@ -220,6 +235,17 @@ struct PackTrustManager {
 
         output.plain("")
         return output.askYesNo("Trust this pack?", default: false)
+    }
+
+    /// Auto-trust prints no permissions block, so this line is the only record of what a
+    /// pack was granted without review.
+    private static func itemSummary(_ items: [TrustableItem]) -> String {
+        TrustableItem.TrustableType.allCases.compactMap { type -> String? in
+            let count = items.count { $0.type == type }
+            guard count > 0 else { return nil }
+            return "\(count) \(type.rawValue)\(count == 1 ? "" : "s")"
+        }
+        .joined(separator: ", ")
     }
 
     // MARK: - Verify
@@ -449,15 +475,16 @@ struct TrustableItem {
     /// trustable artifact does not re-prompt every installed pack.
     var representsDefaultBehavior: Bool = false
 
-    enum TrustableType {
-        case shellCommand // From component install actions
-        case hookFragment // From hook component files (runs on every session)
-        case configureScript // From configureProject
-        case doctorCommand // From commandExists doctor checks (runs during doctor)
-        case doctorScript // From shellScript doctor checks
-        case fixScript // From fix scripts / fix commands
-        case mcpServerCommand // MCP server command (runs with user privs)
-        case commandFile // Command file copied into .claude/commands/ (invoked by Claude)
-        case hookInterpreter // Non-default command a hook file is invoked with (runs every session)
+    /// Raw values are the singular human label, so a new case cannot reach a log line unnamed.
+    enum TrustableType: String, CaseIterable {
+        case shellCommand = "shell command" // From component install actions
+        case hookFragment = "hook file" // From hook component files (runs on every session)
+        case configureScript = "configure script" // From configureProject
+        case doctorCommand = "doctor command" // From commandExists doctor checks (runs during doctor)
+        case doctorScript = "doctor script" // From shellScript doctor checks
+        case fixScript = "fix command" // From fix scripts / fix commands
+        case mcpServerCommand = "MCP server" // MCP server command (runs with user privs)
+        case commandFile = "command file" // Command file copied into .claude/commands/ (invoked by Claude)
+        case hookInterpreter = "hook interpreter" // Non-default command a hook is invoked with (runs every session)
     }
 }

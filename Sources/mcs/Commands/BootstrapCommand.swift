@@ -16,8 +16,18 @@ struct BootstrapCommand: LockedCommand {
     @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
     var yes: Bool = false
 
+    @Flag(name: .long, help: "Trust declared packs without prompting (no TTY required)")
+    var trustAll: Bool = false
+
     var skipLock: Bool {
         dryRun
+    }
+
+    /// Shared by both trust surfaces bootstrap can reach: a fresh `PackAdder.add` and a
+    /// `ref:` advance through `PackUpdater`. Auto-accepting only the first leaves the
+    /// second prompting on every later ref bump, which is most of a project's lifetime.
+    private var trustPolicy: PackTrustManager.TrustPolicy {
+        trustAll ? .autoAccept : .prompt
     }
 
     func perform() throws {
@@ -112,7 +122,8 @@ struct BootstrapCommand: LockedCommand {
         // to askYesNo (which blocks in CI and defeats the declarative contract).
         let bootstrapOptions = PackAdder.Options(
             duplicatePolicy: .autoAccept,
-            showNextSteps: false
+            showNextSteps: false,
+            trustPolicy: trustPolicy
         )
 
         var bySourceURL: [String: PackRegistryFile.PackEntry] = [:]
@@ -219,7 +230,10 @@ struct BootstrapCommand: LockedCommand {
                         identifiers.append(entry.identifier)
                         installedThisRun.append(entry.identifier)
                     case .declined:
+                        // Bootstrap auto-accepts duplicates and collisions, so trust is the
+                        // only thing `.declined` can mean here.
                         ctx.output.error("Bootstrap aborted: pack '\(displaySource)' was not added.")
+                        hintTrustAllIfUnattended(output: ctx.output)
                         throw ExitCode.failure
                     case .previewed:
                         // PackAdder only returns .previewed when Options.preview is true;
@@ -283,6 +297,14 @@ struct BootstrapCommand: LockedCommand {
         throw ExitCode.failure
     }
 
+    /// Without a terminal the trust prompt takes its `false` default, so a decline reads as
+    /// "the user said no" when it really means there was nobody to ask. Say which it was.
+    private func hintTrustAllIfUnattended(output: CLIOutput) {
+        guard !output.hasInteractiveStdin, !trustAll else { return }
+        output.plain("  No terminal was available to answer the trust prompt.")
+        output.plain("  Pass --trust-all to approve declared packs without review.")
+    }
+
     /// Summarize which packs are already installed when bootstrap aborts mid-loop, so users
     /// know what state re-running finds and where to resume from.
     private func reportPartialInstall(installed: [String], failedAt source: String, output: CLIOutput) {
@@ -323,7 +345,7 @@ struct BootstrapCommand: LockedCommand {
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
-            trustManager: PackTrustManager(output: ctx.output),
+            trustManager: PackTrustManager(output: ctx.output, policy: trustPolicy),
             environment: ctx.env,
             output: ctx.output
         )
@@ -347,6 +369,7 @@ struct BootstrapCommand: LockedCommand {
             return entry
         case .trustDeclined:
             ctx.output.error("Bootstrap aborted: trust declined for '\(target.identifier)'")
+            hintTrustAllIfUnattended(output: ctx.output)
             throw ExitCode.failure
         case .fetchFailed, .manifestInvalid, .internalError:
             ctx.output.error("Bootstrap aborted: \(result.reason ?? "update failed") (\(target.identifier))")
