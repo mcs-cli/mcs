@@ -3,7 +3,17 @@ import Foundation
 /// Manages the trust lifecycle for external packs — analyzing executable content,
 /// prompting for user approval, and verifying script integrity before execution.
 struct PackTrustManager {
+    /// How `promptForTrust` reaches its answer.
+    ///
+    /// `autoAccept` exists for a declarative run whose file already states the intent and
+    /// which has no terminal to answer the prompt with.
+    enum TrustPolicy {
+        case prompt
+        case autoAccept
+    }
+
     let output: CLIOutput
+    var policy: TrustPolicy = .prompt
 
     // MARK: - Analyze
 
@@ -144,6 +154,14 @@ struct PackTrustManager {
             return true
         }
 
+        if policy == .autoAccept {
+            output.warn("Trusting '\(manifest.displayName)' without review: \(Self.itemSummary(items))")
+            for line in Self.grantedDetail(items) {
+                output.plain(line)
+            }
+            return true
+        }
+
         output.plain("")
         output.header("Pack '\(manifest.displayName)' requests these permissions:")
 
@@ -220,6 +238,30 @@ struct PackTrustManager {
 
         output.plain("")
         return output.askYesNo("Trust this pack?", default: false)
+    }
+
+    /// Heads the auto-trust block. The registry keeps the approved hashes either way, so what
+    /// this line uniquely records is that the approval happened with nobody reviewing it.
+    private static func itemSummary(_ items: [TrustableItem]) -> String {
+        TrustableItem.TrustableType.allCases.compactMap { type -> String? in
+            let count = items.count { $0.type == type }
+            guard count > 0 else { return nil }
+            return "\(count) \(type.rawValue)\(count == 1 ? "" : "s")"
+        }
+        .joined(separator: ", ")
+    }
+
+    /// Counts alone cannot tell a pack that runs `echo hi` from one that pipes a remote script
+    /// into a shell, and an unattended run has no reviewer to ask — so the log carries the same
+    /// detail the permissions block would have shown.
+    private static func grantedDetail(_ items: [TrustableItem]) -> [String] {
+        items.map { item in
+            guard let path = item.relativePath else {
+                return "    \(item.type.rawValue): \(item.content)"
+            }
+            let lineCount = item.content.components(separatedBy: "\n").count
+            return "    \(item.type.rawValue): \(path) (\(lineCount) lines)"
+        }
     }
 
     // MARK: - Verify
@@ -449,15 +491,17 @@ struct TrustableItem {
     /// trustable artifact does not re-prompt every installed pack.
     var representsDefaultBehavior: Bool = false
 
-    enum TrustableType {
-        case shellCommand // From component install actions
-        case hookFragment // From hook component files (runs on every session)
-        case configureScript // From configureProject
-        case doctorCommand // From commandExists doctor checks (runs during doctor)
-        case doctorScript // From shellScript doctor checks
-        case fixScript // From fix scripts / fix commands
-        case mcpServerCommand // MCP server command (runs with user privs)
-        case commandFile // Command file copied into .claude/commands/ (invoked by Claude)
-        case hookInterpreter // Non-default command a hook file is invoked with (runs every session)
+    /// Raw values are the singular human label trust output prints. A case declared without one
+    /// silently inherits its camelCase name and reaches that output verbatim, so set it.
+    enum TrustableType: String, CaseIterable {
+        case shellCommand = "shell command" // From component install actions
+        case hookFragment = "hook file" // From hook component files (runs on every session)
+        case configureScript = "configure script" // From configureProject
+        case doctorCommand = "doctor command" // From commandExists doctor checks (runs during doctor)
+        case doctorScript = "doctor script" // From shellScript doctor checks
+        case fixScript = "fix command" // From fix scripts / fix commands
+        case mcpServerCommand = "MCP server" // MCP server command (runs with user privs)
+        case commandFile = "command file" // Command file copied into .claude/commands/ (invoked by Claude)
+        case hookInterpreter = "hook interpreter" // Command a hook runs under; emitted for defaults too (see analyzeScripts)
     }
 }

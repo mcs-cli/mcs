@@ -791,4 +791,48 @@ struct PackTrustManagerTests {
 
         #expect(newItems.count == 1)
     }
+
+    // MARK: - Trust policy
+
+    @Test("autoAccept approves trustable items without reading stdin")
+    func autoAcceptApprovesWithoutPrompting() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try FileManager.default.createDirectory(
+            at: tmpDir.appendingPathComponent("hooks"),
+            withIntermediateDirectories: true
+        )
+        try writeFile("echo gate", at: tmpDir.appendingPathComponent("hooks/gate.sh"))
+
+        let manifest = try loadManifest(yaml: hookPackYAML(interpreterLine: "sh -c"), in: tmpDir)
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false), policy: .autoAccept)
+        let items = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
+
+        // A hook file plus its interpreter: the prompt is genuinely reached, not skipped
+        // by the `items.isEmpty` shortcut.
+        #expect(items.count >= 2)
+        #expect(manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: items))
+    }
+
+    @Test("policy defaults to .prompt so auto-accept is never implicit")
+    func policyDefaultsToPrompt() {
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
+        #expect(manager.policy == .prompt)
+    }
+
+    @Test("a pack with nothing executable is trusted without an auto-trust warning")
+    func emptyItemsNeedNoAutoTrustWarning() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = try loadManifest(yaml: """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test Pack
+        description: A pack with nothing executable
+        """, in: tmpDir)
+
+        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false), policy: .autoAccept)
+        #expect(manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: []))
+    }
 }

@@ -3407,6 +3407,16 @@ struct BootstrapIntegrationTests {
         let after = try bed.projectState()
         #expect(!after.configuredPacks.contains(seeded.packB.identifier))
     }
+
+    @Test("--trust-all is the only thing that selects .autoAccept")
+    func trustAllFlagSelectsAutoAccept() throws {
+        // Pins the flag's spelling and the direction of the mapping. Without this, a renamed
+        // flag or an inverted ternary would ship green — every other trust test constructs the
+        // policy directly and never parses an argument vector.
+        #expect(try BootstrapCommand.parse([]).trustPolicy == .prompt)
+        #expect(try BootstrapCommand.parse(["--trust-all"]).trustPolicy == .autoAccept)
+        #expect(try BootstrapCommand.parse(["--prune", "--yes"]).trustPolicy == .prompt)
+    }
 }
 
 // MARK: - Bootstrap: MCSConfig migration is dry-run safe

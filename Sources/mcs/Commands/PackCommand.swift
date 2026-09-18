@@ -58,7 +58,7 @@ struct AddPack: LockedCommand {
     @Argument(help: "Git URL, GitHub shorthand (user/repo), or local path")
     var source: String
 
-    @Option(name: .shortAndLong, help: "Git tag, branch, or commit (git packs only)")
+    @Option(name: .shortAndLong, help: "Git tag or branch (git packs only; commit SHAs are not supported)")
     var ref: String?
 
     @Flag(name: .shortAndLong, help: "Preview pack contents without installing")
