@@ -42,8 +42,7 @@ struct SyncCommand: LockedCommand {
 
         let effectiveGlobal = try guardClaudeHomeCwd(env: env, output: output)
 
-        // First-run: prompt for update notification preference
-        let config = promptForUpdateCheckIfNeeded(env: env, output: output)
+        let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         let registry = TechPackRegistry.loadWithExternalPacks(
             environment: env,
@@ -57,6 +56,9 @@ struct SyncCommand: LockedCommand {
         }
 
         if !dryRun {
+            // Persist the legacy-key migration only when we're actually mutating things —
+            // dry-run must not touch the file.
+            config.persistMigrationIfNeeded(to: env.mcsConfigFile, output: output)
             // Ensure the update check hook lives in global settings.json (not project-scoped)
             UpdateChecker.syncHook(config: config, env: env, output: output)
 
@@ -81,7 +83,7 @@ struct SyncCommand: LockedCommand {
             strategy: GlobalSyncStrategy(environment: env)
         )
 
-        let globalState = try loadGlobalState(env: env, output: output)
+        let globalState = try Self.loadGlobalState(env: env, output: output)
         let persistedExclusions = globalState.allExcludedComponents
 
         if Self.scopeIsBlockedByUnloadablePack(
@@ -146,7 +148,7 @@ struct SyncCommand: LockedCommand {
         let persistedExclusions = projectState.allExcludedComponents
         let previouslyConfigured = projectState.configuredPacks
 
-        let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
+        let globallyInstalledPacks = try Self.loadGlobalState(env: env, output: output).configuredPacks
 
         if Self.scopeIsBlockedByUnloadablePack(
             configured: previouslyConfigured, registry: registry, output: output
@@ -155,7 +157,7 @@ struct SyncCommand: LockedCommand {
         }
 
         if all || !pack.isEmpty {
-            let packs = try Self.filterGloballyBlocked(
+            let packs = try ConfiguratorSupport.filterGloballyBlocked(
                 resolvePacks(from: registry, output: output),
                 globallyInstalled: globallyInstalledPacks,
                 previouslyConfigured: previouslyConfigured,
@@ -205,7 +207,10 @@ struct SyncCommand: LockedCommand {
     /// Load global state, failing the command with an actionable message if the file is
     /// corrupt. A *missing* file is not an error — `ProjectState.load` returns early and
     /// yields an empty state, so machines that never ran `--global` are unaffected.
-    private func loadGlobalState(env: Environment, output: CLIOutput) throws -> ProjectState {
+    ///
+    /// Exposed as `static` so `BootstrapCommand` reuses the same load-and-fail message
+    /// wording — the "Delete <path> and re-run" line has one home.
+    static func loadGlobalState(env: Environment, output: CLIOutput) throws -> ProjectState {
         do {
             return try ProjectState(stateFile: env.globalStateFile)
         } catch {
@@ -213,45 +218,6 @@ struct SyncCommand: LockedCommand {
             output.error("Delete \(env.globalStateFile.path) and re-run 'mcs sync --global'.")
             throw ExitCode.failure
         }
-    }
-
-    /// Drop globally-blocked packs from a non-interactive pack set, reporting what was
-    /// skipped. Skipping is safe precisely because a blocked pack is not configured
-    /// here, so removing it from the desired set cannot unconfigure anything.
-    ///
-    /// `static` so tests can drive the real filter — `SyncCommand` builds its own
-    /// `Environment()`, so instance paths are not reachable from a sandboxed test bed.
-    static func filterGloballyBlocked(
-        _ packs: [any TechPack],
-        globallyInstalled: Set<String>,
-        previouslyConfigured: Set<String>,
-        output: CLIOutput
-    ) throws -> [any TechPack] {
-        let blocked = ConfiguratorSupport.globallyBlockedIDs(
-            candidates: packs.map(\.identifier),
-            globallyInstalled: globallyInstalled,
-            previouslyConfigured: previouslyConfigured
-        )
-        guard !blocked.isEmpty else { return packs }
-
-        // Display names, matching the picker's "Already installed globally" section.
-        // The same packs must not be named differently depending on the flag used.
-        let blockedNames = packs
-            .filter { blocked.contains($0.identifier) }
-            .map(\.displayName)
-            .sorted()
-        output.warn("Skipping \(blocked.count) pack(s) already installed globally:")
-        output.plain("  \(blockedNames.joined(separator: ", "))")
-        output.plain("  Run 'mcs sync --global' to manage them.")
-
-        let remaining = packs.filter { !blocked.contains($0.identifier) }
-        // `resolvePacks` guarantees a non-empty result, but filtering happens after it.
-        // Syncing an empty desired set would unconfigure every pack in the project.
-        guard !remaining.isEmpty else {
-            output.error("All requested packs are already installed globally. Nothing to sync.")
-            throw ExitCode.failure
-        }
-        return remaining
     }
 
     // MARK: - Shared Helpers
@@ -296,27 +262,6 @@ struct SyncCommand: LockedCommand {
             return true
         }
         return true
-    }
-
-    /// Prompt for update notification preference on first interactive sync.
-    @discardableResult
-    private func promptForUpdateCheckIfNeeded(env: Environment, output: CLIOutput) -> MCSConfig {
-        var config = MCSConfig.load(from: env.mcsConfigFile, output: output)
-
-        // Only prompt in interactive mode (no --pack, --all, or --dry-run) and if never configured
-        let isInteractive = pack.isEmpty && !all && !dryRun
-        guard isInteractive, config.isUnconfigured else { return config }
-
-        let enabled = output.askYesNo("Enable update notifications on session start?")
-        config.updateCheckPacks = enabled
-        config.updateCheckCLI = enabled
-        do {
-            try config.save(to: env.mcsConfigFile)
-        } catch {
-            output.warn("Could not save config: \(error.localizedDescription)")
-        }
-        UpdateChecker.syncHook(config: config, env: env, output: output)
-        return config
     }
 
     private func resolvePacks(

@@ -19,8 +19,7 @@ struct MCSConfigTests {
 
         let path = tmpDir.appendingPathComponent("config.yaml")
         let config = MCSConfig.load(from: path)
-        #expect(config.updateCheckPacks == nil)
-        #expect(config.updateCheckCLI == nil)
+        #expect(config.updateCheck == nil)
         #expect(config.telemetry == nil)
     }
 
@@ -31,15 +30,13 @@ struct MCSConfigTests {
 
         let path = tmpDir.appendingPathComponent("config.yaml")
         let yaml = """
-        update-check-packs: true
-        update-check-cli: false
+        update-check: false
         telemetry: false
         """
         try yaml.write(to: path, atomically: true, encoding: .utf8)
 
         let config = MCSConfig.load(from: path)
-        #expect(config.updateCheckPacks == true)
-        #expect(config.updateCheckCLI == false)
+        #expect(config.updateCheck == false)
         #expect(config.telemetry == false)
     }
 
@@ -52,8 +49,7 @@ struct MCSConfigTests {
         try ":::invalid:::yaml:::".write(to: path, atomically: true, encoding: .utf8)
 
         let config = MCSConfig.load(from: path)
-        #expect(config.updateCheckPacks == nil)
-        #expect(config.updateCheckCLI == nil)
+        #expect(config.updateCheck == nil)
     }
 
     @Test("Load returns empty config for empty file")
@@ -65,7 +61,141 @@ struct MCSConfigTests {
         try "".write(to: path, atomically: true, encoding: .utf8)
 
         let config = MCSConfig.load(from: path)
-        #expect(config.updateCheckPacks == nil)
+        #expect(config.updateCheck == nil)
+    }
+
+    // MARK: - Legacy Key Migration
+
+    @Test("Legacy both-false pair migrates to updateCheck=false")
+    func migratesBothLegacyFalse() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try """
+        update-check-packs: false
+        update-check-cli: false
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Legacy pair where either key is false preserves the opt-out")
+    func migratesLegacyMixedFalsePreservesOptOut() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try """
+        update-check-packs: false
+        update-check-cli: true
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+        #expect(!config.isUpdateCheckEnabled)
+    }
+
+    @Test("Legacy packs-only false preserves the opt-out")
+    func migratesLegacyPacksOnlyFalse() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Legacy cli-only false preserves the opt-out")
+    func migratesLegacyCLIOnlyFalse() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-cli: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Legacy pair both true migrates to unset (default-on)")
+    func migratesLegacyBothTrueToUnset() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try """
+        update-check-packs: true
+        update-check-cli: true
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == nil)
+        #expect(config.isUpdateCheckEnabled)
+    }
+
+    @Test("Load alone never rewrites the file — dry-run and hook readers must not mutate disk")
+    func loadDoesNotRewriteFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        _ = MCSConfig.load(from: path)
+        let untouched = try String(contentsOf: path, encoding: .utf8)
+        #expect(untouched.contains("update-check-packs"))
+        #expect(!untouched.contains("update-check: false"))
+    }
+
+    @Test("persistMigrationIfNeeded rewrites the file so the notice fires once")
+    func persistMigrationRewritesFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check-packs: false\n".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        config.persistMigrationIfNeeded(to: path)
+        let rewritten = try String(contentsOf: path, encoding: .utf8)
+        #expect(rewritten.contains("update-check: false"))
+        #expect(!rewritten.contains("update-check-packs"))
+        #expect(!rewritten.contains("update-check-cli"))
+    }
+
+    @Test("persistMigrationIfNeeded is a no-op when nothing was migrated")
+    func persistMigrationNoOpOnModernFile() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check: true\n".write(to: path, atomically: true, encoding: .utf8)
+        let before = try String(contentsOf: path, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        config.persistMigrationIfNeeded(to: path)
+        let after = try String(contentsOf: path, encoding: .utf8)
+        #expect(after == before)
+    }
+
+    @Test("New key on disk wins over legacy keys when both are present")
+    func newKeyTakesPrecedenceOverLegacy() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try """
+        update-check: true
+        update-check-packs: false
+        update-check-cli: false
+        """.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == true)
     }
 
     // MARK: - Save + Roundtrip
@@ -77,14 +207,12 @@ struct MCSConfigTests {
 
         let path = tmpDir.appendingPathComponent("config.yaml")
         var config = MCSConfig()
-        config.updateCheckPacks = true
-        config.updateCheckCLI = false
+        config.updateCheck = false
         config.telemetry = false
         try config.save(to: path)
 
         let reloaded = MCSConfig.load(from: path)
-        #expect(reloaded.updateCheckPacks == true)
-        #expect(reloaded.updateCheckCLI == false)
+        #expect(reloaded.updateCheck == false)
         #expect(reloaded.telemetry == false)
     }
 
@@ -95,54 +223,33 @@ struct MCSConfigTests {
 
         let path = tmpDir.appendingPathComponent("nested/dir/config.yaml")
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: path)
 
         let reloaded = MCSConfig.load(from: path)
-        #expect(reloaded.updateCheckPacks == true)
+        #expect(reloaded.updateCheck == true)
     }
 
     // MARK: - Computed Properties
 
-    @Test("isUpdateCheckEnabled returns false when both nil")
-    func isUpdateCheckEnabledBothNil() {
+    @Test("isUpdateCheckEnabled defaults to true when unset")
+    func isUpdateCheckEnabledUnset() {
         let config = MCSConfig()
-        #expect(!config.isUpdateCheckEnabled)
-    }
-
-    @Test("isUpdateCheckEnabled returns true when packs enabled")
-    func isUpdateCheckEnabledPacksOnly() {
-        var config = MCSConfig()
-        config.updateCheckPacks = true
         #expect(config.isUpdateCheckEnabled)
     }
 
-    @Test("isUpdateCheckEnabled returns true when CLI enabled")
-    func isUpdateCheckEnabledCLIOnly() {
+    @Test("isUpdateCheckEnabled returns true when explicitly true")
+    func isUpdateCheckEnabledExplicitTrue() {
         var config = MCSConfig()
-        config.updateCheckCLI = true
+        config.updateCheck = true
         #expect(config.isUpdateCheckEnabled)
     }
 
-    @Test("isUpdateCheckEnabled returns false when both explicitly false")
-    func isUpdateCheckEnabledBothFalse() {
+    @Test("isUpdateCheckEnabled returns false when explicitly false")
+    func isUpdateCheckEnabledExplicitFalse() {
         var config = MCSConfig()
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
         #expect(!config.isUpdateCheckEnabled)
-    }
-
-    @Test("isUnconfigured returns true when both nil")
-    func isUnconfiguredBothNil() {
-        let config = MCSConfig()
-        #expect(config.isUnconfigured)
-    }
-
-    @Test("isUnconfigured returns false when one is set")
-    func isUnconfiguredOneSet() {
-        var config = MCSConfig()
-        config.updateCheckPacks = false
-        #expect(!config.isUnconfigured)
     }
 
     @Test("isTelemetryEnabled defaults to true when nil")
@@ -170,12 +277,10 @@ struct MCSConfigTests {
     @Test("value(forKey:) returns correct values")
     func valueForKey() {
         var config = MCSConfig()
-        config.updateCheckPacks = true
-        config.updateCheckCLI = false
+        config.updateCheck = false
         config.telemetry = true
 
-        #expect(config.value(forKey: "update-check-packs") == true)
-        #expect(config.value(forKey: "update-check-cli") == false)
+        #expect(config.value(forKey: "update-check") == false)
         #expect(config.value(forKey: "telemetry") == true)
         #expect(config.value(forKey: "unknown-key") == nil)
     }
@@ -184,13 +289,9 @@ struct MCSConfigTests {
     func setValueForKey() {
         var config = MCSConfig()
 
-        let packsSet = config.setValue(true, forKey: "update-check-packs")
-        #expect(packsSet)
-        #expect(config.updateCheckPacks == true)
-
-        let cliSet = config.setValue(false, forKey: "update-check-cli")
-        #expect(cliSet)
-        #expect(config.updateCheckCLI == false)
+        let updateSet = config.setValue(false, forKey: "update-check")
+        #expect(updateSet)
+        #expect(config.updateCheck == false)
 
         let telemetrySet = config.setValue(false, forKey: "telemetry")
         #expect(telemetrySet)

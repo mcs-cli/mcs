@@ -1756,7 +1756,7 @@ struct HookMetadataLifecycleTests {
 
         // Enable update checks in config
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: bed.env.mcsConfigFile)
 
         // Sync with a minimal pack
@@ -1789,8 +1789,7 @@ struct HookMetadataLifecycleTests {
 
         // Disable update checks in config
         var config = MCSConfig()
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
         try config.save(to: bed.env.mcsConfigFile)
 
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
@@ -1824,7 +1823,7 @@ struct HookMetadataLifecycleTests {
 
         // Enable → hook appears in global settings.json
         var config = MCSConfig()
-        config.updateCheckPacks = true
+        config.updateCheck = true
         try config.save(to: bed.env.mcsConfigFile)
 
         UpdateChecker.syncHook(config: config, env: bed.env, output: output)
@@ -1835,8 +1834,7 @@ struct HookMetadataLifecycleTests {
         #expect(commands1.contains(UpdateChecker.hookCommand))
 
         // Disable → hook removed from global settings.json
-        config.updateCheckPacks = false
-        config.updateCheckCLI = false
+        config.updateCheck = false
 
         UpdateChecker.syncHook(config: config, env: bed.env, output: output)
 
@@ -2249,7 +2247,7 @@ struct GlobalPackBlockingLifecycleTests {
         // is blocked because it is global and not yet configured here. Drive the real
         // filter, not a copy of it — a reimplementation here would keep passing even
         // if `performProject` stopped calling it.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [shared, projectOnly],
             globallyInstalled: globallyInstalled,
             previouslyConfigured: bed.projectState().configuredPacks,
@@ -2284,7 +2282,7 @@ struct GlobalPackBlockingLifecycleTests {
         // The regression guard: blocking by bare identity here would drop the pack
         // from the desired set, and `configure(confirmRemovals: false)` would
         // unconfigure it without a prompt.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [shared],
             globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
             previouslyConfigured: bed.projectState().configuredPacks,
@@ -2308,7 +2306,7 @@ struct GlobalPackBlockingLifecycleTests {
         let pack = MockTechPack(identifier: "ios", displayName: "iOS")
         // `ProjectState.load` returns early for a missing file rather than throwing,
         // so an untouched global scope yields an empty set and nothing is filtered.
-        let toSync = try SyncCommand.filterGloballyBlocked(
+        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
             [pack],
             globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
             previouslyConfigured: [],
@@ -2331,7 +2329,7 @@ struct GlobalPackBlockingLifecycleTests {
         // Returning an empty pack list instead of throwing would make `configure`
         // converge on an empty desired set and unconfigure the whole project.
         #expect(throws: (any Error).self) {
-            try SyncCommand.filterGloballyBlocked(
+            try ConfiguratorSupport.filterGloballyBlocked(
                 [shared],
                 globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
                 previouslyConfigured: [],
@@ -3181,5 +3179,261 @@ struct BrewPackageDoctorTests {
         let summary = try runner.run()
         #expect(summary.warnings == 0)
         #expect(summary.issues == 0)
+    }
+}
+
+// MARK: - Bootstrap: additive-vs-prune convergence
+
+struct BootstrapIntegrationTests {
+    /// Build a pair of packs, seed both into the project's configured set via a first
+    /// `Configurator.configure`, and hand back everything BootstrapCommand.runSync needs.
+    private func seedTwoPackProject(
+        bed: LifecycleTestBed
+    ) throws -> (packA: MockTechPack, packB: MockTechPack, registry: TechPackRegistry) {
+        let settingsA = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_A_KEY": "valueA" } }
+        """)
+        let settingsB = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_B_KEY": "valueB" } }
+        """)
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [bed.settingsComponent(pack: "pack-a", id: "settings", source: settingsA)]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [bed.settingsComponent(pack: "pack-b", id: "settings", source: settingsB)]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        return (packA, packB, registry)
+    }
+
+    @Test("Additive default preserves a previously-configured pack absent from mcs.yaml")
+    func additiveDefaultKeepsExtras() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Bootstrap declares only pack-a; pack-b is an extra.
+        let command = try BootstrapCommand.parse([])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packA.identifier))
+        #expect(after.configuredPacks.contains(seeded.packB.identifier))
+
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_A_KEY"] as? String == "valueA")
+        #expect(envDict["PACK_B_KEY"] as? String == "valueB")
+    }
+
+    @Test("--prune removes packs configured in the project but absent from mcs.yaml")
+    func pruneRemovesExtras() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packA.identifier))
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_A_KEY"] as? String == "valueA")
+        #expect(envDict["PACK_B_KEY"] == nil)
+    }
+
+    @Test("Additive re-add of only the declared pack is a no-op — extras untouched")
+    func additiveNoOpWhenExtrasStillDeclared() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let command = try BootstrapCommand.parse([])
+
+        let projectState = try bed.projectState()
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier, seeded.packB.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: seeded.registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == Set([seeded.packA.identifier, seeded.packB.identifier]))
+    }
+
+    @Test("Additive mode rejects an extra whose registry entry is gone (would otherwise silently uninstall)")
+    func additiveBlocksUnresolvableExtra() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Simulate pack-b removed from the registry between runs (e.g. `mcs pack remove`
+        // ran out of band). pack-b is still in projectState.configuredPacks as an extra.
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse([])
+        let projectState = try bed.projectState()
+
+        // Additive default must NOT silently unconfigure pack-b just because the
+        // registry cannot resolve it — that is the exact "filter-then-configure
+        // uninstalls" pattern the guard defends against.
+        #expect(throws: (any Error).self) {
+            try command.runSync(
+                projectRoot: bed.project,
+                desiredIdentifiers: [seeded.packA.identifier],
+                projectState: projectState,
+                env: bed.env,
+                output: CLIOutput(colorsEnabled: false),
+                shell: ShellRunner(environment: bed.env),
+                registry: strippedRegistry
+            )
+        }
+
+        // pack-b's artifacts (the settings env entry) must still be on disk — nothing
+        // ran through unconfigurePack.
+        let after = try bed.projectState()
+        #expect(after.configuredPacks.contains(seeded.packB.identifier))
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_B_KEY"] as? String == "valueB")
+    }
+
+    @Test("--prune allows an extra whose registry entry is gone through to removal")
+    func pruneAllowsUnresolvableExtraThrough() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+        let projectState = try bed.projectState()
+
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: strippedRegistry
+        )
+
+        let after = try bed.projectState()
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+        let envDict = try bed.settingsEnv()
+        #expect(envDict["PACK_B_KEY"] == nil)
+    }
+
+    @Test("dry-run on a fresh project with no registered packs is a no-op, not a failure")
+    func dryRunEmptyResolvedIsNoop() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        // Fresh project — no packs configured, no packs in `desiredIdentifiers`
+        // (installPacks in dry-run mode does not append IDs for new packs).
+        let command = try BootstrapCommand.parse(["--dry-run"])
+        let projectState = try bed.projectState()
+        let emptyRegistry = TechPackRegistry(packs: [])
+
+        // Must not throw. Prior behavior threw "No packs could be loaded", defeating
+        // the preview flow on a fresh manifest.
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: emptyRegistry
+        )
+
+        // No artifacts written.
+        #expect(!FileManager.default.fileExists(atPath: bed.settingsLocalPath.path))
+    }
+
+    @Test("--prune bypasses the unloadable-scope guard so a broken configured pack can be pruned")
+    func pruneBypassesUnloadableScopeGuard() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        // Simulate pack-b becoming unloadable (broken manifest / removed from registry).
+        // In additive mode, `scopeIsBlockedByUnloadablePack` would abort the whole scope
+        // — meaning a broken pack blocks *any* bootstrap. `--prune` must be able to
+        // clean it up instead.
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+        let command = try BootstrapCommand.parse(["--prune", "--yes"])
+        let projectState = try bed.projectState()
+
+        try command.runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [seeded.packA.identifier],
+            projectState: projectState,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: strippedRegistry
+        )
+
+        let after = try bed.projectState()
+        #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+    }
+}
+
+// MARK: - Bootstrap: MCSConfig migration is dry-run safe
+
+struct BootstrapMigrationPersistenceTests {
+    @Test("BootstrapCommand.perform in dry-run does not persist the legacy-key migration")
+    func dryRunLeavesLegacyConfigIntact() throws {
+        // The BootstrapCommand.perform path threads MCSConfig.load through
+        // `if !dryRun`, and `MCSConfig.load` itself never writes to disk anymore —
+        // pin both invariants with a direct check on the load API, since the full
+        // BootstrapCommand.perform requires cwd + registry + claude-cli plumbing.
+        let tmpDir = try makeTmpDir(label: "bootstrap-migration")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        let original = "update-check-packs: false\n"
+        try original.write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.didMigrateLegacyUpdateCheck)
+
+        let onDisk = try String(contentsOf: path, encoding: .utf8)
+        #expect(onDisk == original, "load must not touch the file — the persist step is caller-driven")
+
+        // The non-dry-run path in Bootstrap/Sync explicitly opts into persistence.
+        config.persistMigrationIfNeeded(to: path)
+        let afterPersist = try String(contentsOf: path, encoding: .utf8)
+        #expect(afterPersist.contains("update-check: false"))
     }
 }

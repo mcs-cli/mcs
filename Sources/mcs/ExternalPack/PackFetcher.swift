@@ -140,6 +140,18 @@ struct PackFetcher {
         try fm.removeItem(at: packPath)
     }
 
+    /// Same as `remove(packPath:)` but surfaces failure as a warning instead of
+    /// propagating it. Used by cleanup paths where an orphan `~/.mcs/packs/…`
+    /// directory is a nuisance, not a fatal error — but the failure must not
+    /// be silent, or orphans accumulate invisibly.
+    func removeQuietly(packPath: URL) {
+        do {
+            try remove(packPath: packPath)
+        } catch {
+            output.warn("Could not delete pack directory at \(packPath.path): \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Helpers
 
     /// Validate that an identifier is safe for use as a path component.

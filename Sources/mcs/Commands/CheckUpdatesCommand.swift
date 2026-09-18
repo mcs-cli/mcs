@@ -36,10 +36,12 @@ struct CheckUpdatesCommand: ParsableCommand {
         let checkPacks: Bool
         let checkCLI: Bool
         if hook {
-            // Hook mode: respect config keys
+            // Hook mode: respect the config key (default on — opt-out). One key drives both
+            // check families; the hook is on or off as a whole.
             let config = MCSConfig.load(from: env.mcsConfigFile)
-            checkPacks = config.updateCheckPacks ?? false
-            checkCLI = config.updateCheckCLI ?? false
+            let enabled = config.isUpdateCheckEnabled
+            checkPacks = enabled
+            checkCLI = enabled
         } else {
             // User-invoked: always check both
             checkPacks = true

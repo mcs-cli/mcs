@@ -7,7 +7,7 @@ Documentation for [Managed Claude Stack (mcs)](../README.md) — a configuration
 New to mcs? Start here:
 
 1. [Install and Quick Start](../README.md#-quick-start) — Get your first pack running in under 2 minutes
-2. [CLI Reference](cli.md) — Complete command reference (`sync`, `pack`, `doctor`, `export`, `cleanup`, `check-updates`, `config`)
+2. [CLI Reference](cli.md) — Complete command reference (`sync`, `bootstrap`, `pack`, `doctor`, `export`, `cleanup`, `check-updates`, `config`)
 3. [Troubleshooting](troubleshooting.md) — Common issues and fixes
 
 ## Building Tech Packs
@@ -29,6 +29,7 @@ How mcs works under the hood:
 |------|---------------|
 | Install mcs | [README > Quick Start](../README.md#-quick-start) |
 | Add a pack | [CLI > mcs pack add](cli.md#mcs-pack-add-source) |
+| Bootstrap a project from `mcs.yaml` | [CLI > mcs bootstrap](cli.md#mcs-bootstrap) |
 | Sync a project | [CLI > mcs sync](cli.md#mcs-sync) |
 | Create a pack | [Creating Tech Packs](creating-tech-packs.md) |
 | Validate a pack | [CLI > mcs pack validate](cli.md#mcs-pack-validate-source) |

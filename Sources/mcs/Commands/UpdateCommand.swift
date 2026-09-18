@@ -98,6 +98,13 @@ struct UpdateCommand: LockedCommand {
         }
 
         if !dryRun {
+            // Surface + persist any legacy MCSConfig migration from this write-safe
+            // path. GlobalSyncStrategy loads the config silently during compose, so
+            // without this call a legacy config would silently in-memory-migrate but
+            // leave the deprecated keys on disk, deferring the notice to the next
+            // Sync/Bootstrap run.
+            let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
+            config.persistMigrationIfNeeded(to: env.mcsConfigFile, output: output)
             UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
         }
 

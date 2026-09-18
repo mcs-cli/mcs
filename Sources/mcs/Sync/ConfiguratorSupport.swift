@@ -1,9 +1,55 @@
+import ArgumentParser
 import Foundation
 
 /// Shared utilities for the `Configurator` and `SyncStrategy` implementations.
 ///
 /// Eliminates duplication of common methods that both configurators need.
 enum ConfiguratorSupport {
+    /// Drop globally-blocked packs from a non-interactive pack set, reporting what was
+    /// skipped. Skipping is safe precisely because a blocked pack is not configured
+    /// here, so removing it from the desired set cannot unconfigure anything.
+    ///
+    /// Shared by every non-interactive project-scope entry point (`mcs sync --pack`,
+    /// `mcs bootstrap`): the rule and its user-facing wording have one definition.
+    static func filterGloballyBlocked(
+        _ packs: [any TechPack],
+        globallyInstalled: Set<String>,
+        previouslyConfigured: Set<String>,
+        output: CLIOutput,
+        allowEmpty: Bool = false
+    ) throws -> [any TechPack] {
+        let blocked = globallyBlockedIDs(
+            candidates: packs.map(\.identifier),
+            globallyInstalled: globallyInstalled,
+            previouslyConfigured: previouslyConfigured
+        )
+        guard !blocked.isEmpty else { return packs }
+
+        // Display names, matching the picker's "Already installed globally" section.
+        // The same packs must not be named differently depending on the flag used.
+        let blockedNames = packs
+            .filter { blocked.contains($0.identifier) }
+            .map(\.displayName)
+            .sorted()
+        output.warn("Skipping \(blocked.count) pack(s) already installed globally:")
+        output.plain("  \(blockedNames.joined(separator: ", "))")
+        output.plain("  Run 'mcs sync --global' to manage them.")
+
+        let remaining = packs.filter { !blocked.contains($0.identifier) }
+        // Callers guarantee `packs` is non-empty, but filtering can leave it empty.
+        // For an additive caller, syncing an empty desired set would unconfigure the
+        // whole project — refuse. For a caller that has already computed an
+        // authoritative desired set (e.g. `mcs bootstrap --prune` where the extras
+        // it wants removed live outside this list), `allowEmpty` says the empty
+        // result is legitimate and the caller will drive the removal itself.
+        guard !remaining.isEmpty else {
+            if allowEmpty { return [] }
+            output.error("All requested packs are already installed globally. Nothing to sync.")
+            throw ExitCode.failure
+        }
+        return remaining
+    }
+
     /// Pack identifiers that may not be installed into a project because they are
     /// already installed globally.
     ///

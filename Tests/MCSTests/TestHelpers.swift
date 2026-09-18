@@ -348,6 +348,15 @@ func makeTmpDir(label: String = "test") throws -> URL {
     return dir
 }
 
+/// Opt the sandbox out of the (default-on) update-check hook so tests that assert on
+/// SessionStart hook shape don't see the mcs update-check entry auto-injected.
+func disableUpdateCheck(home: URL) throws {
+    let env = Environment(home: home)
+    var config = MCSConfig()
+    config.updateCheck = false
+    try config.save(to: env.mcsConfigFile)
+}
+
 /// Create a temp directory pre-configured for global-scope tests (`.claude/` + `.mcs/` subdirectories).
 func makeGlobalTmpDir(label: String = "global") throws -> URL {
     let dir = FileManager.default.temporaryDirectory

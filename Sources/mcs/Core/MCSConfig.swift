@@ -4,14 +4,50 @@ import Yams
 /// User preferences stored at `~/.mcs/config.yaml`.
 /// All fields are optional — `nil` means "never configured".
 struct MCSConfig: Codable {
-    var updateCheckPacks: Bool?
-    var updateCheckCLI: Bool?
+    /// SessionStart update-check preference. `nil` (default) enables the hook — update
+    /// notifications are opt-out; explicit `false` removes it.
+    var updateCheck: Bool?
     var telemetry: Bool?
+    /// Set during decoding when either legacy `update-check-*` key was present so callers
+    /// can surface a one-time migration notice. Not persisted.
+    private(set) var didMigrateLegacyUpdateCheck: Bool = false
 
     enum CodingKeys: String, CodingKey, CaseIterable {
+        case updateCheck = "update-check"
+        case telemetry
+    }
+
+    /// Legacy keys read on load (v0 config files) and folded into `updateCheck`.
+    /// Retained only for one-shot migration in `init(from:)` — never written back.
+    private enum LegacyCodingKeys: String, CodingKey {
         case updateCheckPacks = "update-check-packs"
         case updateCheckCLI = "update-check-cli"
-        case telemetry
+    }
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        telemetry = try container.decodeIfPresent(Bool.self, forKey: .telemetry)
+
+        if let value = try container.decodeIfPresent(Bool.self, forKey: .updateCheck) {
+            updateCheck = value
+            return
+        }
+
+        // Migrate from the two-key era. Any explicit `false` on either legacy key preserves
+        // the opt-out; both `true` or missing leaves the field `nil` (default-on). Callers
+        // that read config from disk surface `didMigrateLegacyUpdateCheck` once so the flip
+        // is visible instead of silent.
+        let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        let legacyPacks = try legacy.decodeIfPresent(Bool.self, forKey: .updateCheckPacks)
+        let legacyCLI = try legacy.decodeIfPresent(Bool.self, forKey: .updateCheckCLI)
+        if legacyPacks != nil || legacyCLI != nil {
+            didMigrateLegacyUpdateCheck = true
+            if legacyPacks == false || legacyCLI == false {
+                updateCheck = false
+            }
+        }
     }
 
     /// Whether telemetry is enabled. Defaults to `true` when unconfigured (`nil`).
@@ -19,14 +55,10 @@ struct MCSConfig: Codable {
         telemetry != false
     }
 
-    /// Whether any update check is enabled (at least one key is true).
+    /// Whether the SessionStart update-check hook should be installed.
+    /// Default is `true` when unset — update notifications are opt-out.
     var isUpdateCheckEnabled: Bool {
-        (updateCheckPacks ?? false) || (updateCheckCLI ?? false)
-    }
-
-    /// Whether neither key has been configured yet (first-run state).
-    var isUnconfigured: Bool {
-        updateCheckPacks == nil && updateCheckCLI == nil
+        updateCheck ?? true
     }
 
     // MARK: - Known Keys
@@ -39,14 +71,9 @@ struct MCSConfig: Codable {
 
     static let knownKeys: [ConfigKey] = [
         ConfigKey(
-            key: CodingKeys.updateCheckPacks.rawValue,
-            description: "Automatically check for tech pack updates on Claude Code session start",
-            defaultValue: "false"
-        ),
-        ConfigKey(
-            key: CodingKeys.updateCheckCLI.rawValue,
-            description: "Automatically check for new mcs versions on Claude Code session start",
-            defaultValue: "false"
+            key: CodingKeys.updateCheck.rawValue,
+            description: "Show tech-pack and mcs CLI update notifications on Claude Code session start",
+            defaultValue: "true"
         ),
         ConfigKey(
             key: CodingKeys.telemetry.rawValue,
@@ -58,10 +85,21 @@ struct MCSConfig: Codable {
     // MARK: - Persistence
 
     /// Load config from disk. Returns empty config if file is missing.
-    /// Warns via `output` if the file exists but is corrupt.
+    /// Warns via `output` if the file exists but is corrupt, or when a legacy
+    /// two-key `update-check-*` file is migrated. Load never writes to disk —
+    /// callers on write-safe paths (not dry-run, not silent readers like
+    /// `SessionStart` hooks) invoke `persistMigrationIfNeeded` afterwards.
     static func load(from path: URL, output: CLIOutput? = nil) -> MCSConfig {
         do {
-            return try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
+            let loaded = try YAMLFile.load(MCSConfig.self, from: path) ?? MCSConfig()
+            if loaded.didMigrateLegacyUpdateCheck {
+                let newValue = loaded.updateCheck.map(String.init(describing:)) ?? "unset"
+                output?.warn(
+                    "Migrated deprecated 'update-check-packs' / 'update-check-cli' → 'update-check' = \(newValue)."
+                )
+                output?.plain("  Run 'mcs config list' to review.")
+            }
+            return loaded
         } catch let error as DecodingError {
             output?.warn("Config file is corrupt (\(path.lastPathComponent)): \(error.localizedDescription)")
             return MCSConfig()
@@ -79,13 +117,25 @@ struct MCSConfig: Codable {
         try YAMLFile.save(self, to: path)
     }
 
+    /// Persist the config iff `load` rewrote legacy keys. No-op otherwise.
+    /// Callers on write-safe paths (non-dry-run, non-hook) invoke this after load
+    /// so the migration is durable. A persist failure warns and leaves the old
+    /// keys on disk; the notice re-fires on the next load until the write succeeds.
+    func persistMigrationIfNeeded(to path: URL, output: CLIOutput? = nil) {
+        guard didMigrateLegacyUpdateCheck else { return }
+        do {
+            try save(to: path)
+        } catch {
+            output?.warn("Could not persist migrated config: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Key Access
 
     /// Get a config value by key name. Returns nil if the key is unknown or unset.
     func value(forKey key: String) -> Bool? {
         switch key {
-        case CodingKeys.updateCheckPacks.rawValue: updateCheckPacks
-        case CodingKeys.updateCheckCLI.rawValue: updateCheckCLI
+        case CodingKeys.updateCheck.rawValue: updateCheck
         case CodingKeys.telemetry.rawValue: telemetry
         default: nil
         }
@@ -94,11 +144,8 @@ struct MCSConfig: Codable {
     /// Set a config value by key name. Returns false if the key is unknown.
     mutating func setValue(_ value: Bool, forKey key: String) -> Bool {
         switch key {
-        case CodingKeys.updateCheckPacks.rawValue:
-            updateCheckPacks = value
-            return true
-        case CodingKeys.updateCheckCLI.rawValue:
-            updateCheckCLI = value
+        case CodingKeys.updateCheck.rawValue:
+            updateCheck = value
             return true
         case CodingKeys.telemetry.rawValue:
             telemetry = value
