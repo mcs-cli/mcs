@@ -2,10 +2,6 @@ import Foundation
 @testable import mcs
 import Testing
 
-/// Bootstrap depends on `PackAdder.DuplicatePolicy.autoAccept` short-circuiting the
-/// duplicate-identifier and artifact-collision prompts so `mcs bootstrap` stays
-/// non-interactive. Any regression that flips either branch back to `askYesNo`
-/// would deadlock CI, so these tests pin the policy branches directly.
 private func makeContext(home: URL) -> PackCommandContext {
     let env = Environment(home: home)
     return PackCommandContext(
@@ -16,6 +12,10 @@ private func makeContext(home: URL) -> PackCommandContext {
     )
 }
 
+/// Bootstrap depends on `PackAdder.DuplicatePolicy.autoAccept` short-circuiting the
+/// duplicate-identifier and artifact-collision prompts so `mcs bootstrap` stays
+/// non-interactive. Any regression that flips either branch back to `askYesNo`
+/// would deadlock CI, so these tests pin the policy branches directly.
 struct PackAdderPolicyTests {
     private func makeManifest(identifier: String) -> ExternalPackManifest {
         ExternalPackManifest(
@@ -109,10 +109,14 @@ struct PackAdderPolicyTests {
 }
 
 /// `mcs bootstrap --trust-all` exists so an unattended run can add a pack it has never
-/// seen. The trust prompt bottoms out at `readLine()`, so the only way to prove
-/// the flag works is to drive the real add pipeline against a real repo and reach
+/// seen. Proving the flag works means driving the real add pipeline against a real repo to
 /// `.installed` — a unit test of `promptForTrust` alone would not catch the policy being
 /// dropped somewhere between `Options` and `PackTrustManager`.
+///
+/// Be aware of what failure looks like: a dropped policy reaches `askYesNo`, which fails
+/// cleanly in CI but **blocks on `readLine()`** for anyone running the suite from a terminal,
+/// because `swift test > file 2>&1` redirects stdout while stdin stays a TTY. This suite and
+/// two in `PackUpdaterTests` are the deliberate exceptions to "no new test reaches the prompt".
 struct PackAdderTrustPolicyTests {
     private struct TestSetupError: Error {
         let message: String

@@ -15,7 +15,7 @@ struct PackFetcher {
     // MARK: - Fetch (Clone)
 
     /// Clone a pack repo to `~/.mcs/packs/<identifier>/`.
-    /// If `ref` is specified, check out that ref (tag, branch, or commit).
+    /// If `ref` is specified, clone at that ref (tag or branch — `--branch` cannot resolve a commit SHA).
     /// If the pack directory already exists, it is removed first for a clean state.
     func fetch(url: String, identifier: String, ref: String?) throws -> FetchResult {
         try ensureGitAvailable()

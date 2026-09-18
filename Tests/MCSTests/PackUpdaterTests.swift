@@ -36,7 +36,7 @@ struct PackUpdaterTests {
 
     /// Create a bare repo seeded with a minimal techpack.yaml, clone it into packs/,
     /// and return a fixture with a PackUpdater ready to test.
-    private func makeFixture() throws -> Fixture {
+    private func makeFixture(trustPolicy: PackTrustManager.TrustPolicy = .prompt) throws -> Fixture {
         let tmpDir = try makeTmpDir()
         let remoteDir = tmpDir.appendingPathComponent("remote.git")
         let workDir = tmpDir.appendingPathComponent("work")
@@ -79,7 +79,7 @@ struct PackUpdaterTests {
         let registryPath = tmpDir.appendingPathComponent("registry.yaml")
         let registry = PackRegistryFile(path: registryPath)
 
-        let trustManager = PackTrustManager(output: output)
+        let trustManager = PackTrustManager(output: output, policy: trustPolicy)
         let updater = PackUpdater(
             fetcher: fetcher, trustManager: trustManager,
             environment: env, output: output
@@ -476,6 +476,45 @@ struct PackUpdaterTests {
             return
         }
         #expect(!result.isHardFailure)
+    }
+
+    /// The mirror of `trustDeclined`, and the second of the two trust surfaces
+    /// `mcs bootstrap --trust-all` covers. Unlike its sibling this one never reaches
+    /// `askYesNo` — `.autoAccept` returns before the prompt — so it cannot hang off a TTY.
+    @Test("autoAccept updates through new scripts and records their hashes")
+    func trustAutoAccepted() throws {
+        let fix = try makeFixture(trustPolicy: .autoAccept)
+        defer { fix.cleanup() }
+
+        let entry = makeEntry(commitSHA: fix.initialSHA)
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+
+        try pushManifest(
+            fixture: fix,
+            manifest: """
+            schemaVersion: 1
+            identifier: test-pack
+            displayName: Test Pack
+            description: A test pack with a shell command
+            components:
+              - id: greet
+                description: Greet during install
+                type: skill
+                shell: "echo hello"
+            """
+        )
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(updatedEntry, _) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        // Approving without review must still record what was approved, or the next update
+        // re-prompts for content this run already granted.
+        #expect(!updatedEntry.trustedScriptHashes.isEmpty)
     }
 
     @Test("returns manifestInvalid when the fetched revision has a broken manifest")

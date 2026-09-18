@@ -38,7 +38,7 @@ mcs doctor --global              # Check globally-configured packs only
 mcs pack add <source>            # Add a tech pack (git URL, GitHub shorthand, or local path)
 mcs pack add user/repo           # GitHub shorthand → https://github.com/user/repo.git
 mcs pack add /path/to/pack       # Add a local pack (read in-place, no clone)
-mcs pack add <url> --ref <tag>   # Add at a specific tag, branch, or commit (git only)
+mcs pack add <url> --ref <tag>   # Add at a specific tag or branch (git only)
 mcs pack add <url> --preview     # Preview pack contents without installing
 mcs pack remove <name>           # Remove an external tech pack
 mcs pack remove <name> --force   # Remove without confirmation

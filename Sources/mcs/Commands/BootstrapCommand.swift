@@ -24,9 +24,9 @@ struct BootstrapCommand: LockedCommand {
     }
 
     /// Shared by both trust surfaces bootstrap can reach: a fresh `PackAdder.add` and a
-    /// `ref:` advance through `PackUpdater`. Auto-accepting only the first leaves the
-    /// second prompting on every later ref bump, which is most of a project's lifetime.
-    private var trustPolicy: PackTrustManager.TrustPolicy {
+    /// `ref:` advance through `PackUpdater`. Auto-accepting only the first leaves the second
+    /// prompting whenever an advanced `ref:` brings new or changed scripts.
+    var trustPolicy: PackTrustManager.TrustPolicy {
         trustAll ? .autoAccept : .prompt
     }
 
@@ -297,12 +297,13 @@ struct BootstrapCommand: LockedCommand {
         throw ExitCode.failure
     }
 
-    /// Without a terminal the trust prompt takes its `false` default, so a decline reads as
-    /// "the user said no" when it really means there was nobody to ask. Say which it was.
+    /// Off a TTY the trust prompt takes its `false` default, so a decline reads as "the user
+    /// said no" when it may mean there was nobody to ask. Redirected stdin carrying a real "n"
+    /// is equally off-TTY, though, so the hint offers the possibility rather than asserting it.
     private func hintTrustAllIfUnattended(output: CLIOutput) {
         guard !output.hasInteractiveStdin, !trustAll else { return }
-        output.plain("  No terminal was available to answer the trust prompt.")
-        output.plain("  Pass --trust-all to approve declared packs without review.")
+        output.plain("  If no terminal was available to answer the trust prompt, pass")
+        output.plain("  --trust-all to approve declared packs without review.")
     }
 
     /// Summarize which packs are already installed when bootstrap aborts mid-loop, so users
