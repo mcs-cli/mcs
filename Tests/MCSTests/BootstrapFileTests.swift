@@ -3,24 +3,21 @@ import Foundation
 import Testing
 
 struct BootstrapFileTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-bootstrap-file-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
     private func write(_ contents: String, to dir: URL) throws -> URL {
         let path = dir.appendingPathComponent(BootstrapFile.defaultFilename)
         try contents.write(to: path, atomically: true, encoding: .utf8)
         return path
     }
 
+    private func makeDir() throws -> URL {
+        try makeTmpDir(label: "bootstrap-file")
+    }
+
     // MARK: - Success
 
     @Test("Loads a minimal v1 file with just a source")
     func loadsMinimalFile() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -40,7 +37,7 @@ struct BootstrapFileTests {
 
     @Test("Loads a file with ref, values, and explicit project scope")
     func loadsFullFile() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -66,7 +63,7 @@ struct BootstrapFileTests {
 
     @Test("Missing file surfaces a notFound error")
     func missingFile() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = tmp.appendingPathComponent(BootstrapFile.defaultFilename)
@@ -77,7 +74,7 @@ struct BootstrapFileTests {
 
     @Test("Rejects unsupported schemaVersion")
     func rejectsFutureSchema() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -93,7 +90,7 @@ struct BootstrapFileTests {
 
     @Test("Rejects an empty packs list")
     func rejectsEmptyPackList() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -108,7 +105,7 @@ struct BootstrapFileTests {
 
     @Test("Rejects duplicate source entries")
     func rejectsDuplicateSource() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -125,7 +122,7 @@ struct BootstrapFileTests {
 
     @Test("Rejects a blank source")
     func rejectsBlankSource() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -141,7 +138,7 @@ struct BootstrapFileTests {
 
     @Test("Rejects a scope value other than 'project'")
     func rejectsReservedScope() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -158,7 +155,7 @@ struct BootstrapFileTests {
 
     @Test("Explicit 'project' scope is accepted")
     func acceptsProjectScope() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""
@@ -174,7 +171,7 @@ struct BootstrapFileTests {
 
     @Test("Source is normalized (trimmed) so validation and installation see the same value")
     func normalizesSourceWhitespace() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         // Quoted source with surrounding whitespace — must not survive as-is.
@@ -192,7 +189,7 @@ struct BootstrapFileTests {
 
     @Test("Trimming happens before duplicate detection, so quoted/spaced duplicates are caught")
     func duplicateDetectionUsesTrimmedValue() throws {
-        let tmp = try makeTmpDir()
+        let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
         let path = try write("""

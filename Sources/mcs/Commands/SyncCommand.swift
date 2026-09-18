@@ -83,7 +83,7 @@ struct SyncCommand: LockedCommand {
             strategy: GlobalSyncStrategy(environment: env)
         )
 
-        let globalState = try loadGlobalState(env: env, output: output)
+        let globalState = try Self.loadGlobalState(env: env, output: output)
         let persistedExclusions = globalState.allExcludedComponents
 
         if Self.scopeIsBlockedByUnloadablePack(
@@ -148,7 +148,7 @@ struct SyncCommand: LockedCommand {
         let persistedExclusions = projectState.allExcludedComponents
         let previouslyConfigured = projectState.configuredPacks
 
-        let globallyInstalledPacks = try loadGlobalState(env: env, output: output).configuredPacks
+        let globallyInstalledPacks = try Self.loadGlobalState(env: env, output: output).configuredPacks
 
         if Self.scopeIsBlockedByUnloadablePack(
             configured: previouslyConfigured, registry: registry, output: output
@@ -207,7 +207,10 @@ struct SyncCommand: LockedCommand {
     /// Load global state, failing the command with an actionable message if the file is
     /// corrupt. A *missing* file is not an error — `ProjectState.load` returns early and
     /// yields an empty state, so machines that never ran `--global` are unaffected.
-    private func loadGlobalState(env: Environment, output: CLIOutput) throws -> ProjectState {
+    ///
+    /// Exposed as `static` so `BootstrapCommand` reuses the same load-and-fail message
+    /// wording — the "Delete <path> and re-run" line has one home.
+    static func loadGlobalState(env: Environment, output: CLIOutput) throws -> ProjectState {
         do {
             return try ProjectState(stateFile: env.globalStateFile)
         } catch {

@@ -159,27 +159,23 @@ struct BootstrapCommand: LockedCommand {
             }
             let existing = bySourceURL[sourceURL]
 
+            // Every existing-pack path (dry-run/existing, local/existing, git/reconcile)
+            // knows the identifier before any mutation, so run the collision check once,
+            // upfront. The new-pack path can only know the identifier after PackAdder
+            // fetches and reads the manifest, so it runs a second check post-add.
+            if let existing {
+                try trackIdentifier(
+                    existing.identifier,
+                    source: pack.source,
+                    seen: &seenIdentifiers,
+                    installed: installedThisRun,
+                    ctx: ctx
+                )
+            }
+
             if dryRun {
-                if let existing {
-                    ctx.output.dimmed("  already registered: \(displaySource)")
-                    try trackIdentifier(
-                        existing.identifier,
-                        source: pack.source,
-                        seen: &seenIdentifiers,
-                        installed: installedThisRun,
-                        ctx: ctx
-                    )
-                    identifiers.append(existing.identifier)
-                } else {
-                    let isLocal = if case .localPath = packSource {
-                        true
-                    } else {
-                        false
-                    }
-                    let verb = isLocal ? "would register (local)" : "would fetch"
-                    let refSuffix = isLocal ? "" : (pack.ref.map { "@\($0)" } ?? "")
-                    ctx.output.info("  \(verb): \(displaySource)\(refSuffix)")
-                }
+                printDryRunLine(existing: existing, packSource: packSource, pack: pack, output: ctx.output)
+                if let existing { identifiers.append(existing.identifier) }
                 continue
             }
 
@@ -191,13 +187,6 @@ struct BootstrapCommand: LockedCommand {
                     ctx.output.warn("'\(displaySource)': --ref is ignored for local packs")
                 }
                 ctx.output.dimmed("  \(displaySource) already registered (local pack)")
-                try trackIdentifier(
-                    existing.identifier,
-                    source: pack.source,
-                    seen: &seenIdentifiers,
-                    installed: installedThisRun,
-                    ctx: ctx
-                )
                 identifiers.append(existing.identifier)
                 continue
             }
@@ -209,23 +198,17 @@ struct BootstrapCommand: LockedCommand {
                         pack: pack,
                         ctx: ctx
                     )
-                    try trackIdentifier(
-                        reconciled.identifier,
-                        source: pack.source,
-                        seen: &seenIdentifiers,
-                        installed: installedThisRun,
-                        ctx: ctx
-                    )
                     identifiers.append(reconciled.identifier)
                     installedThisRun.append(reconciled.identifier)
                 } else {
                     let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
                     switch outcome {
                     case let .installed(entry):
-                        // Detection happens post-add: the collision-safety net can't run
-                        // upfront without a pre-flight fetch. If we do fire, the second
-                        // pack has already overwritten the first — the error tells the
-                        // user so they can fix mcs.yaml and re-run.
+                        // Post-add check: the identifier isn't knowable without a fetch,
+                        // so if two entries with different sources produce the same
+                        // manifest identifier, the second one has already overwritten
+                        // the first by the time we detect it. The error tells the user
+                        // to fix mcs.yaml and re-run.
                         try trackIdentifier(
                             entry.identifier,
                             source: pack.source,
@@ -254,6 +237,30 @@ struct BootstrapCommand: LockedCommand {
         }
 
         return identifiers
+    }
+
+    /// Render the per-pack dry-run line. Existing packs get a dimmed "already
+    /// registered" line; new packs distinguish local (registered in place) from
+    /// git (would be cloned).
+    private func printDryRunLine(
+        existing: PackRegistryFile.PackEntry?,
+        packSource: PackSource,
+        pack: BootstrapFile.PackRef,
+        output: CLIOutput
+    ) {
+        let displaySource = redactSourceForDisplay(pack.source)
+        if existing != nil {
+            output.dimmed("  already registered: \(displaySource)")
+            return
+        }
+        let isLocal = if case .localPath = packSource {
+            true
+        } else {
+            false
+        }
+        let verb = isLocal ? "would register (local)" : "would fetch"
+        let refSuffix = isLocal ? "" : (pack.ref.map { "@\($0)" } ?? "")
+        output.info("  \(verb): \(displaySource)\(refSuffix)")
     }
 
     /// Reject the current entry when an earlier one in the same bootstrap already
@@ -444,14 +451,7 @@ struct BootstrapCommand: LockedCommand {
             return
         }
 
-        let globalState: ProjectState
-        do {
-            globalState = try ProjectState(stateFile: env.globalStateFile)
-        } catch {
-            output.error("Corrupt global state: \(error.localizedDescription)")
-            output.error("Delete \(env.globalStateFile.path) and re-run 'mcs sync --global'.")
-            throw ExitCode.failure
-        }
+        let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
 
         let declaredIDs = Set(desiredIdentifiers)
         let previouslyConfigured = projectState.configuredPacks
@@ -473,23 +473,20 @@ struct BootstrapCommand: LockedCommand {
         // longer resolves is only safe to skip under --prune; otherwise
         // Configurator.configure would treat it as a deselection and silently
         // unconfigure it.
-        let declaredUnresolved = unresolved.intersection(declaredIDs)
-        let extrasUnresolved = unresolved.subtracting(declaredIDs)
-
-        for id in declaredUnresolved.sorted() {
-            output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
-        }
-        for id in extrasUnresolved.sorted() {
-            if prune {
+        var mustAbort = false
+        for id in unresolved.sorted() {
+            if declaredIDs.contains(id) {
+                output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
+                mustAbort = true
+            } else if prune {
                 output.warn("Pack '\(id)' has no registry entry — will be unconfigured (--prune).")
             } else {
                 output.error("Pack '\(id)' is configured in this project but missing from the registry.")
                 output.plain("  Re-add it with 'mcs pack add', or run 'mcs bootstrap --prune' to remove it.")
+                mustAbort = true
             }
         }
-        if !declaredUnresolved.isEmpty || (!prune && !extrasUnresolved.isEmpty) {
-            throw ExitCode.failure
-        }
+        if mustAbort { throw ExitCode.failure }
 
         guard !resolvedPacks.isEmpty else {
             if dryRun {
