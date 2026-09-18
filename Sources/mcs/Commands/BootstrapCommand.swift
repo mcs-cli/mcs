@@ -10,7 +10,10 @@ struct BootstrapCommand: LockedCommand {
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
-    @Flag(name: .shortAndLong, help: "Skip the confirmation prompt when packs would be removed")
+    @Flag(name: .long, help: "Remove packs configured in this project but absent from mcs.yaml")
+    var prune: Bool = false
+
+    @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
     var yes: Bool = false
 
     var skipLock: Bool {
@@ -249,9 +252,13 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Sync
 
-    /// Run project sync authoritatively for the declared pack set.
-    /// Removals go through the same `Configurator.configure(confirmRemovals:)` gate
-    /// `mcs sync` uses; `--yes` bypasses the confirmation.
+    /// Run project sync for the declared pack set.
+    ///
+    /// **Default is additive**: any pack configured in the project but absent from
+    /// `mcs.yaml` is preserved (its identifier is unioned into the desired set).
+    /// `--prune` opts into authoritative behavior — declared IDs become the exact
+    /// desired set, and `Configurator.configure(confirmRemovals: !yes)` prompts
+    /// before removing anything.
     private func runSync(
         projectRoot: URL,
         desiredIdentifiers: [String],
@@ -276,8 +283,27 @@ struct BootstrapCommand: LockedCommand {
             throw ExitCode.failure
         }
 
-        let resolvedPacks: [any TechPack] = desiredIdentifiers.compactMap { registry.pack(for: $0) }
-        let unknown = Set(desiredIdentifiers).subtracting(resolvedPacks.map(\.identifier))
+        let declaredIDs = Set(desiredIdentifiers)
+        let previouslyConfigured = projectState.configuredPacks
+        let extras = previouslyConfigured.subtracting(declaredIDs)
+
+        // Additive default: union declared with the packs already configured here so
+        // nothing gets unconfigured. `--prune` collapses back to authoritative.
+        let effectiveIDs: [String] = {
+            guard !prune else { return desiredIdentifiers }
+            var seen = Set<String>()
+            var result: [String] = []
+            for id in desiredIdentifiers where seen.insert(id).inserted {
+                result.append(id)
+            }
+            for id in extras.sorted() {
+                result.append(id)
+            }
+            return result
+        }()
+
+        let resolvedPacks: [any TechPack] = effectiveIDs.compactMap { registry.pack(for: $0) }
+        let unknown = Set(effectiveIDs).subtracting(resolvedPacks.map(\.identifier))
         for id in unknown.sorted() {
             output.warn("Pack '\(id)' failed to load — skipping")
         }
@@ -289,7 +315,7 @@ struct BootstrapCommand: LockedCommand {
         let filteredPacks = try ConfiguratorSupport.filterGloballyBlocked(
             resolvedPacks,
             globallyInstalled: globalState.configuredPacks,
-            previouslyConfigured: projectState.configuredPacks,
+            previouslyConfigured: previouslyConfigured,
             output: output
         )
 
@@ -317,6 +343,22 @@ struct BootstrapCommand: LockedCommand {
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }
+
+        if !prune, !extras.isEmpty {
+            printAdditiveDivergenceNote(extras: extras, output: output)
+        }
+    }
+
+    /// Post-sync footer emitted after an additive bootstrap when the project holds
+    /// packs that aren't in `mcs.yaml`. Non-blocking — an informational report so
+    /// users see the divergence without a wall-style prompt.
+    private func printAdditiveDivergenceNote(extras: Set<String>, output: CLIOutput) {
+        output.plain("")
+        output.info("\(extras.count) pack(s) are configured in this project but not in \(BootstrapFile.defaultFilename):")
+        for id in extras.sorted() {
+            output.plain("  - \(id)")
+        }
+        output.plain("  Add them to \(BootstrapFile.defaultFilename), or run 'mcs bootstrap --prune' to remove them.")
     }
 }
 

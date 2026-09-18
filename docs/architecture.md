@@ -188,9 +188,11 @@ The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack 
 1. **Load & validate** (`Bootstrap/BootstrapFile.swift`): schema version, non-empty `packs`, unique `source`, reserved `scope`.
 2. **Reconcile the registry**: for each `source`, check `PackRegistryFile`. Not registered → `PackAdder.add` (shared with `mcs pack add`). Same source + same ref → silent no-op. Same source + different ref → `PackUpdater.updateGitPack`. Different source → `PackAdder.add` with `duplicatePolicy: .autoAccept` and a warning.
 3. **Seed prompt priors**: merge each pack's `values` into `ProjectState.resolvedValues`. The sync engine's existing prior-reuse path (`Configurator.resolveAllValues`) picks them up silently.
-4. **Authoritative sync**: build `desiredIdentifiers` from the file, filter through `SyncCommand.filterGloballyBlocked`, and call `Configurator.configure(packs: desired, confirmRemovals: !yes, excludedComponents: ...)` with `ProjectSyncStrategy`. The removal-confirmation gate inside `Configurator.configure` is bootstrap's `--yes` switch.
+4. **Compose the effective pack set**: default is *additive* — `effectiveIDs = declared ∪ previouslyConfigured`, so packs configured outside `mcs.yaml` are preserved. `--prune` collapses to *authoritative* — `effectiveIDs = declared`, and packs configured but absent from the file get unconfigured by `Configurator.configure`.
+5. **Sync**: filter globally-blocked packs via `ConfiguratorSupport.filterGloballyBlocked`, then call `Configurator.configure(packs: effective, confirmRemovals: !yes, excludedComponents: ...)` with `ProjectSyncStrategy`. Under `--prune`, the removal-confirmation gate inside `Configurator.configure` is bootstrap's `--yes` switch.
+6. **Divergence footer**: after an additive sync, if any packs were preserved (present in project but not in the file), print an informational list pointing at `--prune` as the remedy. Non-blocking — keeps the divergence visible without a wall-style prompt.
 
-The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it.
+The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it. The additive-default + explicit-`--prune` shape matches the convention Homebrew Bundle, Kubernetes (`kubectl apply --prune`), and npm (`install` vs `prune`) settled on for declarative-file + external-state workflows.
 
 ## Dependency Resolution
 

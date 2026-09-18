@@ -28,18 +28,20 @@ mcs sync --global                # Install to global scope (~/.claude/)
 
 ## `mcs bootstrap`
 
-Apply a declarative `mcs.yaml` from the current directory. Bootstrap installs any packs the file declares, seeds prompt values, and makes the project's configured pack set match the file exactly.
+Apply a declarative `mcs.yaml` from the current directory. Bootstrap installs any packs the file declares, seeds prompt values, and syncs the project.
 
 ```bash
-mcs bootstrap                    # Read ./mcs.yaml and reconcile this project to it
+mcs bootstrap                    # Read ./mcs.yaml, install declared packs, keep any others
+mcs bootstrap --prune            # Also remove packs configured here but absent from mcs.yaml
 mcs bootstrap --dry-run          # Preview what would change
-mcs bootstrap --yes              # Skip the confirmation prompt when packs would be removed
+mcs bootstrap --prune --yes      # Prune without the removal-confirmation prompt (CI)
 ```
 
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Preview without making changes. For un-registered packs, prints `would fetch <source>@<ref>` without cloning. |
-| `-y, --yes` | Skip the confirmation prompt when the file authoritatively removes packs from the project. |
+| `--prune` | Remove packs configured in this project but absent from `mcs.yaml`. Prompts before removing unless `--yes` is passed. |
+| `-y, --yes` | Skip the removal-confirmation prompt. Only meaningful with `--prune`. |
 
 **File format (`./mcs.yaml`)**
 
@@ -60,7 +62,8 @@ packs:
 **Semantics**
 
 - **Project scope only.** Bootstrap never touches the global scope; use `mcs sync --global` for that.
-- **Authoritative.** The pack set in `mcs.yaml` is exactly what ends up configured in the project. Any pack previously configured but not listed is unconfigured (with a confirmation prompt unless `--yes` is passed).
+- **Additive by default.** Packs listed in `mcs.yaml` are installed / updated; any pack configured in the project but not listed is preserved. After sync, a note lists any such extras so the divergence stays visible.
+- **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set — extras are unconfigured. A confirmation prompt lists what will be removed (skip with `--yes`).
 - **Idempotent.** Re-running converges — no work if nothing changed.
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason.
 - **Trust prompt stays interactive** in v1. Non-interactive trust auto-accept is planned for a future release.
