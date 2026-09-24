@@ -568,7 +568,8 @@ struct Configurator {
         pruneOrphanResolvedValues(state: &state)
     }
 
-    /// Drop `state.resolvedValues` entries whose keys are not declared by any currently-configured pack.
+    /// Drop `state.resolvedValues` entries whose keys no currently-configured pack declares as a
+    /// prompt or references as a `__PLACEHOLDER__`.
     /// Invoked at the tail of `unconfigurePack` so both `mcs sync` deselection and `mcs pack remove`
     /// federated cleanup prune orphans — a later pack declaring the same key is asked fresh instead
     /// of seeing a stale "prior" from a removed pack.
@@ -587,10 +588,13 @@ struct Configurator {
         let context = strategy.makeConfigContext(
             output: output, resolvedValues: priors, priorValues: priors
         )
-        let declared = CrossPackPromptResolver.collectDeclaredPrompts(
-            packs: survivingPacks, context: context
+        let consumed = CrossPackPromptResolver.consumedKeys(
+            packs: survivingPacks,
+            context: context,
+            includeTemplates: scope.includeTemplatesInScan,
+            onWarning: { output.warn($0) }
         )
-        state.pruneResolvedValues(keepingKeys: Set(declared.lazy.map(\.key)))
+        state.pruneResolvedValues(keepingKeys: consumed.all)
     }
 
     /// Remove artifacts for components that were previously included but are now excluded.
@@ -718,6 +722,7 @@ struct Configurator {
     /// - `select` priors are reused only if the stored value is still a valid option.
     /// - `fileDetect` priors are reused only if this run's scan still finds the stored file.
     /// - `script` always re-executes (computed, never answered).
+    /// - `__KEY__` placeholders no prompt declares reuse their prior verbatim, like `input`.
     private func resolveAllValues(
         packs: [any TechPack],
         state: inout ProjectState,
@@ -730,11 +735,28 @@ struct Configurator {
         let initialContext = strategy.makeConfigContext(
             output: output, resolvedValues: allValues, priorValues: priorValues
         )
-        let allDeclaredPrompts = CrossPackPromptResolver.collectDeclaredPrompts(
-            packs: packs, context: initialContext
+        // Packs resolve only their declared prompts, so every other key a placeholder
+        // references is known before any prompt runs — and can go through the same reuse gate.
+        let consumed = CrossPackPromptResolver.consumedKeys(
+            packs: packs,
+            context: initialContext,
+            includeTemplates: scope.includeTemplatesInScan,
+            onWarning: { output.warn($0) }
         )
+        let allDeclaredPrompts = consumed.declared
+        let undeclaredKeys = consumed.undeclared.subtracting(allValues.keys)
+        // Nothing constrains an undeclared placeholder's value, so it partitions as `input`.
+        let placeholderPrompts = undeclaredKeys.map {
+            PromptDefinition(
+                key: $0, type: .input,
+                label: nil, defaultValue: nil, options: nil,
+                detectPatterns: nil, scriptCommand: nil
+            )
+        }
         let (reusableValues, newDeclaredKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            allDeclaredPrompts, priorValues: priorValues, projectPath: initialContext.projectPath
+            allDeclaredPrompts + placeholderPrompts,
+            priorValues: priorValues,
+            projectPath: initialContext.projectPath
         )
 
         let seedFromPriors = decideSeedStrategy(
@@ -769,16 +791,7 @@ struct Configurator {
             allValues.merge(packValues) { existing, _ in existing }
         }
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: packs, resolvedValues: allValues,
-            includeTemplates: scope.includeTemplatesInScan,
-            onWarning: { output.warn($0) }
-        )
-        for key in undeclared {
-            if seedFromPriors, let prior = priorValues[key] {
-                allValues[key] = prior
-                continue
-            }
+        for key in undeclaredKeys.sorted() where allValues[key] == nil {
             let prior = priorValues[key]
             allValues[key] = output.promptInline(
                 "Set value for \(key)",

@@ -73,6 +73,10 @@ struct BootstrapCommand: LockedCommand {
         }
 
         let registry = TechPackRegistry.loadWithExternalPacks(environment: ctx.env, output: ctx.output)
+        warnUnmatchedSeedKeys(
+            file: file, desiredIdentifiers: desiredIdentifiers,
+            registry: registry, cwd: cwd, env: ctx.env, output: ctx.output
+        )
         try seedPromptValues(file: file, state: &projectState, output: ctx.output)
         try runSync(
             projectRoot: cwd,
@@ -391,12 +395,9 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Prompt priors
 
-    /// Merge the bootstrap file's `values` into `state.resolvedValues`. Values whose
-    /// key matches a prompt declared by one of the resolved packs are reused silently
-    /// on sync. Keys that no pack declares (either because the key is a typo or because
-    /// the pack references it only as a `__PLACEHOLDER__` in a file) currently fall
-    /// through to the undeclared-placeholder scan and re-prompt — tracked in the
-    /// follow-up issue for `values:` handling of undeclared placeholders.
+    /// Merge the bootstrap file's `values` into `state.resolvedValues`. Sync reuses them
+    /// silently for keys a resolved pack declares as a prompt or references as a
+    /// `__PLACEHOLDER__`; any other key is dropped when sync rewrites the state.
     private func seedPromptValues(
         file: BootstrapFile,
         state: inout ProjectState,
@@ -442,6 +443,55 @@ struct BootstrapCommand: LockedCommand {
             output.error("Failed to seed prompt values: \(error.localizedDescription)")
             throw ExitCode.failure
         }
+    }
+
+    /// A seeded key nothing consumes is most likely a typo, and sync drops it without a
+    /// trace while prompting for the key the pack actually expects.
+    private func warnUnmatchedSeedKeys(
+        file: BootstrapFile,
+        desiredIdentifiers: [String],
+        registry: TechPackRegistry,
+        cwd: URL,
+        env: Environment,
+        output: CLIOutput
+    ) {
+        // A dry run skips fetching new packs, and their keys would read as unmatched.
+        let packs = desiredIdentifiers.compactMap { registry.pack(for: $0) }
+        guard packs.count == file.packs.count else { return }
+
+        let strategy = ProjectSyncStrategy(projectPath: cwd, environment: env)
+        let context = strategy.makeConfigContext(output: output, resolvedValues: [:], priorValues: [:])
+        for key in Self.unmatchedSeedKeys(
+            file: file, packs: packs, context: context,
+            includeTemplates: strategy.scope.includeTemplatesInScan
+        ) {
+            output.warn(
+                "'\(key)' in \(BootstrapFile.defaultFilename) values matches no prompt or placeholder"
+                    + " in the declared packs — ignored. Check it for a typo."
+            )
+        }
+    }
+
+    /// Seeded keys that no pack declares as a prompt or references as a `__PLACEHOLDER__`.
+    /// Empty when a template can't be read, since its placeholders are then unknown.
+    static func unmatchedSeedKeys(
+        file: BootstrapFile,
+        packs: [any TechPack],
+        context: ProjectConfigContext,
+        includeTemplates: Bool
+    ) -> [String] {
+        let seeded = Set(file.packs.flatMap { ($0.values ?? [:]).keys })
+        guard !seeded.isEmpty else { return [] }
+
+        var templatesUnreadable = false
+        let consumed = CrossPackPromptResolver.consumedKeys(
+            packs: packs,
+            context: context,
+            includeTemplates: includeTemplates,
+            onWarning: { _ in templatesUnreadable = true }
+        )
+        guard !templatesUnreadable else { return [] }
+        return seeded.subtracting(consumed.all).sorted()
     }
 
     // MARK: - Sync

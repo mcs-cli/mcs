@@ -1911,6 +1911,65 @@ struct PromptValueReuseLifecycleTests {
         #expect(state2.resolvedValues?["LABEL_PREFIX"] == "scope:")
     }
 
+    /// A pack with no prompts whose command references `__MEMORIES_BRANCH__`.
+    private func placeholderPack(bed: LifecycleTestBed) throws -> MockTechPack {
+        let cmdSource = try bed.makeCommandSource(name: "sync.md", content: "branch: __MEMORIES_BRANCH__")
+        return MockTechPack(
+            identifier: "placeholder-pack",
+            displayName: "Placeholder Pack",
+            components: [
+                bed.commandComponent(
+                    pack: "placeholder-pack", id: "sync",
+                    source: cmdSource, destination: "sync.md"
+                ),
+            ],
+            templates: []
+        )
+    }
+
+    @Test("Placeholder no prompt declares reuses its stored value")
+    func undeclaredPlaceholderReusesPrior() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try placeholderPack(bed: bed)
+        var state = try bed.projectState()
+        state.setResolvedValues(["MEMORIES_BRANCH": "main"])
+        try state.save()
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+
+        let installed = bed.project.appendingPathComponent(".claude/commands/sync.md")
+        #expect(try String(contentsOf: installed, encoding: .utf8) == "branch: main")
+        #expect(try bed.projectState().resolvedValues?["MEMORIES_BRANCH"] == "main")
+    }
+
+    @Test("Removing another pack keeps a value a surviving pack references as a placeholder")
+    func pruneKeepsReferencedPlaceholderValue() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let placeholderPack = try placeholderPack(bed: bed)
+        let promptPack = MockPromptTechPack(
+            identifier: "prompt-pack",
+            displayName: "Prompt Pack",
+            prompts: [inputPrompt("LABEL_PREFIX")]
+        )
+        let registry = TechPackRegistry(packs: [placeholderPack, promptPack])
+        var state = try bed.projectState()
+        state.setResolvedValues(["MEMORIES_BRANCH": "main"])
+        try state.save()
+
+        let configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [placeholderPack, promptPack], confirmRemovals: false)
+        try configurator.configure(packs: [placeholderPack], confirmRemovals: false)
+
+        let values = try bed.projectState().resolvedValues
+        #expect(values?["MEMORIES_BRANCH"] == "main")
+        #expect(values?["LABEL_PREFIX"] == nil)
+    }
+
     @Test("New prompt added between syncs: old values reused, new prompt asked")
     func newPromptAddedSkipsGate() throws {
         let bed = try LifecycleTestBed()

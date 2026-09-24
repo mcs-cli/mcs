@@ -33,6 +33,32 @@ enum CrossPackPromptResolver {
         packs.flatMap { $0.declaredPrompts(context: context) }
     }
 
+    /// Every value key a pack set consumes: its declared prompts, plus the `__KEY__`
+    /// placeholders its artifacts reference without a prompt declaring them.
+    struct ConsumedKeys {
+        let declared: [PromptDefinition]
+        let undeclared: Set<String>
+
+        var all: Set<String> {
+            undeclared.union(declared.map(\.key))
+        }
+    }
+
+    static func consumedKeys(
+        packs: [any TechPack],
+        context: ProjectConfigContext,
+        includeTemplates: Bool,
+        onWarning: ((String) -> Void)? = nil
+    ) -> ConsumedKeys {
+        let declared = collectDeclaredPrompts(packs: packs, context: context)
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
+            packs: packs,
+            includeTemplates: includeTemplates,
+            onWarning: onWarning
+        )
+        return ConsumedKeys(declared: declared, undeclared: referenced.subtracting(declared.map(\.key)))
+    }
+
     /// Partition declared prompts against `priorValues`.
     ///
     /// `script` keys are excluded from both outputs — they always re-execute and must
