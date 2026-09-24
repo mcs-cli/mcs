@@ -482,11 +482,9 @@ struct ScannerExtensionTests {
             )]
         )
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: [pack], resolvedValues: [:]
-        )
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(packs: [pack])
 
-        #expect(undeclared.contains("MY_API_KEY"))
+        #expect(referenced.contains("MY_API_KEY"))
     }
 
     @Test("Finds placeholders in MCP server env values")
@@ -511,11 +509,9 @@ struct ScannerExtensionTests {
             )]
         )
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: [pack], resolvedValues: [:]
-        )
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(packs: [pack])
 
-        #expect(undeclared.contains("SERVICE_TOKEN"))
+        #expect(referenced.contains("SERVICE_TOKEN"))
     }
 
     @Test("Finds placeholders in MCP server command")
@@ -540,11 +536,9 @@ struct ScannerExtensionTests {
             )]
         )
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: [pack], resolvedValues: [:]
-        )
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(packs: [pack])
 
-        #expect(undeclared.contains("MY_CMD"))
+        #expect(referenced.contains("MY_CMD"))
     }
 
     @Test("Finds placeholders in MCP server args")
@@ -569,18 +563,21 @@ struct ScannerExtensionTests {
             )]
         )
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: [pack], resolvedValues: [:]
-        )
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(packs: [pack])
 
-        #expect(undeclared.contains("API_ENDPOINT"))
+        #expect(referenced.contains("API_ENDPOINT"))
     }
 
-    @Test("Already-resolved keys are not reported as undeclared")
-    func resolvedKeysExcluded() {
+    @Test("consumedKeys splits declared prompts from placeholders no prompt declares")
+    func consumedKeysSplitsDeclaredAndUndeclared() {
         let pack = PromptMockPack(
             identifier: "test-pack",
             displayName: "Test",
+            prompts: [PromptDefinition(
+                key: "LABEL_PREFIX", type: .input,
+                label: nil, defaultValue: nil, options: nil,
+                detectPatterns: nil, scriptCommand: nil
+            )],
             components: [ComponentDefinition(
                 id: "test-pack.mcp",
                 displayName: "MCP Server",
@@ -592,17 +589,25 @@ struct ScannerExtensionTests {
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test",
                     command: "npx",
-                    args: [],
+                    args: ["__LABEL_PREFIX__"],
                     env: ["TOKEN": "__SERVICE_TOKEN__"]
                 ))
             )]
         )
 
-        let undeclared = ConfiguratorSupport.scanForUndeclaredPlaceholders(
-            packs: [pack], resolvedValues: ["SERVICE_TOKEN": "already-resolved"]
+        let consumed = CrossPackPromptResolver.consumedKeys(
+            packs: [pack],
+            context: ProjectConfigContext(
+                projectPath: FileManager.default.temporaryDirectory,
+                repoName: "test-repo",
+                output: CLIOutput(colorsEnabled: false)
+            ),
+            includeTemplates: false
         )
 
-        #expect(!undeclared.contains("SERVICE_TOKEN"))
+        #expect(consumed.declared.map(\.key) == ["LABEL_PREFIX"])
+        #expect(consumed.undeclared == ["SERVICE_TOKEN"])
+        #expect(consumed.all == ["LABEL_PREFIX", "SERVICE_TOKEN"])
     }
 }
 

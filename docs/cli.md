@@ -58,7 +58,7 @@ packs:
 ```
 
 - `source` is required. `ref`, `values`, and `scope` are optional.
-- `values` seeds `ProjectState.resolvedValues` so declared prompt answers do not re-prompt. Any prompt not seeded here falls through to normal interactive resolution.
+- `values` seeds `ProjectState.resolvedValues` so the keys it covers do not re-prompt. A key counts when a declared pack declares it as a prompt or references it as a `__KEY__` placeholder in a file, template, settings file, or MCP config. A key that matches neither is ignored with a warning (usually a typo). Any key not seeded here falls through to normal interactive resolution.
 - `scope` is reserved for a future release; v1 accepts only `project` (or omitted).
 
 **Semantics**

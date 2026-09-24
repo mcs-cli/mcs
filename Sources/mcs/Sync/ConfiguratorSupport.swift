@@ -556,43 +556,37 @@ enum ConfiguratorSupport {
         String(token.dropFirst(2).dropLast(2))
     }
 
-    /// Scan all `copyPackFile` sources (and optionally template content) for
-    /// `__PLACEHOLDER__` tokens not covered by resolved values.
-    /// Returns bare keys (without `__` delimiters) sorted alphabetically.
-    static func scanForUndeclaredPlaceholders(
+    /// Every `__PLACEHOLDER__` key the packs' `copyPackFile` sources, settings files, MCP
+    /// configs and (optionally) templates reference, as bare keys (without `__` delimiters).
+    static func referencedPlaceholderKeys(
         packs: [any TechPack],
-        resolvedValues: [String: String],
         includeTemplates: Bool = false,
         onWarning: ((String) -> Void)? = nil
-    ) -> [String] {
-        var undeclared = Set<String>()
-        let resolvedKeys = Set(resolvedValues.keys)
+    ) -> Set<String> {
+        var referenced = Set<String>()
 
-        let collectUndeclared = { (placeholder: String) in
-            let key = stripPlaceholderDelimiters(placeholder)
-            if !resolvedKeys.contains(key) {
-                undeclared.insert(key)
-            }
+        let collectReferenced = { (placeholder: String) in
+            _ = referenced.insert(stripPlaceholderDelimiters(placeholder))
         }
 
         for pack in packs {
             for component in pack.components {
                 switch component.installAction {
                 case let .copyPackFile(source, _, _):
-                    findPlaceholdersInSource(source).forEach(collectUndeclared)
+                    findPlaceholdersInSource(source).forEach(collectReferenced)
 
                 case let .settingsMerge(source):
                     if let source {
-                        findPlaceholdersInSource(source).forEach(collectUndeclared)
+                        findPlaceholdersInSource(source).forEach(collectReferenced)
                     }
 
                 case let .mcpServer(config):
                     for text in config.env.values {
-                        TemplateEngine.findUnreplacedPlaceholders(in: text).forEach(collectUndeclared)
+                        TemplateEngine.findUnreplacedPlaceholders(in: text).forEach(collectReferenced)
                     }
-                    TemplateEngine.findUnreplacedPlaceholders(in: config.command).forEach(collectUndeclared)
+                    TemplateEngine.findUnreplacedPlaceholders(in: config.command).forEach(collectReferenced)
                     for text in config.args {
-                        TemplateEngine.findUnreplacedPlaceholders(in: text).forEach(collectUndeclared)
+                        TemplateEngine.findUnreplacedPlaceholders(in: text).forEach(collectReferenced)
                     }
 
                 default:
@@ -604,7 +598,7 @@ enum ConfiguratorSupport {
                 do {
                     for template in try pack.templates {
                         TemplateEngine.findUnreplacedPlaceholders(in: template.templateContent)
-                            .forEach(collectUndeclared)
+                            .forEach(collectReferenced)
                     }
                 } catch {
                     onWarning?("Could not scan templates for \(pack.displayName): \(error.localizedDescription)")
@@ -612,6 +606,6 @@ enum ConfiguratorSupport {
             }
         }
 
-        return undeclared.sorted()
+        return referenced
     }
 }
