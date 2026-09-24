@@ -380,8 +380,59 @@ struct ListPacks: ParsableCommand {
         abstract: "List installed tech packs"
     )
 
+    @Flag(name: .long, help: "Output the pack list as JSON")
+    var json: Bool = false
+
+    enum PackHealth: Equatable {
+        case ok
+        case invalidPath
+        case missing
+        case missingManifest
+
+        var jsonStatus: JSONEntry.Status {
+            switch self {
+            case .ok: .ok
+            case .missing: .missing
+            case .invalidPath, .missingManifest: .invalid
+            }
+        }
+    }
+
+    struct JSONEntry: Codable, Equatable {
+        enum Status: String, Codable {
+            case ok
+            case missing
+            case invalid
+        }
+
+        let identifier: String
+        let source: String
+        let ref: String?
+        let commitSHA: String
+        let isLocal: Bool
+        let status: Status
+        let scopes: [String]
+
+        /// Synthesized encoding drops nil optionals; the documented schema always carries `ref`.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(identifier, forKey: .identifier)
+            try container.encode(source, forKey: .source)
+            try container.encode(ref, forKey: .ref)
+            try container.encode(commitSHA, forKey: .commitSHA)
+            try container.encode(isLocal, forKey: .isLocal)
+            try container.encode(status, forKey: .status)
+            try container.encode(scopes, forKey: .scopes)
+        }
+    }
+
     func run() throws {
         let ctx = PackCommandContext()
+
+        if json {
+            try printJSON(ctx: ctx)
+            return
+        }
 
         ctx.output.header("Tech Packs")
 
@@ -409,32 +460,95 @@ struct ListPacks: ParsableCommand {
         ctx.output.plain("")
     }
 
-    func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
+    private func printJSON(ctx: PackCommandContext) throws {
+        let registryData = try ctx.loadRegistry()
+
+        let indexData: ProjectIndex.IndexData
+        do {
+            indexData = try ProjectIndex(path: ctx.env.projectsIndexFile).load()
+        } catch {
+            ctx.output.error("Failed to read project index: \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+
+        let entries = jsonEntries(registry: registryData, index: indexData, env: ctx.env)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data: Data
+        do {
+            data = try encoder.encode(entries)
+        } catch {
+            ctx.output.error("JSON encoding failed: \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+        guard let string = String(bytes: data, encoding: .utf8) else {
+            ctx.output.error("JSON encoding produced invalid UTF-8")
+            throw ExitCode.failure
+        }
+        print(string)
+    }
+
+    func jsonEntries(
+        registry: PackRegistryFile.RegistryData,
+        index: ProjectIndex.IndexData,
+        env: Environment
+    ) -> [JSONEntry] {
+        let projectIndex = ProjectIndex(path: env.projectsIndexFile)
+        return registry.packs.map { entry in
+            let scopeEntries = projectIndex.projects(withPack: entry.identifier, in: index)
+            let isGlobal = scopeEntries.contains(where: \.isGlobal)
+            let projectPaths = scopeEntries
+                .filter { !$0.isGlobal && $0.directoryExists }
+                .map(\.path)
+                .sorted()
+            return JSONEntry(
+                identifier: entry.identifier,
+                source: entry.sourceURL,
+                ref: entry.ref,
+                commitSHA: entry.commitSHA,
+                isLocal: entry.isLocalPack,
+                status: packHealth(entry: entry, env: env).jsonStatus,
+                scopes: (isGlobal ? ["global"] : []) + projectPaths
+            )
+        }
+    }
+
+    func packHealth(entry: PackRegistryFile.PackEntry, env: Environment) -> PackHealth {
         let fm = FileManager.default
 
         guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
-            if entry.isLocalPack {
-                return "(invalid local path: \(entry.localPath))"
-            }
-            return "(invalid path — escapes packs directory)"
+            return .invalidPath
         }
-
         guard fm.fileExists(atPath: packPath.path) else {
-            if entry.isLocalPack {
-                return "(local — missing at \(entry.localPath))"
-            }
-            return "(missing checkout)"
+            return .missing
         }
-
         if entry.isLocalPack {
-            return "\(entry.sourceURL) (local)"
+            return .ok
         }
 
         let manifestURL = packPath.appendingPathComponent(Constants.ExternalPacks.manifestFilename)
         guard fm.fileExists(atPath: manifestURL.path) else {
-            return "(invalid — no \(Constants.ExternalPacks.manifestFilename))"
+            return .missingManifest
         }
+        return .ok
+    }
 
-        return entry.sourceURL
+    func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
+        switch (packHealth(entry: entry, env: env), entry.isLocalPack) {
+        case (.invalidPath, true):
+            "(invalid local path: \(entry.localPath))"
+        case (.invalidPath, false):
+            "(invalid path — escapes packs directory)"
+        case (.missing, true):
+            "(local — missing at \(entry.localPath))"
+        case (.missing, false):
+            "(missing checkout)"
+        case (.missingManifest, _):
+            "(invalid — no \(Constants.ExternalPacks.manifestFilename))"
+        case (.ok, true):
+            "\(entry.sourceURL) (local)"
+        case (.ok, false):
+            entry.sourceURL
+        }
     }
 }
