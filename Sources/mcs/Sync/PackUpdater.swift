@@ -35,6 +35,10 @@ struct PackUpdater {
         packPath: URL,
         registry: PackRegistryFile
     ) -> UpdateResult {
+        if PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath) {
+            return recloneMissingCheckout(entry: entry, packPath: packPath, registry: registry)
+        }
+
         // Must happen before `fetcher.update` resets the working tree — see `PackSnapshot`.
         // Unconditional, because whether an update will happen is not known until after the
         // fetch, by which point the old tree is gone. Cost is one YAML decode plus a hash per
@@ -81,6 +85,27 @@ struct PackUpdater {
         return validateAndTrust(
             entry: entry, packPath: packPath, registry: registry, commitSHA: result.commitSHA,
             beforeSnapshot: beforeSnapshot
+        )
+    }
+
+    /// Without a re-clone every `git` call against the deleted checkout fails, and no command
+    /// ever brings the pack back. Clones at the recorded ref and re-verify trust against the recorded hashes, so an intact
+    /// copy of already-trusted content does not prompt again.
+    private func recloneMissingCheckout(
+        entry: PackRegistryFile.PackEntry,
+        packPath: URL,
+        registry: PackRegistryFile
+    ) -> UpdateResult {
+        output.warn("\(entry.displayName): local checkout is missing — re-cloning from \(redactSourceForDisplay(entry.sourceURL))")
+        let fetchResult: PackFetcher.FetchResult
+        do {
+            fetchResult = try fetcher.clone(url: entry.sourceURL, into: packPath, ref: entry.ref)
+        } catch {
+            return .fetchFailed(underlying: error)
+        }
+        return validateAndTrust(
+            entry: entry, packPath: packPath, registry: registry, commitSHA: fetchResult.commitSHA,
+            beforeSnapshot: nil
         )
     }
 

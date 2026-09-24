@@ -255,7 +255,11 @@ struct UpdateCommand: LockedCommand {
 
         if dryRun {
             for entry in entries {
-                output.dimmed("  \(entry.displayName): would check for updates")
+                if entry.isCheckoutMissing(packsDirectory: env.packsDirectory) {
+                    output.dimmed("  \(entry.displayName): would re-fetch (checkout missing)")
+                } else {
+                    output.dimmed("  \(entry.displayName): would check for updates")
+                }
             }
             return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
         }

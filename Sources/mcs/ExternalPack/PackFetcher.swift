@@ -18,16 +18,27 @@ struct PackFetcher {
     /// If `ref` is specified, clone at that ref (tag or branch — `--branch` cannot resolve a commit SHA).
     /// If the pack directory already exists, it is removed first for a clean state.
     func fetch(url: String, identifier: String, ref: String?) throws -> FetchResult {
-        try ensureGitAvailable()
-        try ensurePacksDirectory()
         try validateIdentifier(identifier)
-        if let ref { try validateRef(ref) }
-
         guard let packPath = PathContainment.safePath(
             relativePath: identifier,
             within: packsDirectory
         ) else {
             throw PackFetchError.pathEscapesPacksDirectory(path: identifier)
+        }
+        return try clone(url: url, into: packPath, ref: ref)
+    }
+
+    /// Clone into an already-resolved checkout path, replacing whatever is there.
+    func clone(url: String, into packPath: URL, ref: String?) throws -> FetchResult {
+        try ensureGitAvailable()
+        try ensurePacksDirectory()
+        if let ref { try validateRef(ref) }
+        // `isContained` accepts the base itself, and the clean-state removal below would then
+        // delete every installed pack.
+        guard PathContainment.isContained(url: packPath, within: packsDirectory),
+              packPath.resolvingSymlinksInPath() != packsDirectory.resolvingSymlinksInPath()
+        else {
+            throw PackFetchError.pathEscapesPacksDirectory(path: packPath.path)
         }
 
         // Clean state: remove existing checkout if present
