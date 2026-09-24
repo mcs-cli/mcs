@@ -156,16 +156,6 @@ enum Constants {
         static let brewFormula = "mcs-cli/tap/mcs"
     }
 
-    // MARK: - Telemetry
-
-    enum Telemetry {
-        /// The TelemetryDeck app identifier.
-        static let appID = "A6CB95A6-0DD5-4B46-82AA-5A319797ACA0"
-
-        /// Marker file indicating the telemetry notice has been shown.
-        static let telemetryNoticedFile = ".telemetry-noticed"
-    }
-
     // MARK: - Plugins
 
     enum Plugins {

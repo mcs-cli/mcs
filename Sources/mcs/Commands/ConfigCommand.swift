@@ -20,8 +20,6 @@ struct ListConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        MCSAnalytics.initialize(env: env, output: output)
-        defer { MCSAnalytics.trackCommand(.configList) }
         let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         output.header("Configuration")
@@ -53,8 +51,6 @@ struct GetConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        MCSAnalytics.initialize(env: env, output: output)
-        defer { MCSAnalytics.trackCommand(.configGet) }
         let config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         guard MCSConfig.knownKeys.contains(where: { $0.key == key }) else {
@@ -88,8 +84,6 @@ struct SetConfig: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        MCSAnalytics.initialize(env: env, output: output)
-        defer { MCSAnalytics.trackCommand(.configSet) }
         var config = MCSConfig.load(from: env.mcsConfigFile, output: output)
 
         guard MCSConfig.knownKeys.contains(where: { $0.key == key }) else {

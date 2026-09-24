@@ -7,18 +7,11 @@ struct PackCommandContext {
     let shell: ShellRunner
     let registry: PackRegistryFile
 
-    /// Standard entry point for pack commands. `initializeTelemetry: false` is for
-    /// dry-run and other read-only paths: `MCSAnalytics.initialize` writes a
-    /// first-run marker under `~/.mcs` on its first invocation, so a documented
-    /// no-change preview must not trigger it.
-    init(initializeTelemetry: Bool = true) {
+    init() {
         env = Environment()
         output = CLIOutput()
         shell = ShellRunner(environment: env)
         registry = PackRegistryFile(path: env.packsRegistry)
-        if initializeTelemetry {
-            MCSAnalytics.initialize(env: env, output: output)
-        }
     }
 
     /// Injectable initializer used by tests to point the context at a sandbox home.
@@ -70,7 +63,6 @@ struct AddPack: LockedCommand {
 
     func perform() throws {
         let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.packAdd) }
 
         let resolver = PackSourceResolver()
         let packSource: PackSource
@@ -108,7 +100,6 @@ struct RemovePack: LockedCommand {
 
     func perform() throws {
         let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.packRemove) }
         let fetcher = PackFetcher(
             shell: ctx.shell,
             output: ctx.output,
@@ -292,7 +283,6 @@ struct UpdatePack: LockedCommand {
 
     func perform() throws {
         let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.packUpdate) }
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
@@ -392,7 +382,6 @@ struct ListPacks: ParsableCommand {
 
     func run() throws {
         let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.packList) }
 
         ctx.output.header("Tech Packs")
 

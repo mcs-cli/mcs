@@ -91,7 +91,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ProjectState.swift` — per-project `.claude/.mcs-project` JSON state (configured packs, per-pack `PackArtifactRecord` with ownership tracking, version)
 - `ProjectIndex.swift` — cross-project index (`~/.mcs/projects.yaml`) mapping project paths to pack IDs for reference counting
 - `MCSError.swift` — error types for the CLI
-- `MCSConfig.swift` — user preferences (`~/.mcs/config.yaml`): `update-check`, `telemetry`. Load is pure (never writes); the one-shot migration from the deprecated `update-check-packs` / `update-check-cli` pair to the unified `update-check` key is persisted by callers via `persistMigrationIfNeeded` on write-safe paths only (skipped on dry-run and SessionStart-hook reads).
+- `MCSConfig.swift` — user preferences (`~/.mcs/config.yaml`): `update-check`. Load is pure (never writes); the one-shot migration from the deprecated `update-check-packs` / `update-check-cli` pair to the unified `update-check` key is persisted by callers via `persistMigrationIfNeeded` on write-safe paths only (skipped on dry-run and SessionStart-hook reads).
 - `UpdateChecker.swift` — pack freshness checks (`git ls-remote`), CLI version checks (`git ls-remote --tags`), cooldown management
 
 ### TechPack System (`Sources/mcs/TechPack/`)
