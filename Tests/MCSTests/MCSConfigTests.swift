@@ -20,11 +20,22 @@ struct MCSConfigTests {
         let path = tmpDir.appendingPathComponent("config.yaml")
         let config = MCSConfig.load(from: path)
         #expect(config.updateCheck == nil)
-        #expect(config.telemetry == nil)
     }
 
     @Test("Load parses valid YAML")
     func loadValidYAML() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let path = tmpDir.appendingPathComponent("config.yaml")
+        try "update-check: false".write(to: path, atomically: true, encoding: .utf8)
+
+        let config = MCSConfig.load(from: path)
+        #expect(config.updateCheck == false)
+    }
+
+    @Test("Load ignores unknown keys")
+    func loadIgnoresUnknownKeys() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -37,7 +48,6 @@ struct MCSConfigTests {
 
         let config = MCSConfig.load(from: path)
         #expect(config.updateCheck == false)
-        #expect(config.telemetry == false)
     }
 
     @Test("Load returns empty config for corrupt YAML")
@@ -208,12 +218,10 @@ struct MCSConfigTests {
         let path = tmpDir.appendingPathComponent("config.yaml")
         var config = MCSConfig()
         config.updateCheck = false
-        config.telemetry = false
         try config.save(to: path)
 
         let reloaded = MCSConfig.load(from: path)
         #expect(reloaded.updateCheck == false)
-        #expect(reloaded.telemetry == false)
     }
 
     @Test("Save creates parent directories")
@@ -252,36 +260,14 @@ struct MCSConfigTests {
         #expect(!config.isUpdateCheckEnabled)
     }
 
-    @Test("isTelemetryEnabled defaults to true when nil")
-    func isTelemetryEnabledNil() {
-        let config = MCSConfig()
-        #expect(config.isTelemetryEnabled)
-    }
-
-    @Test("isTelemetryEnabled returns true when explicitly true")
-    func isTelemetryEnabledTrue() {
-        var config = MCSConfig()
-        config.telemetry = true
-        #expect(config.isTelemetryEnabled)
-    }
-
-    @Test("isTelemetryEnabled returns false when explicitly false")
-    func isTelemetryEnabledFalse() {
-        var config = MCSConfig()
-        config.telemetry = false
-        #expect(!config.isTelemetryEnabled)
-    }
-
     // MARK: - Key Access
 
     @Test("value(forKey:) returns correct values")
     func valueForKey() {
         var config = MCSConfig()
         config.updateCheck = false
-        config.telemetry = true
 
         #expect(config.value(forKey: "update-check") == false)
-        #expect(config.value(forKey: "telemetry") == true)
         #expect(config.value(forKey: "unknown-key") == nil)
     }
 
@@ -292,10 +278,6 @@ struct MCSConfigTests {
         let updateSet = config.setValue(false, forKey: "update-check")
         #expect(updateSet)
         #expect(config.updateCheck == false)
-
-        let telemetrySet = config.setValue(false, forKey: "telemetry")
-        #expect(telemetrySet)
-        #expect(config.telemetry == false)
 
         let unknownSet = config.setValue(true, forKey: "unknown-key")
         #expect(!unknownSet)

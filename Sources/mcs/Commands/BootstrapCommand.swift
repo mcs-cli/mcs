@@ -31,16 +31,13 @@ struct BootstrapCommand: LockedCommand {
     }
 
     func perform() throws {
-        // Dry-run must not mutate `~/.mcs` state or trigger the Homebrew install prompt
-        // for Claude Code — both would violate the no-changes contract on a preview.
-        let ctx = PackCommandContext(initializeTelemetry: !dryRun)
-        defer {
-            if !dryRun { MCSAnalytics.trackCommand(.bootstrap) }
-        }
+        let ctx = PackCommandContext()
 
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         try guardCwd(cwd: cwd, env: ctx.env, output: ctx.output)
 
+        // Dry-run must not trigger the Homebrew install prompt for Claude Code — that
+        // would violate the no-changes contract on a preview.
         if !dryRun {
             guard ensureClaudeCLI(shell: ctx.shell, environment: ctx.env, output: ctx.output) else {
                 throw ExitCode.failure

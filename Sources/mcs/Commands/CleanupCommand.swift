@@ -19,8 +19,6 @@ struct CleanupCommand: LockedCommand {
     func perform() throws {
         let env = Environment()
         let output = CLIOutput()
-        MCSAnalytics.initialize(env: env, output: output)
-        defer { MCSAnalytics.trackCommand(.cleanup) }
 
         output.header("Backup Cleanup")
 

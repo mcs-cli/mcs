@@ -12,7 +12,6 @@ struct ValidatePack: ParsableCommand {
 
     func run() throws {
         let ctx = PackCommandContext()
-        defer { MCSAnalytics.trackCommand(.packValidate) }
         let packPath = try resolvePackPath(ctx: ctx)
 
         ctx.output.info("Validating pack at \(packPath.path)...")

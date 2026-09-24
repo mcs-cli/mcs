@@ -35,8 +35,6 @@ struct UpdateCommand: LockedCommand {
     func perform() throws {
         let env = Environment()
         let output = CLIOutput()
-        MCSAnalytics.initialize(env: env, output: output)
-        defer { MCSAnalytics.trackCommand(.update) }
         let shell = ShellRunner(environment: env)
 
         guard ensureClaudeCLI(shell: shell, environment: env, output: output) else {

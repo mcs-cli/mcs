@@ -16,10 +16,6 @@ struct CheckUpdatesCommand: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        if !hook {
-            MCSAnalytics.initialize(env: env, output: output)
-        }
-        defer { MCSAnalytics.trackCommand(.checkUpdates) }
         let shell = ShellRunner(environment: env)
 
         let registry = PackRegistryFile(path: env.packsRegistry)

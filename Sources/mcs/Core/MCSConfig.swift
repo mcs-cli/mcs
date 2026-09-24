@@ -7,14 +7,12 @@ struct MCSConfig: Codable {
     /// SessionStart update-check preference. `nil` (default) enables the hook — update
     /// notifications are opt-out; explicit `false` removes it.
     var updateCheck: Bool?
-    var telemetry: Bool?
     /// Set during decoding when either legacy `update-check-*` key was present so callers
     /// can surface a one-time migration notice. Not persisted.
     private(set) var didMigrateLegacyUpdateCheck: Bool = false
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case updateCheck = "update-check"
-        case telemetry
     }
 
     /// Legacy keys read on load (v0 config files) and folded into `updateCheck`.
@@ -28,8 +26,6 @@ struct MCSConfig: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        telemetry = try container.decodeIfPresent(Bool.self, forKey: .telemetry)
-
         if let value = try container.decodeIfPresent(Bool.self, forKey: .updateCheck) {
             updateCheck = value
             return
@@ -50,11 +46,6 @@ struct MCSConfig: Codable {
         }
     }
 
-    /// Whether telemetry is enabled. Defaults to `true` when unconfigured (`nil`).
-    var isTelemetryEnabled: Bool {
-        telemetry != false
-    }
-
     /// Whether the SessionStart update-check hook should be installed.
     /// Default is `true` when unset — update notifications are opt-out.
     var isUpdateCheckEnabled: Bool {
@@ -73,11 +64,6 @@ struct MCSConfig: Codable {
         ConfigKey(
             key: CodingKeys.updateCheck.rawValue,
             description: "Show tech-pack and mcs CLI update notifications on Claude Code session start",
-            defaultValue: "true"
-        ),
-        ConfigKey(
-            key: CodingKeys.telemetry.rawValue,
-            description: "Enable anonymous usage telemetry",
             defaultValue: "true"
         ),
     ]
@@ -136,7 +122,6 @@ struct MCSConfig: Codable {
     func value(forKey key: String) -> Bool? {
         switch key {
         case CodingKeys.updateCheck.rawValue: updateCheck
-        case CodingKeys.telemetry.rawValue: telemetry
         default: nil
         }
     }
@@ -146,9 +131,6 @@ struct MCSConfig: Codable {
         switch key {
         case CodingKeys.updateCheck.rawValue:
             updateCheck = value
-            return true
-        case CodingKeys.telemetry.rawValue:
-            telemetry = value
             return true
         default:
             return false
