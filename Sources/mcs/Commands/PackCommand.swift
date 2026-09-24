@@ -512,8 +512,10 @@ struct ListPacks: ParsableCommand {
             return JSONEntry(
                 identifier: entry.identifier,
                 source: entry.sourceURL,
-                ref: entry.ref,
-                commitSHA: entry.commitSHA,
+                // mcs never records a ref or SHA for a local pack, so a value here is a hand edit
+                // nothing acts on; the documented contract reports what mcs actually uses.
+                ref: entry.isLocalPack ? nil : entry.ref,
+                commitSHA: entry.isLocalPack ? Constants.ExternalPacks.localCommitSentinel : entry.commitSHA,
                 isLocal: entry.isLocalPack,
                 status: packHealth(entry: entry, env: env).jsonStatus,
                 scopes: (isGlobal ? ["global"] : []) + projectPaths

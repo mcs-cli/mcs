@@ -311,6 +311,29 @@ struct ListPacksJSONTests {
         #expect(entry.status == .ok)
     }
 
+    @Test("Local pack reports nil ref and local sentinel even when the registry was hand-edited")
+    func localPackFieldsNormalized() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let packDir = tmpDir.appendingPathComponent("local-pack")
+        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+
+        var edited = makeLocalRegistryEntry(identifier: "local-pack", localPath: packDir.path)
+        edited.ref = "v1.0"
+        edited.commitSHA = "abc123def456"
+        let entry = try #require(
+            ListPacks().jsonEntries(
+                registry: PackRegistryFile.RegistryData(packs: [edited]),
+                index: ProjectIndex.IndexData(),
+                env: env
+            ).first
+        )
+
+        #expect(entry.ref == nil)
+        #expect(entry.commitSHA == Constants.ExternalPacks.localCommitSentinel)
+    }
+
     @Test("Status maps missing checkout, bad path, and missing manifest")
     func statusMapping() throws {
         let tmpDir = try makeTmpDir()

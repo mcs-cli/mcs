@@ -177,7 +177,7 @@ With `--json`, each array element has these fields:
 | `ref` | string or `null` | Tag or branch as declared with `--ref`; `null` when none was given (always for local packs). |
 | `commitSHA` | string | Checked-out commit, or `"local"` for a local pack. |
 | `isLocal` | boolean | Whether the pack is read in-place from a local path. |
-| `status` | string | `"ok"`, `"missing"` (checkout or local directory not on disk), or `"invalid"` (path escapes the packs directory, or no `techpack.yaml`). |
+| `status` | string | `"ok"`, `"missing"` (checkout or local directory not on disk), or `"invalid"` (path escapes the packs directory, or a git checkout has no `techpack.yaml`; local packs are not checked for a manifest). |
 | `scopes` | array of strings | Where the pack is configured: `"global"` first if synced globally, then project paths from `~/.mcs/projects.yaml`, sorted. Projects whose directory no longer exists are left out. |
 
 An empty registry prints `[]` and exits 0. If `~/.mcs/registry.yaml` or `~/.mcs/projects.yaml` can't be read, the error goes to stderr, nothing is printed to stdout, and the command exits 1. The command never modifies either file.
