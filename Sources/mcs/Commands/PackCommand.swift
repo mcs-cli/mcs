@@ -380,8 +380,59 @@ struct ListPacks: ParsableCommand {
         abstract: "List installed tech packs"
     )
 
+    @Flag(name: .long, help: "Output the pack list as JSON")
+    var json: Bool = false
+
+    enum PackHealth: Equatable {
+        case ok
+        case invalidPath
+        case missing
+        case missingManifest
+
+        var jsonStatus: JSONEntry.Status {
+            switch self {
+            case .ok: .ok
+            case .missing: .missing
+            case .invalidPath, .missingManifest: .invalid
+            }
+        }
+    }
+
+    struct JSONEntry: Codable, Equatable {
+        enum Status: String, Codable {
+            case ok
+            case missing
+            case invalid
+        }
+
+        let identifier: String
+        let source: String
+        let ref: String?
+        let commitSHA: String
+        let isLocal: Bool
+        let status: Status
+        let scopes: [String]
+
+        /// Synthesized encoding drops nil optionals; the documented schema always carries `ref`.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(identifier, forKey: .identifier)
+            try container.encode(source, forKey: .source)
+            try container.encode(ref, forKey: .ref)
+            try container.encode(commitSHA, forKey: .commitSHA)
+            try container.encode(isLocal, forKey: .isLocal)
+            try container.encode(status, forKey: .status)
+            try container.encode(scopes, forKey: .scopes)
+        }
+    }
+
     func run() throws {
         let ctx = PackCommandContext()
+
+        if json {
+            try printJSON(ctx: ctx)
+            return
+        }
 
         ctx.output.header("Tech Packs")
 
@@ -409,32 +460,98 @@ struct ListPacks: ParsableCommand {
         ctx.output.plain("")
     }
 
-    func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
-        let fm = FileManager.default
+    private func printJSON(ctx: PackCommandContext) throws {
+        let registryData = try ctx.loadRegistry()
 
+        let indexData: ProjectIndex.IndexData
+        do {
+            indexData = try ProjectIndex(path: ctx.env.projectsIndexFile).load()
+        } catch {
+            ctx.output.error("Failed to read project index: \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+
+        let entries = jsonEntries(registry: registryData, index: indexData, env: ctx.env)
+        do {
+            try print(Self.renderJSON(entries))
+        } catch {
+            ctx.output.error("JSON encoding failed: \(error.localizedDescription)")
+            throw ExitCode.failure
+        }
+    }
+
+    static func renderJSON(_ entries: [JSONEntry]) throws -> String {
+        // The pretty printer renders an empty array as "[\n\n]"; the documented output is "[]".
+        guard !entries.isEmpty else { return "[]" }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(entries)
+        guard let string = String(bytes: data, encoding: .utf8) else {
+            throw EncodingError.invalidValue(
+                entries,
+                EncodingError.Context(codingPath: [], debugDescription: "Encoded JSON is not valid UTF-8")
+            )
+        }
+        return string
+    }
+
+    func jsonEntries(
+        registry: PackRegistryFile.RegistryData,
+        index: ProjectIndex.IndexData,
+        env: Environment
+    ) -> [JSONEntry] {
+        let projectIndex = ProjectIndex(path: env.projectsIndexFile)
+        return registry.packs.map { entry in
+            let scopeEntries = projectIndex.projects(withPack: entry.identifier, in: index)
+            let isGlobal = scopeEntries.contains(where: \.isGlobal)
+            let projectPaths = scopeEntries
+                .filter { !$0.isGlobal && $0.directoryExists }
+                .map(\.path)
+                .sorted()
+            return JSONEntry(
+                identifier: entry.identifier,
+                source: entry.sourceURL,
+                // mcs never records a ref or SHA for a local pack, so a value here is a hand edit
+                // nothing acts on; the documented contract reports what mcs actually uses.
+                ref: entry.isLocalPack ? nil : entry.ref,
+                commitSHA: entry.isLocalPack ? Constants.ExternalPacks.localCommitSentinel : entry.commitSHA,
+                isLocal: entry.isLocalPack,
+                status: packHealth(entry: entry, env: env).jsonStatus,
+                scopes: (isGlobal ? ["global"] : []) + projectPaths
+            )
+        }
+    }
+
+    func packHealth(entry: PackRegistryFile.PackEntry, env: Environment) -> PackHealth {
         guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
-            if entry.isLocalPack {
-                return "(invalid local path: \(entry.localPath))"
-            }
-            return "(invalid path — escapes packs directory)"
+            return .invalidPath
         }
-
-        guard fm.fileExists(atPath: packPath.path) else {
-            if entry.isLocalPack {
-                return "(local — missing at \(entry.localPath))"
-            }
-            return "(missing checkout)"
+        guard FileManager.default.fileExists(atPath: packPath.path) else {
+            return .missing
         }
-
-        if entry.isLocalPack {
-            return "\(entry.sourceURL) (local)"
+        if !entry.isLocalPack, PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath) {
+            return .missingManifest
         }
+        return .ok
+    }
 
-        let manifestURL = packPath.appendingPathComponent(Constants.ExternalPacks.manifestFilename)
-        guard fm.fileExists(atPath: manifestURL.path) else {
-            return "(invalid — no \(Constants.ExternalPacks.manifestFilename))"
+    func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
+        switch (packHealth(entry: entry, env: env), entry.isLocalPack) {
+        case (.invalidPath, true):
+            "(invalid local path: \(entry.localPath))"
+        case (.invalidPath, false):
+            "(invalid path — escapes packs directory)"
+        case (.missing, true):
+            "(local — missing at \(entry.localPath))"
+        case (.missing, false):
+            "(missing checkout)"
+        case (.missingManifest, _):
+            "(invalid — no \(Constants.ExternalPacks.manifestFilename))"
+        case (.ok, true):
+            "\(entry.sourceURL) (local)"
+        case (.ok, false):
+            entry.sourceURL
         }
-
-        return entry.sourceURL
     }
 }

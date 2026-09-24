@@ -294,14 +294,15 @@ final class TrackingMockTechPack: TechPack, @unchecked Sendable {
 func makeRegistryEntry(
     identifier: String,
     commitSHA: String = "abc123def456",
-    sourceURL: String? = nil
+    sourceURL: String? = nil,
+    ref: String? = nil
 ) -> PackRegistryFile.PackEntry {
     PackRegistryFile.PackEntry(
         identifier: identifier,
         displayName: identifier,
         author: nil,
         sourceURL: sourceURL ?? "https://example.com/\(identifier).git",
-        ref: nil,
+        ref: ref,
         commitSHA: commitSHA,
         localPath: identifier,
         addedAt: "2026-01-01T00:00:00Z",

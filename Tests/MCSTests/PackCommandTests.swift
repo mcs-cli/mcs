@@ -90,7 +90,14 @@ struct PackCommandParsingTests {
 
     @Test("ListPacks parses with no arguments")
     func listPacksNoArgs() throws {
-        _ = try ListPacks.parse([])
+        let cmd = try ListPacks.parse([])
+        #expect(cmd.json == false)
+    }
+
+    @Test("ListPacks parses --json flag")
+    func listPacksJSON() throws {
+        let cmd = try ListPacks.parse(["--json"])
+        #expect(cmd.json == true)
     }
 
     // MARK: - PackCommand subcommands
@@ -231,5 +238,187 @@ struct ListPacksStatusTests {
         let entry = makeEntry()
         let status = ListPacks().packStatus(entry: entry, env: env)
         #expect(status == "(invalid — no \(Constants.ExternalPacks.manifestFilename))")
+    }
+}
+
+// MARK: - ListPacks JSON
+
+struct ListPacksJSONTests {
+    private func installGitPack(_ identifier: String, home: URL) throws {
+        try preparePackDir(home: home, identifier: identifier)
+        let packDir = Environment(home: home).packsDirectory.appendingPathComponent(identifier)
+        try "identifier: \(identifier)".write(
+            to: packDir.appendingPathComponent(Constants.ExternalPacks.manifestFilename),
+            atomically: true, encoding: .utf8
+        )
+    }
+
+    private func indexEntry(_ path: String, packs: [String]) -> ProjectIndex.ProjectEntry {
+        ProjectIndex.ProjectEntry(path: path, packs: packs, lastSynced: "2026-01-01T00:00:00Z")
+    }
+
+    @Test("Empty registry produces no entries")
+    func emptyRegistry() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+
+        let entries = ListPacks().jsonEntries(
+            registry: PackRegistryFile.RegistryData(),
+            index: ProjectIndex.IndexData(),
+            env: env
+        )
+        #expect(entries.isEmpty)
+    }
+
+    @Test("Git pack maps registry fields and reports ok")
+    func gitPackFields() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        try installGitPack("test-pack", home: tmpDir)
+
+        let registry = PackRegistryFile.RegistryData(packs: [makeRegistryEntry(identifier: "test-pack", ref: "v1.0")])
+        let entries = ListPacks().jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env)
+
+        #expect(entries == [ListPacks.JSONEntry(
+            identifier: "test-pack",
+            source: "https://example.com/test-pack.git",
+            ref: "v1.0",
+            commitSHA: "abc123def456",
+            isLocal: false,
+            status: .ok,
+            scopes: []
+        )])
+    }
+
+    @Test("Local pack reports local sentinel and nil ref")
+    func localPackFields() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let packDir = tmpDir.appendingPathComponent("local-pack")
+        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+
+        let registry = PackRegistryFile.RegistryData(packs: [makeLocalRegistryEntry(identifier: "local-pack", localPath: packDir.path)])
+        let entry = try #require(
+            ListPacks().jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env).first
+        )
+
+        #expect(entry.commitSHA == Constants.ExternalPacks.localCommitSentinel)
+        #expect(entry.ref == nil)
+        #expect(entry.isLocal == true)
+        #expect(entry.status == .ok)
+    }
+
+    @Test("Local pack reports nil ref and local sentinel even when the registry was hand-edited")
+    func localPackFieldsNormalized() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let packDir = tmpDir.appendingPathComponent("local-pack")
+        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+
+        var edited = makeLocalRegistryEntry(identifier: "local-pack", localPath: packDir.path)
+        edited.ref = "v1.0"
+        edited.commitSHA = "abc123def456"
+        let entry = try #require(
+            ListPacks().jsonEntries(
+                registry: PackRegistryFile.RegistryData(packs: [edited]),
+                index: ProjectIndex.IndexData(),
+                env: env
+            ).first
+        )
+
+        #expect(entry.ref == nil)
+        #expect(entry.commitSHA == Constants.ExternalPacks.localCommitSentinel)
+    }
+
+    @Test("Status maps missing checkout, bad path, and missing manifest")
+    func statusMapping() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        try preparePackDir(home: tmpDir, identifier: "no-manifest")
+
+        let registry = PackRegistryFile.RegistryData(packs: [
+            makeRegistryEntry(identifier: "missing"),
+            makeRegistryEntry(identifier: "../../etc"),
+            makeRegistryEntry(identifier: "no-manifest"),
+        ])
+        let statuses = ListPacks()
+            .jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env)
+            .map(\.status)
+
+        #expect(statuses == [.missing, .invalid, .invalid])
+    }
+
+    @Test("Scopes list global first, then existing project paths sorted; stale paths dropped")
+    func scopes() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        try installGitPack("test-pack", home: tmpDir)
+        let projectB = tmpDir.appendingPathComponent("b-project")
+        let projectA = tmpDir.appendingPathComponent("a-project")
+        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: projectB, withIntermediateDirectories: true)
+        let stale = tmpDir.appendingPathComponent("deleted-project").path
+
+        let index = ProjectIndex.IndexData(projects: [
+            indexEntry(projectB.path, packs: ["test-pack"]),
+            indexEntry(stale, packs: ["test-pack"]),
+            indexEntry(ProjectIndex.globalSentinel, packs: ["test-pack"]),
+            indexEntry(projectA.path, packs: ["test-pack", "other"]),
+            indexEntry(tmpDir.path, packs: ["other"]),
+        ])
+        let registry = PackRegistryFile.RegistryData(packs: [makeRegistryEntry(identifier: "test-pack")])
+        let entry = try #require(ListPacks().jsonEntries(registry: registry, index: index, env: env).first)
+
+        #expect(entry.scopes == ["global", projectA.path, projectB.path])
+    }
+
+    @Test("Empty list renders as a literal []")
+    func renderEmpty() throws {
+        #expect(try ListPacks.renderJSON([]) == "[]")
+    }
+
+    @Test("Non-empty list renders pretty-printed with sorted keys")
+    func renderNonEmpty() throws {
+        let entry = ListPacks.JSONEntry(
+            identifier: "test-pack",
+            source: "https://example.com/test-pack.git",
+            ref: nil,
+            commitSHA: "abc123def456",
+            isLocal: false,
+            status: .ok,
+            scopes: []
+        )
+        let rendered = try ListPacks.renderJSON([entry])
+
+        #expect(rendered.hasPrefix("[\n"))
+        let commitRange = try #require(rendered.range(of: "\"commitSHA\""))
+        let statusRange = try #require(rendered.range(of: "\"status\""))
+        #expect(commitRange.lowerBound < statusRange.lowerBound)
+    }
+
+    @Test("Encoded entry carries exactly the documented keys, with null ref")
+    func encodedKeys() throws {
+        let entry = ListPacks.JSONEntry(
+            identifier: "test-pack",
+            source: "/path/to/pack",
+            ref: nil,
+            commitSHA: Constants.ExternalPacks.localCommitSentinel,
+            isLocal: true,
+            status: .missing,
+            scopes: ["global"]
+        )
+        let data = try JSONEncoder().encode([entry])
+        let decoded = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let object = try #require(decoded.first)
+
+        #expect(Set(object.keys) == ["identifier", "source", "ref", "commitSHA", "isLocal", "status", "scopes"])
+        #expect(object["ref"] is NSNull)
+        #expect(object["status"] as? String == "missing")
     }
 }
