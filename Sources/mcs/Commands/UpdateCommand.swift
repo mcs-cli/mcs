@@ -83,16 +83,23 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
+        // One scope's unanswerable prompt must not strand every scope after it unrefreshed.
+        var unresolvedScopes: [String] = []
         for run in runs {
-            try Self.reapplyScope(
-                run,
-                skippedPackIDs: updatePhase.skipped,
-                registry: techPackRegistry,
-                dryRun: dryRun,
-                env: env,
-                shell: shell,
-                output: output
-            )
+            do {
+                try Self.reapplyScope(
+                    run,
+                    skippedPackIDs: updatePhase.skipped,
+                    registry: techPackRegistry,
+                    dryRun: dryRun,
+                    env: env,
+                    shell: shell,
+                    output: output
+                )
+            } catch let error as PromptResolutionError {
+                error.lines.forEach { output.error($0) }
+                unresolvedScopes.append(run.label)
+            }
         }
 
         if !dryRun {
@@ -107,12 +114,18 @@ struct UpdateCommand: LockedCommand {
         }
 
         // Fail after reapply so healthy packs still converge.
-        if PackUpdater.shouldExitNonZero(
+        let updateFailed = PackUpdater.shouldExitNonZero(
             failedCount: updatePhase.failed.count,
             attemptedCount: updatePhase.attempted,
             isInteractive: output.hasInteractiveStdin
-        ) {
+        )
+        if updateFailed {
             output.error("Failed to update: \(updatePhase.failed.sorted().joined(separator: ", "))")
+        }
+        if !unresolvedScopes.isEmpty {
+            output.error("Unresolved prompts in: \(unresolvedScopes.joined(separator: ", "))")
+        }
+        if updateFailed || !unresolvedScopes.isEmpty {
             throw ExitCode.failure
         }
     }

@@ -24,7 +24,7 @@ private struct LifecycleTestBed {
     func makeConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
@@ -49,7 +49,7 @@ private struct LifecycleTestBed {
     ) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter),
+            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: GlobalSyncStrategy(environment: env),
@@ -1857,10 +1857,12 @@ struct PromptValueReuseLifecycleTests {
         )
     }
 
-    private func fileDetectPrompt(_ key: String, patterns: [String]) -> PromptDefinition {
+    private func fileDetectPrompt(
+        _ key: String, patterns: [String], defaultValue: String? = nil
+    ) -> PromptDefinition {
         PromptDefinition(
             key: key, type: .fileDetect,
-            label: nil, defaultValue: nil, options: nil,
+            label: nil, defaultValue: defaultValue, options: nil,
             detectPatterns: patterns, scriptCommand: nil
         )
     }
@@ -2072,16 +2074,19 @@ struct PromptValueReuseLifecycleTests {
         try touch("App.xcodeproj", in: bed.project)
         try touch("App.xcworkspace", in: bed.project)
 
+        // Off-TTY, two matches with no prior resolve only through a default that is one of them.
         let pack = MockPromptTechPack(
             identifier: "detect-pack",
             displayName: "Detect Pack",
-            prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"])],
+            prompts: [fileDetectPrompt(
+                "PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"], defaultValue: "App.xcodeproj"
+            )],
             defaultAnswer: { _ in "re-asked" }
         )
         let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
 
         try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcodeproj")
 
         var state = try bed.projectState()
         state.setResolvedValues(["PROJECT": "App.xcworkspace"])
@@ -2111,8 +2116,9 @@ struct PromptValueReuseLifecycleTests {
         state.setResolvedValues(["PROJECT": "Removed.xcworkspace"])
         try state.save()
 
+        // The re-scan finds only App.xcodeproj, so the stale prior is replaced by that match.
         try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcodeproj")
     }
 
     @Test("Non-interactive sync reuses priors silently")
@@ -2256,6 +2262,95 @@ struct PromptValueReuseLifecycleTests {
 
         let final = try bed.projectState()
         #expect(final.resolvedValues?["KEY_A"] == "user-a")
+    }
+
+    // MARK: Non-interactive resolution
+
+    /// A real adapter, so prompts go through `PromptExecutor` rather than the mock's simulation.
+    private func adapterPack(bed: LifecycleTestBed, prompts: [PromptDefinition]) -> ExternalPackAdapter {
+        ExternalPackAdapter(
+            manifest: ExternalPackManifest(
+                schemaVersion: 1,
+                identifier: "adapter-pack",
+                displayName: "Adapter Pack",
+                description: "Pack with real prompt execution",
+                author: nil,
+                minMCSVersion: nil,
+                components: [],
+                templates: nil,
+                prompts: prompts,
+                configureProject: nil,
+                supplementaryDoctorChecks: nil,
+                ignore: nil
+            ),
+            packPath: bed.home,
+            shell: ShellRunner(environment: bed.env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+
+    @Test("Non-TTY sync fails naming pack and key for an unseeded input with no default")
+    func nonInteractiveUnresolvedInputFails() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let prompted = adapterPack(bed: bed, prompts: [inputPrompt("API_KEY")])
+        let cmdSource = try bed.makeCommandSource(name: "doc.md")
+        let bystander = MockTechPack(
+            identifier: "bystander",
+            displayName: "Bystander",
+            components: [bed.commandComponent(pack: "bystander", id: "doc", source: cmdSource, destination: "doc.md")],
+            templates: []
+        )
+        let packs: [any TechPack] = [prompted, bystander]
+
+        #expect(throws: PromptResolutionError(unresolved: [
+            UnresolvedPrompt(packNames: ["Adapter Pack"], key: "API_KEY"),
+        ])) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
+                .configure(packs: packs, confirmRemovals: false)
+        }
+
+        let stateFile = bed.project.appendingPathComponent(".claude/\(Constants.FileNames.mcsProject)")
+        #expect(!FileManager.default.fileExists(atPath: stateFile.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: bed.project.appendingPathComponent(".claude/commands/doc.md").path
+        ))
+    }
+
+    @Test("Non-TTY sync stores the declared default when nothing is seeded")
+    func nonInteractiveUsesDefault() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let level = PromptDefinition(
+            key: "LOG_LEVEL", type: .select, label: nil, defaultValue: "debug",
+            options: ["info", "debug"].map { PromptOption(value: $0, label: $0) },
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let pack = adapterPack(bed: bed, prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "feature"), level])
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+
+        let values = try bed.projectState().resolvedValues
+        #expect(values?["BRANCH_PREFIX"] == "feature")
+        #expect(values?["LOG_LEVEL"] == "debug")
+    }
+
+    @Test("Non-TTY sync fails for an undeclared placeholder with no stored value")
+    func nonInteractiveUnresolvedPlaceholderFails() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try placeholderPack(bed: bed)
+
+        #expect(throws: PromptResolutionError(unresolved: [
+            UnresolvedPrompt(packNames: ["Placeholder Pack"], key: "MEMORIES_BRANCH"),
+        ])) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+                .configure(packs: [pack], confirmRemovals: false)
+        }
     }
 
     @Test("--customize forces re-ask even when priors are available")

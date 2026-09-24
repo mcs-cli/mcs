@@ -276,6 +276,86 @@ struct CrossPackPromptResolverTests {
         #expect(prompts.count == 1)
         #expect(prompts[0].key == "PREFIX")
     }
+
+    // MARK: - Non-Interactive Preflight
+
+    private func input(_ key: String, defaultValue: String? = nil) -> PromptDefinition {
+        PromptDefinition(
+            key: key, type: .input, label: nil, defaultValue: defaultValue,
+            options: nil, detectPatterns: nil, scriptCommand: nil
+        )
+    }
+
+    @Test("resolveNonInteractively answers from prior or default and lists the rest with every declaring pack")
+    func resolveNonInteractivelyListsMissing() {
+        let packA = makeMockPack(name: "pack-a", prompts: [input("TOKEN"), input("PREFIX", defaultValue: "feat")])
+        let packB = makeMockPack(name: "pack-b", prompts: [input("TOKEN"), input("OWNER")])
+
+        let resolution = CrossPackPromptResolver.resolveNonInteractively(
+            packs: [packA, packB], context: makeContext(),
+            priorValues: ["OWNER": "me"], includeTemplates: false
+        )
+
+        #expect(resolution.resolved == ["PREFIX": "feat", "OWNER": "me"])
+        #expect(resolution.unresolved == [UnresolvedPrompt(packNames: ["pack-a", "pack-b"], key: "TOKEN")])
+    }
+
+    @Test("resolveNonInteractively skips built-in values and script prompts")
+    func resolveNonInteractivelySkipsAnswered() {
+        let script = PromptDefinition(
+            key: "VERSION", type: .script, label: nil, defaultValue: nil,
+            options: nil, detectPatterns: nil, scriptCommand: "echo 1"
+        )
+        let pack = makeMockPack(name: "pack-a", prompts: [input("REPO_NAME"), script])
+        let context = ProjectConfigContext(
+            projectPath: FileManager.default.temporaryDirectory, repoName: "r",
+            output: CLIOutput(colorsEnabled: false), resolvedValues: ["REPO_NAME": "r"],
+            isGlobalScope: false
+        )
+
+        let resolution = CrossPackPromptResolver.resolveNonInteractively(
+            packs: [pack], context: context, priorValues: [:], includeTemplates: false
+        )
+
+        #expect(resolution.resolved.isEmpty)
+        #expect(resolution.unresolved.isEmpty)
+    }
+
+    @Test("Resolution error names packs and keys, never values")
+    func resolutionErrorText() {
+        let error = PromptResolutionError(unresolved: [
+            UnresolvedPrompt(packNames: ["iOS"], key: "API_KEY"),
+            UnresolvedPrompt(packNames: ["A", "B"], key: "REGION"),
+        ])
+        #expect(error.lines == [
+            "Cannot resolve 2 prompt value(s) without an interactive terminal:",
+            "  - iOS: API_KEY",
+            "  - A, B: REGION",
+            "Seed them under 'values:' in mcs.yaml, or re-run from a terminal.",
+        ])
+    }
+
+    @Test("Shared prompts off-TTY use the declared default or throw naming every pack")
+    func sharedPromptsNonInteractive() throws {
+        let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        let dir = FileManager.default.temporaryDirectory
+        let withDefault: [String: [CrossPackPromptResolver.PackPromptInfo]] = [
+            "PREFIX": [
+                .init(packName: "A", prompt: input("PREFIX")),
+                .init(packName: "B", prompt: input("PREFIX", defaultValue: "feat")),
+            ],
+        ]
+        #expect(try CrossPackPromptResolver.resolveSharedPrompts(
+            withDefault, output: output, projectPath: dir
+        ) == ["PREFIX": "feat"])
+
+        let missing: [String: [CrossPackPromptResolver.PackPromptInfo]] = [
+            "TOKEN": [.init(packName: "A", prompt: input("TOKEN")), .init(packName: "B", prompt: input("TOKEN"))],
+        ]
+        #expect(throws: PromptResolutionError(unresolved: [UnresolvedPrompt(packNames: ["A", "B"], key: "TOKEN")])) {
+            try CrossPackPromptResolver.resolveSharedPrompts(missing, output: output, projectPath: dir)
+        }
+    }
 }
 
 // MARK: - MCPServerConfig substitution

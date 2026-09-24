@@ -11,10 +11,11 @@ struct PromptExecutorTests {
         return dir
     }
 
-    /// Create a PromptExecutor for testing.
+    /// Create a PromptExecutor for testing. Stdin is pinned non-interactive so no test
+    /// reaches a reader, whatever the harness's stdin is.
     private func makeExecutor() -> PromptExecutor {
         PromptExecutor(
-            output: CLIOutput(colorsEnabled: false),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             scriptRunner: ScriptRunner(
                 shell: ShellRunner(environment: Environment()),
                 output: CLIOutput(colorsEnabled: false)
@@ -479,7 +480,7 @@ struct PromptExecutorTests {
         #expect(value == "App.xcworkspace")
     }
 
-    @Test("fileDetect prompt falls back to the first match when the prior is gone")
+    @Test("fileDetect prompt fails off-TTY when the prior is gone and no default matches")
     func fileDetectPromptIgnoresMissingPrior() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -498,13 +499,110 @@ struct PromptExecutorTests {
         )
 
         let executor = makeExecutor()
-        let value = try executor.execute(
-            prompt: prompt,
-            packPath: tmpDir,
-            projectPath: tmpDir,
-            priorValue: "Renamed.xcodeproj"
-        )
+        #expect(throws: PromptExecutor.PromptError.unresolved(key: "PROJECT")) {
+            try executor.execute(
+                prompt: prompt,
+                packPath: tmpDir,
+                projectPath: tmpDir,
+                priorValue: "Renamed.xcodeproj"
+            )
+        }
+    }
 
-        #expect(value == "App.xcodeproj")
+    // MARK: - Non-Interactive Resolution
+
+    private func prompt(
+        _ key: String,
+        type: PromptType,
+        defaultValue: String? = nil,
+        options: [String]? = nil,
+        patterns: [String]? = nil
+    ) -> PromptDefinition {
+        PromptDefinition(
+            key: key, type: type, label: nil, defaultValue: defaultValue,
+            options: options?.map { PromptOption(value: $0, label: $0) },
+            detectPatterns: patterns, scriptCommand: nil
+        )
+    }
+
+    private func resolve(
+        _ declarations: PromptDefinition...,
+        prior: String? = nil,
+        in directory: URL = FileManager.default.temporaryDirectory
+    ) -> String? {
+        PromptExecutor.nonInteractiveValue(declarations: declarations, prior: prior, projectPath: directory)
+    }
+
+    @Test("Off-TTY input resolves prior, then default, then fails")
+    func nonInteractiveInputOrder() {
+        let withDefault = prompt("KEY", type: .input, defaultValue: "dflt")
+        #expect(resolve(withDefault, prior: "p") == "p")
+        #expect(resolve(withDefault) == "dflt")
+        #expect(resolve(prompt("KEY", type: .input)) == nil)
+    }
+
+    @Test("Off-TTY explicit empty default counts as a default")
+    func nonInteractiveEmptyDefault() throws {
+        let value = try makeExecutor().execute(
+            prompt: prompt("KEY", type: .input, defaultValue: ""),
+            packPath: FileManager.default.temporaryDirectory,
+            projectPath: FileManager.default.temporaryDirectory
+        )
+        #expect(value == "")
+    }
+
+    @Test("Off-TTY input without prior or default throws naming the key")
+    func nonInteractiveInputThrows() {
+        #expect(throws: PromptExecutor.PromptError.unresolved(key: "API_KEY")) {
+            try makeExecutor().execute(
+                prompt: prompt("API_KEY", type: .input),
+                packPath: FileManager.default.temporaryDirectory,
+                projectPath: FileManager.default.temporaryDirectory
+            )
+        }
+    }
+
+    @Test("Off-TTY select uses the declared default, not option 0, and rejects invalid values")
+    func nonInteractiveSelect() {
+        let select = prompt("LEVEL", type: .select, defaultValue: "debug", options: ["info", "debug"])
+        #expect(resolve(select) == "debug")
+        #expect(resolve(select, prior: "gone") == "debug")
+        #expect(resolve(prompt("LEVEL", type: .select, defaultValue: "trace", options: ["info"])) == nil)
+    }
+
+    @Test("Off-TTY fileDetect: single match, default among matches, else fail")
+    func nonInteractiveFileDetect() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let noDefault = prompt("PROJECT", type: .fileDetect, patterns: ["*.xcodeproj"])
+        let emptyDefault = prompt("PROJECT", type: .fileDetect, defaultValue: "", patterns: ["*.xcodeproj"])
+        let libDefault = prompt("PROJECT", type: .fileDetect, defaultValue: "Lib.xcodeproj", patterns: ["*.xcodeproj"])
+        #expect(resolve(noDefault, in: tmpDir) == nil)
+        #expect(resolve(emptyDefault, in: tmpDir) == nil)
+
+        try "".write(to: tmpDir.appendingPathComponent("App.xcodeproj"), atomically: true, encoding: .utf8)
+        #expect(resolve(noDefault, in: tmpDir) == "App.xcodeproj")
+
+        try "".write(to: tmpDir.appendingPathComponent("Lib.xcodeproj"), atomically: true, encoding: .utf8)
+        #expect(resolve(noDefault, in: tmpDir) == nil)
+        #expect(resolve(libDefault, in: tmpDir) == "Lib.xcodeproj")
+    }
+
+    @Test("Mixed declarations: any input declaration accepts a value verbatim")
+    func nonInteractiveMixedTypes() {
+        #expect(resolve(
+            prompt("REGION", type: .select, options: ["us"]),
+            prompt("REGION", type: .input, defaultValue: "eu")
+        ) == "eu")
+    }
+
+    @Test("Select cursor seeds from the prior, then the declared default")
+    func selectCursorSeeding() {
+        let options = ["info", "debug", "trace"].map { PromptOption(value: $0, label: $0) }
+        #expect(PromptOption.index(of: nil, in: options, fallback: "trace") == 2)
+        #expect(PromptOption.index(of: "debug", in: options, fallback: "trace") == 1)
+        #expect(PromptOption.index(of: "gone", in: options, fallback: "trace") == 2)
+        #expect(PromptOption.index(of: nil, in: options) == 0)
     }
 }

@@ -36,13 +36,17 @@ struct CLIOutput {
     /// callers (e.g. `DoctorRunner`) that need to count emitted warnings.
     let warningCounter: WarningCounter?
 
-    init(colorsEnabled: Bool? = nil, warningCounter: WarningCounter? = nil) {
+    init(
+        colorsEnabled: Bool? = nil,
+        warningCounter: WarningCounter? = nil,
+        interactiveStdin: Bool? = nil
+    ) {
         if let explicit = colorsEnabled {
             self.colorsEnabled = explicit
         } else {
             self.colorsEnabled = isatty(STDOUT_FILENO) != 0
         }
-        hasInteractiveStdin = isatty(STDIN_FILENO) != 0
+        hasInteractiveStdin = interactiveStdin ?? (isatty(STDIN_FILENO) != 0)
         isInteractiveTerminal = hasInteractiveStdin && isatty(STDOUT_FILENO) != 0
         style = ANSIStyle(enabled: self.colorsEnabled)
         self.warningCounter = warningCounter

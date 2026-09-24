@@ -72,10 +72,14 @@ struct PromptOption: Codable, Equatable {
     let value: String
     let label: String
 
-    /// Find the index of the option whose `value` matches, returning 0 when absent.
-    /// Used by single-select UIs to seed the cursor from a previously-stored answer.
-    static func index(of value: String?, in options: [PromptOption]) -> Int {
-        guard let value else { return 0 }
-        return options.firstIndex { $0.value == value } ?? 0
+    /// Index of the option matching `value`, else `fallback`, else 0.
+    /// Used by single-select UIs to seed the cursor from a stored answer or the declared default.
+    static func index(of value: String?, in options: [PromptOption], fallback: String? = nil) -> Int {
+        for candidate in [value, fallback].compactMap(\.self) {
+            if let index = options.firstIndex(where: { $0.value == candidate }) {
+                return index
+            }
+        }
+        return 0
     }
 }

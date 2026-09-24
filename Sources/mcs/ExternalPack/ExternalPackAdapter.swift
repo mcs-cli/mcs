@@ -89,12 +89,16 @@ struct ExternalPackAdapter: TechPack {
         let remaining = prompts.filter { context.resolvedValues[$0.key] == nil }
         guard !remaining.isEmpty else { return [:] }
         let executor = PromptExecutor(output: context.output, scriptRunner: scriptRunner)
-        return try executor.executeAll(
-            prompts: remaining,
-            packPath: packPath,
-            projectPath: context.projectPath,
-            priorValues: context.priorValues
-        )
+        do {
+            return try executor.executeAll(
+                prompts: remaining,
+                packPath: packPath,
+                projectPath: context.projectPath,
+                priorValues: context.priorValues
+            )
+        } catch let PromptExecutor.PromptError.unresolved(key) {
+            throw PromptResolutionError(unresolved: [UnresolvedPrompt(packNames: [displayName], key: key)])
+        }
     }
 
     // MARK: - Project Configuration

@@ -10,6 +10,7 @@ struct PromptExecutor {
     enum PromptError: Error, Equatable, LocalizedError {
         case noFilesDetected(pattern: String)
         case scriptFailed(key: String, stderr: String)
+        case unresolved(key: String)
 
         var errorDescription: String? {
             switch self {
@@ -17,6 +18,8 @@ struct PromptExecutor {
                 "No files matching '\(pattern)' were found"
             case let .scriptFailed(key, stderr):
                 "Script for prompt '\(key)' failed: \(stderr)"
+            case let .unresolved(key):
+                "Prompt '\(key)' has no seeded, stored or default value and stdin is not interactive"
             }
         }
     }
@@ -37,7 +40,15 @@ struct PromptExecutor {
         projectPath: URL,
         priorValue: String? = nil
     ) throws -> String {
-        switch prompt.type {
+        if !output.hasInteractiveStdin, prompt.type != .script {
+            guard let value = Self.nonInteractiveValue(
+                declarations: [prompt], prior: priorValue, projectPath: projectPath
+            ) else {
+                throw PromptError.unresolved(key: prompt.key)
+            }
+            return value
+        }
+        return switch prompt.type {
         case .fileDetect:
             try executeFileDetect(prompt: prompt, projectPath: projectPath, priorValue: priorValue)
         case .input:
@@ -111,7 +122,9 @@ struct PromptExecutor {
                 return (name: name, description: ext.isEmpty ? "File" : ext)
             }
             let label = prompt.label ?? "Select a file"
-            let initialIndex = priorValue.flatMap { files.firstIndex(of: $0) } ?? 0
+            let initialIndex = (priorValue.flatMap { files.firstIndex(of: $0) })
+                ?? (prompt.defaultValue.flatMap { files.firstIndex(of: $0) })
+                ?? 0
             let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
             return files[selected]
         }
@@ -202,9 +215,51 @@ struct PromptExecutor {
             (name: option.label, description: option.value)
         }
         let label = prompt.label ?? "Select value for \(prompt.key)"
-        let initialIndex = PromptOption.index(of: priorValue, in: options)
+        let initialIndex = PromptOption.index(of: priorValue, in: options, fallback: prompt.defaultValue)
         let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
         return options[selected].value
+    }
+
+    // MARK: - Non-Interactive
+
+    /// The value one key resolves to without a reader: the prior, then the first declared
+    /// default, each only when every declaration's constraints admit it. `nil` means the
+    /// key is unanswerable and the run must fail rather than store whatever EOF yields.
+    ///
+    /// Mixed declarations follow `CrossPackPromptResolver.partitionDeclaredPrompts`: any
+    /// `input` declaration accepts a value verbatim, and only keys every pack scans for
+    /// take the `fileDetect` rules. `script` declarations are ignored — they compute
+    /// their value rather than ask for it.
+    static func nonInteractiveValue(
+        declarations: [PromptDefinition],
+        prior: String?,
+        projectPath: URL
+    ) -> String? {
+        let types = Set(declarations.map(\.type)).subtracting([.script])
+        guard !types.isEmpty else { return nil }
+        let declaredDefault = declarations.compactMap(\.defaultValue).first
+        let candidates = [prior, declaredDefault].compactMap(\.self)
+
+        if types.contains(.input) {
+            return candidates.first
+        }
+
+        if types == [.fileDetect] {
+            let files = detectFiles(matching: declarations.flatMap { $0.detectPatterns ?? ["*"] }, in: projectPath)
+            switch files.count {
+            case 0:
+                // A default is the only way to name a file the scan can't see, and an empty
+                // one is rejected here just as the interactive zero-match branch rejects it.
+                return declaredDefault.flatMap { $0.isEmpty ? nil : $0 }
+            case 1:
+                return files[0]
+            default:
+                return candidates.first { files.contains($0) }
+            }
+        }
+
+        let constrained = Set(declarations.flatMap { $0.options ?? [] }.map(\.value))
+        return candidates.first { constrained.isEmpty || constrained.contains($0) }
     }
 
     // MARK: - Script
