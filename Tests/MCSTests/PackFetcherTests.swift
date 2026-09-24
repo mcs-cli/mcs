@@ -283,6 +283,24 @@ struct PackFetcherOperationTests {
         ))
     }
 
+    @Test("clone refuses the packs directory itself and paths outside it, leaving them intact")
+    func cloneRejectsNonChildPaths() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let packsDir = tmpDir.appendingPathComponent("packs")
+        let installed = packsDir.appendingPathComponent("other-pack")
+        try FileManager.default.createDirectory(at: installed, withIntermediateDirectories: true)
+        let (fetcher, shell) = makeMockFetcher(home: tmpDir, packsDir: packsDir)
+
+        for target in [packsDir, tmpDir.appendingPathComponent("outside")] {
+            #expect(throws: PackFetchError.self) {
+                try fetcher.clone(url: "https://github.com/org/repo.git", into: target, ref: nil)
+            }
+        }
+        #expect(FileManager.default.fileExists(atPath: installed.path))
+        #expect(shell.runCalls.isEmpty)
+    }
+
     // MARK: - update tests
 
     @Test("update calls fetch and reset for default branch")

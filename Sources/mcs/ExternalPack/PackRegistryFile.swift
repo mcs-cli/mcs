@@ -38,6 +38,18 @@ struct PackRegistryFile {
             return PathContainment.safePath(relativePath: localPath, within: packsDirectory)
         }
 
+        /// A git checkout deleted out of band while its registry entry remains. Local packs and
+        /// unresolvable paths are never "missing": re-cloning cannot repair either.
+        func isCheckoutMissing(packsDirectory: URL) -> Bool {
+            guard !isLocalPack, let packPath = resolvedPath(packsDirectory: packsDirectory) else { return false }
+            return Self.isCheckoutMissing(at: packPath)
+        }
+
+        static func isCheckoutMissing(at packPath: URL) -> Bool {
+            let manifest = packPath.appendingPathComponent(Constants.ExternalPacks.manifestFilename)
+            return !FileManager.default.fileExists(atPath: manifest.path)
+        }
+
         /// Return a copy with `commitSHA` replaced. The registry SHA and working-tree
         /// HEAD are normally kept in lockstep (set together by clone/checkout). Updating
         /// only the SHA reflects "we acknowledged this upstream commit but did not move

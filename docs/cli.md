@@ -67,6 +67,7 @@ packs:
 - **Additive by default.** Packs listed in `mcs.yaml` are installed / updated; any pack configured in the project but not listed is preserved. After sync, a note lists any such extras so the divergence stays visible.
 - **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set — extras are unconfigured. A confirmation prompt lists what will be removed (skip with `--yes`).
 - **Idempotent.** Re-running converges — no work if nothing changed.
+- **Missing checkouts are restored.** A git pack still in the registry whose `~/.mcs/packs/` checkout was deleted is re-cloned at its recorded `ref` (or the declared one, when `mcs.yaml` changes it), with the usual trust check.
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason. When bootstrap aborts partway through, an epilogue lists which packs already registered — re-run after fixing the failing entry to continue.
 - **Trust prompts need a TTY unless `--trust-all` is passed.** Both trust surfaces bootstrap can reach — adding a pack it has never seen, and advancing a pack's `ref:` to a revision with changed scripts — end at an interactive confirmation. Without a terminal that confirmation reads as "no" and bootstrap aborts, so any unattended run against a fresh pack needs `--trust-all`.
 - **`--trust-all` grants code execution without review.** It approves everything the declared packs can execute: install shell commands, MCP servers, hook files and the interpreters they run under, command files, configure and prompt scripts, and doctor check/fix commands. All run with your privileges; hooks and MCP servers run on every Claude Code session. Brew packages and plugins are outside the trust surface entirely, with or without this flag — see [Architecture](architecture.md) for that boundary. Each auto-trusted pack logs a warning naming what it was granted, and the approval persists: `~/.mcs/registry.yaml` records the hashes, so later interactive runs treat that content as reviewed. Point `mcs.yaml` at sources you control or have already reviewed, and prefer a `ref:` naming a tag over a branch so the content a run trusts is not a moving target.
@@ -85,7 +86,7 @@ packs:
 
 ## `mcs update`
 
-Refresh already-configured packs across every scope they're installed in. Fetches the latest pack contents (with trust verification) and re-applies the existing pack set in both the global scope and the current project's scope.
+Refresh already-configured packs across every scope they're installed in. Fetches the latest pack contents (with trust verification) and re-applies the existing pack set in both the global scope and the current project's scope. A git pack whose local checkout was deleted is re-cloned at its recorded `ref`.
 
 ```bash
 mcs update                       # Refresh all configured packs in every scope (global + current project)
@@ -168,7 +169,7 @@ mcs pack list                    # List registered packs with status
 mcs pack update [name]           # Update pack(s) to latest version (registry only, no re-apply)
 ```
 
-Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically).
+Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically). A checkout that was deleted is re-cloned at the pack's recorded `ref`.
 
 This is a low-level fetch — useful for pack authors testing upstream changes without applying them, or in CI workflows that handle the apply step separately. For most users, [`mcs update`](#mcs-update) is the right command: it does the same fetch *and* re-applies across every configured scope.
 

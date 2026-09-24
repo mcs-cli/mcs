@@ -103,14 +103,16 @@ struct PackUpdaterTests {
 
     private func makeEntry(
         commitSHA: String,
-        trustedScriptHashes: [String: String] = [:]
+        trustedScriptHashes: [String: String] = [:],
+        sourceURL: String = "file:///fake/remote.git",
+        ref: String? = nil
     ) -> PackRegistryFile.PackEntry {
         PackRegistryFile.PackEntry(
             identifier: "test-pack",
             displayName: "Test Pack",
             author: nil,
-            sourceURL: "file:///fake/remote.git",
-            ref: nil,
+            sourceURL: sourceURL,
+            ref: ref,
             commitSHA: commitSHA,
             localPath: "test-pack",
             addedAt: "2026-03-21T00:00:00Z",
@@ -155,6 +157,17 @@ struct PackUpdaterTests {
         try git(shell, ["-C", workDir.path, "add", "."], context: "git add")
         try git(shell, ["-C", workDir.path, "commit", "-m", "push files"], context: "git commit")
         try git(shell, ["-C", workDir.path, "push"], context: "git push")
+    }
+
+    /// A manifest with no git repository behind it: present enough not to count as a missing
+    /// checkout, so the failure comes from the fetch rather than the re-clone path.
+    private func makeNonGitCheckout(fixture: Fixture) throws -> URL {
+        let path = fixture.tmpDir.appendingPathComponent("not-a-repo")
+        try FileManager.default.createDirectory(at: path, withIntermediateDirectories: true)
+        try "schemaVersion: 1\n".write(
+            to: path.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8
+        )
+        return path
     }
 
     /// A manifest declaring one skill component backed by `skills/docs.md`.
@@ -399,15 +412,135 @@ struct PackUpdaterTests {
         #expect(FileManager.default.fileExists(atPath: fix.env.updateCheckCacheFile.path))
     }
 
+    // MARK: - Missing checkout
+
+    @Test("isCheckoutMissing is true only when the manifest is absent")
+    func checkoutMissingDetection() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        #expect(!PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
+
+        try FileManager.default.removeItem(at: packPath.appendingPathComponent("techpack.yaml"))
+        #expect(PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
+        #expect(PackRegistryFile.PackEntry.isCheckoutMissing(at: fix.packsDir.appendingPathComponent("absent")))
+    }
+
+    @Test("re-clones a deleted checkout without re-prompting for already-trusted scripts")
+    func recloneMissingCheckoutKeepsTrust() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
+            Issue.record("Expected the fetch to advance the checkout")
+            return
+        }
+        let scriptHash = try FileHasher.sha256(
+            of: packPath.appendingPathComponent("scripts/configure.sh")
+        )
+        let entry = makeEntry(
+            commitSHA: fetched.commitSHA,
+            trustedScriptHashes: ["scripts/configure.sh": scriptHash],
+            sourceURL: fix.remoteDir.path
+        )
+        try FileManager.default.removeItem(at: packPath)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        // A prompt would decline non-interactively, so `.updated` proves none was shown.
+        guard case let .updated(updatedEntry, _) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(updatedEntry.commitSHA == fetched.commitSHA)
+        #expect(updatedEntry.trustedScriptHashes["scripts/configure.sh"] == scriptHash)
+        #expect(!PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
+    }
+
+    @Test("a declined trust prompt after a re-clone leaves the checkout missing for the next run")
+    func recloneMissingCheckoutChecksTrust() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        let entry = makeEntry(commitSHA: fix.initialSHA, sourceURL: fix.remoteDir.path)
+        try FileManager.default.removeItem(at: packPath)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case .trustDeclined = result else {
+            Issue.record("Expected .trustDeclined, got \(result)")
+            return
+        }
+        #expect(PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
+    }
+
+    @Test("re-clones a deleted checkout at the recorded tag, not the branch tip")
+    func recloneMissingCheckoutHonorsRef() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let workDir = fix.tmpDir.appendingPathComponent("work")
+        let shell = ShellRunner(environment: fix.env)
+        try git(shell, ["-C", workDir.path, "tag", "v1"], context: "git tag")
+        try git(shell, ["-C", workDir.path, "push", "origin", "v1"], context: "git push tag")
+        let tipSHA = try pushNewCommit(fixture: fix)
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        let entry = makeEntry(commitSHA: fix.initialSHA, sourceURL: fix.remoteDir.path, ref: "v1")
+        try FileManager.default.removeItem(at: packPath)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case let .updated(updatedEntry, _) = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(updatedEntry.commitSHA == fix.initialSHA)
+        #expect(updatedEntry.commitSHA != tipSHA)
+        #expect(updatedEntry.ref == "v1")
+    }
+
+    @Test("returns fetchFailed when the re-clone of a deleted checkout fails")
+    func recloneMissingCheckoutFailure() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        let entry = makeEntry(
+            commitSHA: fix.initialSHA,
+            sourceURL: fix.tmpDir.appendingPathComponent("no-such-remote.git").path
+        )
+        try FileManager.default.removeItem(at: packPath)
+
+        let result = fix.updater.updateGitPack(
+            entry: entry, packPath: packPath, registry: fix.registry
+        )
+
+        guard case .fetchFailed = result else {
+            Issue.record("Expected .fetchFailed, got \(result)")
+            return
+        }
+        #expect(result.isHardFailure)
+    }
+
     @Test("returns fetchFailed when fetch fails")
     func fetchFailure() throws {
         let fix = try makeFixture()
         defer { fix.cleanup() }
 
         let entry = makeEntry(commitSHA: fix.initialSHA)
-
-        // Point at a nonexistent path so git fetch fails
-        let brokenPath = fix.tmpDir.appendingPathComponent("nonexistent-pack")
+        let brokenPath = try makeNonGitCheckout(fixture: fix)
 
         let result = fix.updater.updateGitPack(
             entry: entry, packPath: brokenPath, registry: fix.registry
@@ -428,7 +561,7 @@ struct PackUpdaterTests {
         try seedUpdateCheckCache(env: fix.env)
 
         let entry = makeEntry(commitSHA: fix.initialSHA)
-        let brokenPath = fix.tmpDir.appendingPathComponent("nonexistent-pack")
+        let brokenPath = try makeNonGitCheckout(fixture: fix)
 
         let result = fix.updater.updateGitPack(
             entry: entry, packPath: brokenPath, registry: fix.registry

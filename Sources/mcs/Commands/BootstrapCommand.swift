@@ -186,7 +186,13 @@ struct BootstrapCommand: LockedCommand {
             }
 
             if dryRun {
-                printDryRunLine(existing: existing, packSource: packSource, pack: pack, output: ctx.output)
+                printDryRunLine(
+                    existing: existing,
+                    packSource: packSource,
+                    pack: pack,
+                    packsDirectory: ctx.env.packsDirectory,
+                    output: ctx.output
+                )
                 if let existing { identifiers.append(existing.identifier) }
                 continue
             }
@@ -261,11 +267,16 @@ struct BootstrapCommand: LockedCommand {
         existing: PackRegistryFile.PackEntry?,
         packSource: PackSource,
         pack: BootstrapFile.PackRef,
+        packsDirectory: URL,
         output: CLIOutput
     ) {
         let displaySource = redactSourceForDisplay(pack.source)
-        if existing != nil {
-            output.dimmed("  already registered: \(displaySource)")
+        if let existing {
+            if existing.isCheckoutMissing(packsDirectory: packsDirectory) {
+                output.info("  would re-fetch (checkout missing): \(displaySource)")
+            } else {
+                output.dimmed("  already registered: \(displaySource)")
+            }
             return
         }
         let isLocal = if case .localPath = packSource {
@@ -323,27 +334,29 @@ struct BootstrapCommand: LockedCommand {
     }
 
     /// Handle a git pack that is already registered — either a same-ref no-op or a
-    /// `PackUpdater`-driven ref advance. Local packs never reach this path (they're
+    /// `PackUpdater`-driven ref advance or missing-checkout re-clone. Local packs never reach this path (they're
     /// handled inline in `installPacks`).
-    private func reconcileExistingGitPack(
+    func reconcileExistingGitPack(
         existing: PackRegistryFile.PackEntry,
         pack: BootstrapFile.PackRef,
         ctx: PackCommandContext
     ) throws -> PackRegistryFile.PackEntry {
-        if existing.ref == pack.ref {
-            let display = redactSourceForDisplay(pack.source)
-            ctx.output.dimmed("  \(display) already registered\(pack.ref.map { "@\($0)" } ?? "")")
-            return existing
-        }
-
-        ctx.output.info("Updating '\(existing.displayName)' to \(pack.ref ?? "default branch")...")
-        var target = existing
-        target.ref = pack.ref
-
-        guard let packPath = target.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
-            ctx.output.error("Pack '\(target.identifier)' has an invalid path — skipping")
+        guard let packPath = existing.resolvedPath(packsDirectory: ctx.env.packsDirectory) else {
+            ctx.output.error("Pack '\(existing.identifier)' has an invalid path — skipping")
             throw ExitCode.failure
         }
+
+        // A missing checkout skips both lines: the updater announces its own re-clone.
+        if !PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath) {
+            if existing.ref == pack.ref {
+                let display = redactSourceForDisplay(pack.source)
+                ctx.output.dimmed("  \(display) already registered\(pack.ref.map { "@\($0)" } ?? "")")
+                return existing
+            }
+            ctx.output.info("Updating '\(existing.displayName)' to \(pack.ref ?? "default branch")...")
+        }
+        var target = existing
+        target.ref = pack.ref
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
