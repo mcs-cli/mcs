@@ -1970,6 +1970,27 @@ struct PromptValueReuseLifecycleTests {
         #expect(values?["LABEL_PREFIX"] == nil)
     }
 
+    @Test("Removing a pack skips pruning when a surviving pack's templates can't be read")
+    func pruneSkippedWhenTemplatesUnreadable() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let unreadable = TemplateFailingPack(identifier: "unreadable-pack")
+        let promptPack = MockPromptTechPack(
+            identifier: "prompt-pack",
+            displayName: "Prompt Pack",
+            prompts: [inputPrompt("LABEL_PREFIX")]
+        )
+        let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [unreadable, promptPack]))
+        try configurator.configure(packs: [unreadable, promptPack], confirmRemovals: false)
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["LABEL_PREFIX": "scope:", "TEMPLATE_ONLY_KEY": "kept"])
+        configurator.unconfigurePack("prompt-pack", state: &state)
+
+        #expect(state.resolvedValues?["TEMPLATE_ONLY_KEY"] == "kept")
+    }
+
     @Test("New prompt added between syncs: old values reused, new prompt asked")
     func newPromptAddedSkipsGate() throws {
         let bed = try LifecycleTestBed()
@@ -3504,5 +3525,27 @@ struct BootstrapMigrationPersistenceTests {
         config.persistMigrationIfNeeded(to: path)
         let afterPersist = try String(contentsOf: path, encoding: .utf8)
         #expect(afterPersist.contains("update-check: false"))
+    }
+}
+
+private struct TemplateFailingPack: TechPack {
+    let identifier: String
+    let displayName: String = "Template Failing Pack"
+    let description: String = "A pack whose templates throw"
+    let components: [ComponentDefinition] = []
+    var templates: [TemplateContribution] {
+        get throws { throw TemplateLoadError() }
+    }
+
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        []
+    }
+
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
+
+    private struct TemplateLoadError: Error, LocalizedError {
+        var errorDescription: String? {
+            "simulated template load failure"
+        }
     }
 }

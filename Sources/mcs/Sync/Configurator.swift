@@ -588,12 +588,18 @@ struct Configurator {
         let context = strategy.makeConfigContext(
             output: output, resolvedValues: priors, priorValues: priors
         )
+        var templatesUnreadable = false
         let consumed = CrossPackPromptResolver.consumedKeys(
             packs: survivingPacks,
             context: context,
             includeTemplates: scope.includeTemplatesInScan,
-            onWarning: { output.warn($0) }
+            onWarning: {
+                output.warn($0)
+                templatesUnreadable = true
+            }
         )
+        // Same fallback as an unloadable pack: an unread template's placeholders are unknown.
+        guard !templatesUnreadable else { return }
         state.pruneResolvedValues(keepingKeys: consumed.all)
     }
 
