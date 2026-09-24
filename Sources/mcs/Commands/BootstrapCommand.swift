@@ -339,7 +339,7 @@ struct BootstrapCommand: LockedCommand {
     /// Handle a git pack that is already registered — either a same-ref no-op or a
     /// `PackUpdater`-driven ref advance or missing-checkout re-clone. Local packs never reach this path (they're
     /// handled inline in `installPacks`).
-    private func reconcileExistingGitPack(
+    func reconcileExistingGitPack(
         existing: PackRegistryFile.PackEntry,
         pack: BootstrapFile.PackRef,
         ctx: PackCommandContext

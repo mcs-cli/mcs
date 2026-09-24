@@ -462,7 +462,7 @@ struct PackUpdaterTests {
         #expect(!PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
     }
 
-    @Test("re-cloned scripts the registry never trusted still go through the trust prompt")
+    @Test("a declined trust prompt after a re-clone leaves the checkout missing for the next run")
     func recloneMissingCheckoutChecksTrust() throws {
         let fix = try makeFixture()
         defer { fix.cleanup() }
@@ -480,6 +480,7 @@ struct PackUpdaterTests {
             Issue.record("Expected .trustDeclined, got \(result)")
             return
         }
+        #expect(PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
     }
 
     @Test("re-clones a deleted checkout at the recorded tag, not the branch tip")

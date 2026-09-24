@@ -103,10 +103,15 @@ struct PackUpdater {
         } catch {
             return .fetchFailed(underlying: error)
         }
-        return validateAndTrust(
+        let result = validateAndTrust(
             entry: entry, packPath: packPath, registry: registry, commitSHA: fetchResult.commitSHA,
             beforeSnapshot: nil
         )
+        if case .updated = result { return result }
+        // A copy left behind no longer reads as missing, so the next bootstrap would skip it as
+        // already registered instead of retrying.
+        fetcher.removeQuietly(packPath: packPath)
+        return result
     }
 
     /// Snapshot the pack as it stands on disk, swallowing failure rather than propagating it.
