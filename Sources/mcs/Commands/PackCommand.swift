@@ -472,20 +472,28 @@ struct ListPacks: ParsableCommand {
         }
 
         let entries = jsonEntries(registry: registryData, index: indexData, env: ctx.env)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data: Data
         do {
-            data = try encoder.encode(entries)
+            try print(Self.renderJSON(entries))
         } catch {
             ctx.output.error("JSON encoding failed: \(error.localizedDescription)")
             throw ExitCode.failure
         }
+    }
+
+    static func renderJSON(_ entries: [JSONEntry]) throws -> String {
+        // The pretty printer renders an empty array as "[\n\n]"; the documented output is "[]".
+        guard !entries.isEmpty else { return "[]" }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(entries)
         guard let string = String(bytes: data, encoding: .utf8) else {
-            ctx.output.error("JSON encoding produced invalid UTF-8")
-            throw ExitCode.failure
+            throw EncodingError.invalidValue(
+                entries,
+                EncodingError.Context(codingPath: [], debugDescription: "Encoded JSON is not valid UTF-8")
+            )
         }
-        print(string)
+        return string
     }
 
     func jsonEntries(

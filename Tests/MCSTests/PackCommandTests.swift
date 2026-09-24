@@ -355,6 +355,30 @@ struct ListPacksJSONTests {
         #expect(entry.scopes == ["global", projectA.path, projectB.path])
     }
 
+    @Test("Empty list renders as a literal []")
+    func renderEmpty() throws {
+        #expect(try ListPacks.renderJSON([]) == "[]")
+    }
+
+    @Test("Non-empty list renders pretty-printed with sorted keys")
+    func renderNonEmpty() throws {
+        let entry = ListPacks.JSONEntry(
+            identifier: "test-pack",
+            source: "https://example.com/test-pack.git",
+            ref: nil,
+            commitSHA: "abc123def456",
+            isLocal: false,
+            status: .ok,
+            scopes: []
+        )
+        let rendered = try ListPacks.renderJSON([entry])
+
+        #expect(rendered.hasPrefix("[\n"))
+        let commitRange = try #require(rendered.range(of: "\"commitSHA\""))
+        let statusRange = try #require(rendered.range(of: "\"status\""))
+        #expect(commitRange.lowerBound < statusRange.lowerBound)
+    }
+
     @Test("Encoded entry carries exactly the documented keys, with null ref")
     func encodedKeys() throws {
         let entry = ListPacks.JSONEntry(
