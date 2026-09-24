@@ -514,20 +514,13 @@ struct ListPacks: ParsableCommand {
     }
 
     func packHealth(entry: PackRegistryFile.PackEntry, env: Environment) -> PackHealth {
-        let fm = FileManager.default
-
         guard let packPath = entry.resolvedPath(packsDirectory: env.packsDirectory) else {
             return .invalidPath
         }
-        guard fm.fileExists(atPath: packPath.path) else {
+        guard FileManager.default.fileExists(atPath: packPath.path) else {
             return .missing
         }
-        if entry.isLocalPack {
-            return .ok
-        }
-
-        let manifestURL = packPath.appendingPathComponent(Constants.ExternalPacks.manifestFilename)
-        guard fm.fileExists(atPath: manifestURL.path) else {
+        if !entry.isLocalPack, PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath) {
             return .missingManifest
         }
         return .ok

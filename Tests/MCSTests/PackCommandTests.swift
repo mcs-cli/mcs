@@ -244,29 +244,9 @@ struct ListPacksStatusTests {
 // MARK: - ListPacks JSON
 
 struct ListPacksJSONTests {
-    private func makeEntry(
-        identifier: String = "test-pack",
-        localPath: String = "test-pack",
-        ref: String? = nil,
-        isLocal: Bool? = nil
-    ) -> PackRegistryFile.PackEntry {
-        PackRegistryFile.PackEntry(
-            identifier: identifier,
-            displayName: "Test Pack",
-            author: nil,
-            sourceURL: "https://github.com/user/\(identifier).git",
-            ref: ref,
-            commitSHA: isLocal == true ? Constants.ExternalPacks.localCommitSentinel : "abc123",
-            localPath: localPath,
-            addedAt: "2026-01-01T00:00:00Z",
-            trustedScriptHashes: [:],
-            isLocal: isLocal
-        )
-    }
-
-    private func installGitPack(_ identifier: String, env: Environment) throws {
-        let packDir = env.packsDirectory.appendingPathComponent(identifier)
-        try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
+    private func installGitPack(_ identifier: String, home: URL) throws {
+        try preparePackDir(home: home, identifier: identifier)
+        let packDir = Environment(home: home).packsDirectory.appendingPathComponent(identifier)
         try "identifier: \(identifier)".write(
             to: packDir.appendingPathComponent(Constants.ExternalPacks.manifestFilename),
             atomically: true, encoding: .utf8
@@ -296,16 +276,16 @@ struct ListPacksJSONTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let env = Environment(home: tmpDir)
-        try installGitPack("test-pack", env: env)
+        try installGitPack("test-pack", home: tmpDir)
 
-        let registry = PackRegistryFile.RegistryData(packs: [makeEntry(ref: "v1.0")])
+        let registry = PackRegistryFile.RegistryData(packs: [makeRegistryEntry(identifier: "test-pack", ref: "v1.0")])
         let entries = ListPacks().jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env)
 
         #expect(entries == [ListPacks.JSONEntry(
             identifier: "test-pack",
-            source: "https://github.com/user/test-pack.git",
+            source: "https://example.com/test-pack.git",
             ref: "v1.0",
-            commitSHA: "abc123",
+            commitSHA: "abc123def456",
             isLocal: false,
             status: .ok,
             scopes: []
@@ -320,7 +300,7 @@ struct ListPacksJSONTests {
         let packDir = tmpDir.appendingPathComponent("local-pack")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
 
-        let registry = PackRegistryFile.RegistryData(packs: [makeEntry(localPath: packDir.path, isLocal: true)])
+        let registry = PackRegistryFile.RegistryData(packs: [makeLocalRegistryEntry(identifier: "local-pack", localPath: packDir.path)])
         let entry = try #require(
             ListPacks().jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env).first
         )
@@ -336,13 +316,12 @@ struct ListPacksJSONTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let env = Environment(home: tmpDir)
-        let noManifest = env.packsDirectory.appendingPathComponent("no-manifest")
-        try FileManager.default.createDirectory(at: noManifest, withIntermediateDirectories: true)
+        try preparePackDir(home: tmpDir, identifier: "no-manifest")
 
         let registry = PackRegistryFile.RegistryData(packs: [
-            makeEntry(identifier: "missing", localPath: "missing"),
-            makeEntry(identifier: "escape", localPath: "../../etc"),
-            makeEntry(identifier: "no-manifest", localPath: "no-manifest"),
+            makeRegistryEntry(identifier: "missing"),
+            makeRegistryEntry(identifier: "../../etc"),
+            makeRegistryEntry(identifier: "no-manifest"),
         ])
         let statuses = ListPacks()
             .jsonEntries(registry: registry, index: ProjectIndex.IndexData(), env: env)
@@ -356,7 +335,7 @@ struct ListPacksJSONTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let env = Environment(home: tmpDir)
-        try installGitPack("test-pack", env: env)
+        try installGitPack("test-pack", home: tmpDir)
         let projectB = tmpDir.appendingPathComponent("b-project")
         let projectA = tmpDir.appendingPathComponent("a-project")
         try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
@@ -370,7 +349,7 @@ struct ListPacksJSONTests {
             indexEntry(projectA.path, packs: ["test-pack", "other"]),
             indexEntry(tmpDir.path, packs: ["other"]),
         ])
-        let registry = PackRegistryFile.RegistryData(packs: [makeEntry()])
+        let registry = PackRegistryFile.RegistryData(packs: [makeRegistryEntry(identifier: "test-pack")])
         let entry = try #require(ListPacks().jsonEntries(registry: registry, index: index, env: env).first)
 
         #expect(entry.scopes == ["global", projectA.path, projectB.path])
