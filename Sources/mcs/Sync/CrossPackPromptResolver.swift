@@ -9,6 +9,8 @@ import Foundation
 enum CrossPackPromptResolver {
     /// A prompt definition paired with the pack that declares it.
     struct PackPromptInfo {
+        /// Identity of the declaring pack; display names need not be unique.
+        let packID: String
         let packName: String
         let prompt: PromptDefinition
     }
@@ -150,7 +152,7 @@ enum CrossPackPromptResolver {
         let declarationsByKey = promptInfosByKey(packs: packs, context: context)
         let shared = groupSharedPrompts(packs: packs, context: context)
         for (key, infos) in declarationsByKey {
-            let answering = shared[key] ?? infos.filter { $0.packName == infos[0].packName }
+            let answering = shared[key] ?? infos.filter { $0.packID == infos[0].packID }
             let declarations = answering.map(\.prompt)
             guard !declarations.contains(where: { $0.type == .script }) else { continue }
             if let value = PromptExecutor.nonInteractiveValue(
@@ -217,7 +219,7 @@ enum CrossPackPromptResolver {
         var byKey: [String: [PackPromptInfo]] = [:]
         for pack in packs {
             for prompt in pack.declaredPrompts(context: context) where context.resolvedValues[prompt.key] == nil {
-                byKey[prompt.key, default: []].append(PackPromptInfo(packName: pack.displayName, prompt: prompt))
+                byKey[prompt.key, default: []].append(PackPromptInfo(packID: pack.identifier, packName: pack.displayName, prompt: prompt))
             }
         }
         return byKey

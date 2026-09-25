@@ -321,7 +321,7 @@ struct CrossPackPromptResolverTests {
         #expect(resolution.unresolved.isEmpty)
     }
 
-    @Test("resolveNonInteractively judges a key no packs share by its first declaring pack's patterns")
+    @Test("resolveNonInteractively judges a key no packs share by its first declaring pack, by identity")
     func resolveNonInteractivelyFileDetectPerPack() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mcs-preflight-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -335,9 +335,10 @@ struct CrossPackPromptResolverTests {
                 options: nil, detectPatterns: [pattern], scriptCommand: nil
             )
         }
+        // One display name on purpose: the first pack must be told apart by identity.
         let packs = [
-            makeMockPack(name: "pack-a", prompts: [detect("*.xcodeproj")]),
-            makeMockPack(name: "pack-b", prompts: [detect("*.xcworkspace")]),
+            PromptMockPack(identifier: "pack-a", displayName: "Xcode", prompts: [detect("*.xcodeproj")]),
+            PromptMockPack(identifier: "pack-b", displayName: "Xcode", prompts: [detect("*.xcworkspace")]),
         ]
         let context = ProjectConfigContext(
             projectPath: dir, repoName: "r", output: CLIOutput(colorsEnabled: false),
@@ -391,8 +392,8 @@ struct CrossPackPromptResolverTests {
         let dir = FileManager.default.temporaryDirectory
         let withDefault: [String: [CrossPackPromptResolver.PackPromptInfo]] = [
             "PREFIX": [
-                .init(packName: "A", prompt: input("PREFIX")),
-                .init(packName: "B", prompt: input("PREFIX", defaultValue: "feat")),
+                .init(packID: "a", packName: "A", prompt: input("PREFIX")),
+                .init(packID: "b", packName: "B", prompt: input("PREFIX", defaultValue: "feat")),
             ],
         ]
         #expect(try CrossPackPromptResolver.resolveSharedPrompts(
@@ -400,7 +401,7 @@ struct CrossPackPromptResolverTests {
         ) == ["PREFIX": "feat"])
 
         let missing: [String: [CrossPackPromptResolver.PackPromptInfo]] = [
-            "TOKEN": [.init(packName: "A", prompt: input("TOKEN")), .init(packName: "B", prompt: input("TOKEN"))],
+            "TOKEN": [.init(packID: "a", packName: "A", prompt: input("TOKEN")), .init(packID: "b", packName: "B", prompt: input("TOKEN"))],
         ]
         #expect(throws: PromptResolutionError(unresolved: [UnresolvedPrompt(packNames: ["A", "B"], key: "TOKEN")])) {
             try CrossPackPromptResolver.resolveSharedPrompts(missing, output: output, projectPath: dir)
