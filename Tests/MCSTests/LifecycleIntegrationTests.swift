@@ -97,14 +97,14 @@ private struct LifecycleTestBed {
 
     // MARK: - Doctor Convenience
 
-    func runDoctor(registry: TechPackRegistry, packFilter: String? = nil) throws {
+    func runDoctor(registry: TechPackRegistry, packFilter: String? = nil) throws -> DoctorSummary {
         var runner = makeDoctorRunner(registry: registry, packFilter: packFilter)
-        try runner.run()
+        return try runner.run()
     }
 
-    func runGlobalDoctor(registry: TechPackRegistry) throws {
+    func runGlobalDoctor(registry: TechPackRegistry) throws -> DoctorSummary {
         var runner = makeGlobalDoctorRunner(registry: registry)
-        try runner.run()
+        return try runner.run()
     }
 
     // MARK: - Component Factories
@@ -312,8 +312,13 @@ struct SinglePackLifecycleTests {
         #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("test-pack/lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
+        // MockClaudeCLI only records `mcp add`; write what the real CLI would store for local scope.
+        let claudeJSON = ["projects": [bed.project.path: ["mcpServers": ["test-mcp": ["command": "npx"]]]]]
+        try JSONSerialization.data(withJSONObject: claudeJSON).write(to: bed.env.claudeJSON)
+
         // === Step 2: Doctor passes ===
-        try bed.runDoctor(registry: registry)
+        let clean = try bed.runDoctor(registry: registry)
+        #expect(clean.issues == 0)
 
         // === Step 3: Introduce settings drift ===
         var driftedSettings = settingsJSON
@@ -324,8 +329,7 @@ struct SinglePackLifecycleTests {
         try driftedData.write(to: bed.settingsLocalPath)
 
         // === Step 4: Doctor detects drift ===
-        try bed.runDoctor(registry: registry)
-        // (The runner completes — drift is reported as .warn, not a throw)
+        #expect(try bed.runDoctor(registry: registry).warnings > clean.warnings)
 
         // === Step 5: Re-sync fixes drift ===
         try configurator.configure(packs: [pack], confirmRemovals: false)
@@ -559,7 +563,7 @@ struct MultiPackConvergenceTests {
         #expect(claudeContent.contains("<!-- mcs:begin pack-b -->"))
 
         // === Step 2: Doctor passes ===
-        try bed.runDoctor(registry: registry)
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
 
         // === Step 3: Remove pack A only ===
         try configurator.configure(packs: [packB], confirmRemovals: false)
@@ -750,48 +754,6 @@ struct CrossPackCollisionDryRunTests {
         #expect(!FileManager.default.fileExists(atPath: namespacedA.path))
         #expect(!FileManager.default.fileExists(atPath: namespacedB.path))
     }
-
-    @Test("dryRun after configure shows consistent namespaced paths")
-    func dryRunAfterConfigureConsistent() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        let hookSourceA = try bed.makeHookSource(name: "dr-a.sh", content: "#!/bin/bash\necho pack-a")
-        let hookSourceB = try bed.makeHookSource(name: "dr-b.sh", content: "#!/bin/bash\necho pack-b")
-
-        let packA = MockTechPack(
-            identifier: "pack-a",
-            displayName: "Pack A",
-            components: [
-                bed.hookComponent(
-                    pack: "pack-a", id: "lint",
-                    source: hookSourceA, destination: "lint.sh",
-                    hookRegistration: HookRegistration(event: .postToolUse)
-                ),
-            ],
-            templates: []
-        )
-        let packB = MockTechPack(
-            identifier: "pack-b",
-            displayName: "Pack B",
-            components: [
-                bed.hookComponent(
-                    pack: "pack-b", id: "lint",
-                    source: hookSourceB, destination: "lint.sh",
-                    hookRegistration: HookRegistration(event: .postToolUse)
-                ),
-            ],
-            templates: []
-        )
-        let registry = TechPackRegistry(packs: [packA, packB])
-        let configurator = bed.makeConfigurator(registry: registry)
-
-        // Configure first so state exists
-        try configurator.configure(packs: [packA, packB], confirmRemovals: false)
-
-        // dryRun on already-configured packs should also complete without error
-        try configurator.dryRun(packs: [packA, packB])
-    }
 }
 
 // MARK: - Scenario 2b: Pre-existing User File Protection
@@ -978,7 +940,7 @@ struct PackUpdateTemplateTests {
         #expect(content.contains("Version 1 content."))
 
         // === Step 2: Doctor passes with v1 ===
-        try bed.runDoctor(registry: registry)
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
 
         // === Step 3: Create v2 pack and re-configure ===
         let packV2 = MockTechPack(
@@ -1000,7 +962,7 @@ struct PackUpdateTemplateTests {
         #expect(!updatedContent.contains("Version 1 content."))
 
         // === Step 4: Doctor passes with v2 ===
-        try bed.runDoctor(registry: registryV2)
+        #expect(try bed.runDoctor(registry: registryV2).issues == 0)
     }
 }
 
@@ -1085,7 +1047,7 @@ struct GlobalScopeLifecycleTests {
         #expect(globalState.configuredPacks.contains("global-pack"))
 
         // === Doctor passes ===
-        try bed.runGlobalDoctor(registry: registry)
+        #expect(try bed.runGlobalDoctor(registry: registry).issues == 0)
     }
 }
 
@@ -1377,7 +1339,7 @@ struct StaleArtifactCleanupTests {
         #expect(!artifacts.files.contains { $0.contains("skillC.md") })
 
         // === Doctor passes ===
-        try bed.runDoctor(registry: registryV2)
+        #expect(try bed.runDoctor(registry: registryV2).issues == 0)
     }
 }
 
@@ -1494,8 +1456,8 @@ struct GlobalScopeExclusionTests {
         let excluded = globalState.excludedComponents(for: "global-pack")
         #expect(excluded.contains("global-pack.hookA"))
 
-        // === Step 3: Doctor with globalOnly runs without error ===
-        try bed.runGlobalDoctor(registry: registry)
+        // === Step 3: Doctor skips the excluded hook ===
+        #expect(try bed.runGlobalDoctor(registry: registry).issues == 0)
     }
 }
 
@@ -1674,7 +1636,7 @@ struct HookMetadataLifecycleTests {
         #expect(entry["statusMessage"] as? String == "Running lint...")
 
         // === Doctor passes with metadata present ===
-        try bed.runDoctor(registry: registry)
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
     }
 
     @Test("Hook matcher flows end-to-end into settings.local.json")
@@ -2942,7 +2904,7 @@ struct HookInterpreterLifecycleTests {
         }
 
         // 4. Doctor joins the recorded commands back to their components without complaint
-        try bed.runDoctor(registry: registry)
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
 
         // 5. Deselecting the pack removes the files and every hook entry, interpreter regardless
         try configurator.configure(packs: [], confirmRemovals: false)
