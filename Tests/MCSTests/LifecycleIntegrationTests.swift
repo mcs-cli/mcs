@@ -21,10 +21,13 @@ private struct LifecycleTestBed {
         try? FileManager.default.removeItem(at: home)
     }
 
-    func makeConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
+    func makeConfigurator(
+        registry: TechPackRegistry = TechPackRegistry(),
+        warningCounter: WarningCounter? = nil
+    ) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
@@ -4109,11 +4112,16 @@ struct DroppedDirectoryFileTests {
         case project, global
     }
 
-    private func configure(_ bed: LifecycleTestBed, scope: Scope, pack: MockTechPack) throws {
+    private func configure(
+        _ bed: LifecycleTestBed,
+        scope: Scope,
+        pack: MockTechPack,
+        warningCounter: WarningCounter? = nil
+    ) throws {
         let registry = TechPackRegistry(packs: [pack])
         let configurator = switch scope {
-        case .project: bed.makeConfigurator(registry: registry)
-        case .global: bed.makeGlobalSyncConfigurator(registry: registry)
+        case .project: bed.makeConfigurator(registry: registry, warningCounter: warningCounter)
+        case .global: bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: warningCounter)
         }
         try configurator.configure(packs: [pack], confirmRemovals: false)
     }
@@ -4187,6 +4195,29 @@ struct DroppedDirectoryFileTests {
             trackedKey(bed, scope: scope, "SKILL.md"),
             trackedKey(bed, scope: scope, "new.md"),
         ])
+    }
+
+    @Test("A dropped file the user already deleted is untracked without warnings", arguments: Scope.allCases)
+    private func droppedFileAlreadyAbsent(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        try write("old", to: source.appendingPathComponent("old.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        let fm = FileManager.default
+        try fm.removeItem(at: source.appendingPathComponent("old.md"))
+        try fm.removeItem(at: installedSkill(bed, scope: scope).appendingPathComponent("old.md"))
+        let counter = WarningCounter()
+        try configure(bed, scope: scope, pack: pack, warningCounter: counter)
+
+        let oldKey = trackedKey(bed, scope: scope, "old.md")
+        #expect(try record(bed, scope: scope).fileHashes[oldKey] == nil)
+        #expect(try !record(bed, scope: scope).files.contains(oldKey))
+        #expect(counter.count == 0)
     }
 
     @Test("A file the user adds inside an installed skill survives re-sync untracked", arguments: Scope.allCases)

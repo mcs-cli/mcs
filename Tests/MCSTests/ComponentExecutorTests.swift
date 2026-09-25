@@ -13,65 +13,6 @@ struct ComponentExecutorTests {
         )
     }
 
-    // MARK: - removeProjectFile path containment
-
-    @Test("Removes file within project directory")
-    func removesFileInsideProject() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("test.txt")
-        try "content".write(to: file, atomically: true, encoding: .utf8)
-        #expect(FileManager.default.fileExists(atPath: file.path))
-
-        let exec = makeExecutor()
-        exec.removeProjectFile(relativePath: "test.txt", projectPath: tmpDir)
-
-        #expect(!FileManager.default.fileExists(atPath: file.path))
-    }
-
-    @Test("Blocks path traversal via ../")
-    func blocksPathTraversal() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        // Create a file outside the project directory
-        let outsideFile = tmpDir
-            .deletingLastPathComponent()
-            .appendingPathComponent("mcs-traversal-target-\(UUID().uuidString).txt")
-        try "sensitive".write(to: outsideFile, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: outsideFile) }
-
-        let exec = makeExecutor()
-        exec.removeProjectFile(
-            relativePath: "../\(outsideFile.lastPathComponent)",
-            projectPath: tmpDir
-        )
-
-        // File outside project must NOT be deleted
-        #expect(FileManager.default.fileExists(atPath: outsideFile.path))
-    }
-
-    @Test("Blocks deeply nested path traversal")
-    func blocksDeeplyNestedTraversal() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let outsideFile = tmpDir
-            .deletingLastPathComponent()
-            .appendingPathComponent("mcs-deep-target-\(UUID().uuidString).txt")
-        try "sensitive".write(to: outsideFile, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: outsideFile) }
-
-        let exec = makeExecutor()
-        exec.removeProjectFile(
-            relativePath: "subdir/../../\(outsideFile.lastPathComponent)",
-            projectPath: tmpDir
-        )
-
-        #expect(FileManager.default.fileExists(atPath: outsideFile.path))
-    }
-
     // MARK: - installProjectFile placeholder substitution
 
     @Test("installProjectFile substitutes PROJECT_DIR_NAME and REPO_NAME placeholders")

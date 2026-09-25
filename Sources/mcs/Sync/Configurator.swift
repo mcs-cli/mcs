@@ -1121,7 +1121,6 @@ struct Configurator {
         for path in staleFiles {
             if removeFileArtifactItem(relativePath: path) {
                 currentArtifacts.fileHashes.removeValue(forKey: path)
-                output.dimmed("  Removed stale file: \(path)")
             } else {
                 currentArtifacts.files.append(path)
                 if let hash = previous.fileHashes[path] {
@@ -1142,7 +1141,6 @@ struct Configurator {
             : []
         for path in staleHashedPaths.sorted() {
             if removeFileArtifactItem(relativePath: path) {
-                output.dimmed("  Removed stale file: \(path)")
                 pruneEmptyParents(of: path, within: currentArtifacts.files)
             } else {
                 currentArtifacts.fileHashes[path] = previous.fileHashes[path]

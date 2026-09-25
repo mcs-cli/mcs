@@ -331,27 +331,6 @@ struct ComponentExecutor {
         try fm.copyItem(at: source, to: destination)
     }
 
-    /// Remove a file from the project by its project-relative path.
-    /// Returns `true` if the file was removed, didn't exist, or escapes the project directory.
-    @discardableResult
-    func removeProjectFile(relativePath: String, projectPath: URL) -> Bool {
-        guard let fullPath = PathContainment.safePath(relativePath: relativePath, within: projectPath) else {
-            output.warn("Path '\(relativePath)' escapes project directory — clearing from tracking")
-            return true
-        }
-
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: fullPath.path) else { return true }
-
-        do {
-            try fm.removeItem(at: fullPath)
-            return true
-        } catch {
-            output.warn("Could not remove \(relativePath): \(error.localizedDescription)")
-            return false
-        }
-    }
-
     /// Remove an MCP server by name and scope.
     /// Returns `true` if removal succeeded.
     @discardableResult
