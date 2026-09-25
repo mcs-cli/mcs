@@ -529,7 +529,6 @@ struct PackGitignoreCheckTests {
     func passWhenAllPresent() throws {
         let home = try makeGlobalTmpDir(label: "pack-gitignore-pass")
         defer { try? FileManager.default.removeItem(at: home) }
-        try seedGlobalGitignore(home: home)
 
         let check = PackGitignoreCheck(
             entries: GitignoreManager.coreEntries, packName: "test-pack", environment: Environment(home: home)
@@ -544,7 +543,6 @@ struct PackGitignoreCheckTests {
     func failListsMissingEntries() throws {
         let home = try makeGlobalTmpDir(label: "pack-gitignore-fail")
         defer { try? FileManager.default.removeItem(at: home) }
-        try seedGlobalGitignore(home: home)
 
         let check = PackGitignoreCheck(
             entries: GitignoreManager.coreEntries + ["pack-only-entry"],

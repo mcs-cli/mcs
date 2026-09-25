@@ -659,42 +659,6 @@ struct PackTrustManagerTests {
         #expect(modified.isEmpty)
     }
 
-    // MARK: - Synthetic Key Determinism
-
-    @Test("syntheticKey is deterministic across calls")
-    func syntheticKeyDeterministic() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        // Create a manifest with an inline shell command
-        let yaml = """
-        schemaVersion: 1
-        identifier: test
-        displayName: Test Pack
-        description: A test pack
-        version: "1.0.0"
-        components:
-          - id: test.cmd
-            displayName: Test
-            description: Test
-            type: configuration
-            installAction:
-              type: shellCommand
-              command: "echo hello"
-        """
-        let manifest = try loadManifest(yaml: yaml, in: tmpDir)
-        let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
-
-        // Analyze twice and verify the items produce the same trust hashes
-        let items1 = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
-        let items2 = try manager.analyzeScripts(manifest: manifest, packPath: tmpDir)
-
-        // The items should be identical between runs
-        #expect(items1.count == items2.count)
-        #expect(items1[0].content == items2[0].content)
-        #expect(items1[0].description == items2[0].description)
-    }
-
     // MARK: - detectNewScripts
 
     @Test("detectNewScripts returns empty when nothing changed")

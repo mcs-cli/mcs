@@ -5,51 +5,45 @@ import Testing
 struct GitignoreManagerTests {
     // MARK: - removeEntry
 
+    private func makeManager(label: String, gitignore: String?) throws -> (GitignoreManager, URL, URL) {
+        let home = try makeGlobalTmpDir(label: label)
+        let manager = GitignoreManager(shell: ShellRunner(environment: Environment(home: home)))
+        let path = manager.resolveGlobalGitignorePath()
+        if let gitignore {
+            try gitignore.write(to: path, atomically: true, encoding: .utf8)
+        } else {
+            try FileManager.default.removeItem(at: path)
+        }
+        return (manager, path, home)
+    }
+
     @Test("Remove existing entry from gitignore")
     func removeExistingEntry() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-gitignore-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let (manager, path, home) = try makeManager(
+            label: "gitignore-remove", gitignore: ".claude\n*.local.*\n.mcs-project\n"
+        )
+        defer { try? FileManager.default.removeItem(at: home) }
 
-        let gitignorePath = tmpDir.appendingPathComponent("ignore")
-        let content = ".claude\n*.local.*\n.mcs-project\n"
-        try content.write(to: gitignorePath, atomically: true, encoding: .utf8)
-
-        let manager = GitignoreManagerWithFixedPath(path: gitignorePath)
-        let removed = try manager.removeEntry("*.local.*")
-        #expect(removed == true)
-
-        let updated = try String(contentsOf: gitignorePath, encoding: .utf8)
-        #expect(!updated.contains("*.local.*"))
-        #expect(updated.contains(".claude"))
-        #expect(updated.contains(".mcs-project"))
+        #expect(try manager.removeEntry("*.local.*"))
+        #expect(try String(contentsOf: path, encoding: .utf8) == ".claude\n.mcs-project\n")
     }
 
-    @Test("Remove entry that does not exist returns false")
+    @Test("Remove entry that does not exist returns false and leaves the file untouched")
     func removeNonexistentEntry() throws {
-        let tmpDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-gitignore-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let (manager, path, home) = try makeManager(label: "gitignore-remove-absent", gitignore: ".claude\n")
+        defer { try? FileManager.default.removeItem(at: home) }
 
-        let gitignorePath = tmpDir.appendingPathComponent("ignore")
-        try ".claude\n".write(to: gitignorePath, atomically: true, encoding: .utf8)
-
-        let manager = GitignoreManagerWithFixedPath(path: gitignorePath)
-        let removed = try manager.removeEntry("nonexistent")
-        #expect(removed == false)
+        #expect(try manager.removeEntry("nonexistent") == false)
+        #expect(try String(contentsOf: path, encoding: .utf8) == ".claude\n")
     }
 
-    @Test("Remove entry from nonexistent file returns false")
+    @Test("Remove entry from nonexistent file returns false without creating it")
     func removeFromMissingFile() throws {
-        let nonexistent = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-gitignore-missing-\(UUID().uuidString)")
-            .appendingPathComponent("ignore")
+        let (manager, path, home) = try makeManager(label: "gitignore-remove-missing", gitignore: nil)
+        defer { try? FileManager.default.removeItem(at: home) }
 
-        let manager = GitignoreManagerWithFixedPath(path: nonexistent)
-        let removed = try manager.removeEntry(".claude")
-        #expect(removed == false)
+        #expect(try manager.removeEntry(".claude") == false)
+        #expect(!FileManager.default.fileExists(atPath: path.path))
     }
 
     // MARK: - Sandbox containment
@@ -70,26 +64,5 @@ struct GitignoreManagerTests {
 
         #expect(resolved.hasPrefix(sandbox))
         #expect(!resolved.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path))
-    }
-}
-
-/// Test helper that bypasses git config resolution and operates on a fixed file path.
-/// Mirrors the `removeEntry` logic from `GitignoreManager` without needing a ShellRunner.
-private struct GitignoreManagerWithFixedPath {
-    let path: URL
-
-    @discardableResult
-    func removeEntry(_ entry: String) throws -> Bool {
-        guard FileManager.default.fileExists(atPath: path.path) else { return false }
-
-        let content = try String(contentsOf: path, encoding: .utf8)
-        let lines = content.components(separatedBy: "\n")
-        let filtered = lines.filter { $0 != entry }
-
-        guard filtered.count < lines.count else { return false }
-
-        let updated = filtered.joined(separator: "\n")
-        try updated.write(to: path, atomically: true, encoding: .utf8)
-        return true
     }
 }

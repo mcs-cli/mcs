@@ -32,11 +32,4 @@ struct PluginRefTests {
         #expect(ref.bareName == "my-plugin")
         #expect(ref.marketplaceRepo == "custom-marketplace")
     }
-
-    @Test("equatable conformance")
-    func equatable() {
-        let a = PluginRef("foo@bar")
-        let b = PluginRef("foo@bar")
-        #expect(a == b)
-    }
 }

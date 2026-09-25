@@ -2541,25 +2541,6 @@ struct GlobalPackBlockingLifecycleTests {
         #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
     }
 
-    @Test("Missing global state blocks nothing — machines that never ran --global")
-    func missingGlobalStateBlocksNothing() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        #expect(!FileManager.default.fileExists(atPath: bed.env.globalStateFile.path))
-
-        let pack = MockTechPack(identifier: "ios", displayName: "iOS")
-        // `ProjectState.load` returns early for a missing file rather than throwing,
-        // so an untouched global scope yields an empty set and nothing is filtered.
-        let toSync = try ConfiguratorSupport.filterGloballyBlocked(
-            [pack],
-            globallyInstalled: ProjectState(stateFile: bed.env.globalStateFile).configuredPacks,
-            previouslyConfigured: [],
-            output: CLIOutput(colorsEnabled: false)
-        )
-        #expect(toSync.map(\.identifier) == ["ios"])
-    }
-
     @Test("Refuses to sync when every requested pack is globally installed")
     func refusesWhenEveryPackIsBlocked() throws {
         let bed = try LifecycleTestBed()

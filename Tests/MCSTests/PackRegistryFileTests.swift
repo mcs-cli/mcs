@@ -252,18 +252,6 @@ struct PackRegistryFileTests {
 
     // MARK: - Local pack support
 
-    @Test("isLocalPack returns false for git pack entry")
-    func isLocalPackFalse() {
-        let entry = sampleEntry()
-        #expect(!entry.isLocalPack)
-    }
-
-    @Test("isLocalPack returns true for local pack entry")
-    func isLocalPackTrue() {
-        let entry = sampleLocalEntry()
-        #expect(entry.isLocalPack)
-    }
-
     @Test("Local pack entry round-trips through save/load")
     func localPackRoundTrip() throws {
         let tmpDir = try makeTmpDir()

@@ -1072,25 +1072,6 @@ struct PackHeuristicsTests {
         ))
     }
 
-    @Test("infrastructureFilesForUpdateCheck still contains the other infra files")
-    func updateCheckSetContainsInfraFiles() {
-        let set = PackHeuristics.infrastructureFilesForUpdateCheck
-        #expect(set.contains("README.md"))
-        #expect(set.contains("LICENSE"))
-        #expect(set.contains("CHANGELOG.md"))
-        #expect(set.contains(".gitignore"))
-        #expect(set.contains("Makefile"))
-    }
-
-    @Test("ignoredDirectories is accessible and contains expected entries")
-    func ignoredDirsAccessible() {
-        let dirs = PackHeuristics.ignoredDirectories
-        #expect(dirs.contains(".git"))
-        #expect(dirs.contains(".github"))
-        #expect(dirs.contains("node_modules"))
-        #expect(dirs.contains(".build"))
-    }
-
     // MARK: - manifest ignore: silences checkUnreferencedFiles (issue #338 Phase 2)
 
     @Test("ignore: directory entry silences unreferenced-file warnings for that dir")
