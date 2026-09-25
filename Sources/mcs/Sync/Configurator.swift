@@ -490,7 +490,6 @@ struct Configurator {
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
 
-        // Remove files via strategy (project vs global have different removal logic)
         var removedFiles: Set<String> = []
         for path in artifacts.files
             where removeFileArtifactItem(relativePath: path) {
@@ -725,8 +724,6 @@ struct Configurator {
                     if removeFileArtifactItem(relativePath: relativePath) {
                         artifacts.files.removeAll { $0 == relativePath }
                         artifacts.fileHashes.removeValue(forKey: relativePath)
-                    } else {
-                        output.warn("  Could not remove '\(relativePath)' — will retry on next sync")
                     }
                     if let hookCmd = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                         artifacts.hookCommands.removeAll { $0 == hookCmd }
@@ -1126,7 +1123,6 @@ struct Configurator {
                 if let hash = previous.fileHashes[path] {
                     currentArtifacts.fileHashes[path] = hash
                 }
-                output.warn("  Could not remove stale file '\(path)' — will retry on next sync")
             }
         }
 
@@ -1144,7 +1140,6 @@ struct Configurator {
                 pruneEmptyParents(of: path, within: currentArtifacts.files)
             } else {
                 currentArtifacts.fileHashes[path] = previous.fileHashes[path]
-                output.warn("  Could not remove stale file '\(path)' — will retry on next sync")
             }
         }
 
@@ -1303,8 +1298,6 @@ struct Configurator {
         exec.removeMCPServer(name: server.name, scope: server.scope)
     }
 
-    /// Remove a single file artifact via strategy.
-    /// - Returns: `true` if the file was successfully removed or already absent.
     private func removeFileArtifactItem(relativePath: String) -> Bool {
         strategy.removeFileArtifact(relativePath: relativePath, output: output)
     }

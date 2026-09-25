@@ -353,7 +353,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         )
     }
 
-    // MARK: - File Removal
+    // MARK: - File Artifacts
 
     var fileArtifactBase: URL {
         environment.claudeDirectory

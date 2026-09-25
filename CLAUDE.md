@@ -144,10 +144,10 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `Configurator.swift` — unified multi-pack convergence engine parameterized by `SyncStrategy` (artifact tracking, settings composition, CLAUDE file writing, gitignore). `unconfigurePack()` handles removal for both `mcs sync` (deselection) and `mcs pack remove` (federated across all affected scopes)
 - `ConfiguratorSupport.swift` — shared utilities for `Configurator` and `SyncStrategy` implementations (executor factory, gitignore setup, dry-run summary, settings composition helpers)
 - `SyncScope.swift` — pure data struct capturing path-level differences between project and global scopes
-- `SyncStrategy.swift` — protocol isolating scope-specific behavior (artifact installation, settings/CLAUDE composition, file removal)
+- `SyncStrategy.swift` — protocol isolating scope-specific behavior (artifact installation, settings/CLAUDE composition, file artifact base); `removeFileArtifact` is a shared default that logs each actual deletion
 - `ProjectSyncStrategy.swift` — project-scope strategy (settings.local.json, CLAUDE.local.md, repo name resolution)
 - `GlobalSyncStrategy.swift` — global-scope strategy (settings.json preservation, brew/plugin ownership, MCP scope override to "user")
-- `ComponentExecutor.swift` — dispatches install actions (brew, MCP servers, plugins, gitignore, project-scoped file copy/removal)
+- `ComponentExecutor.swift` — dispatches install actions (brew, MCP servers, plugins, gitignore, project-scoped file copy)
 - `CrossPackPromptResolver.swift` — deduplicates shared prompt keys across multiple packs (groups by key, executes once for shared `input`/`select` prompts)
 - `DestinationCollisionResolver.swift` — auto-namespaces `copyPackFile` destinations when multiple packs target the same `(destination, fileType)` pair
 - `ScopeReapplier.swift` — converges one scope onto its already-configured pack set (whole-scope skip when any configured pack cannot be produced); shared by `mcs update` and `mcs doctor --fix`

@@ -15,7 +15,7 @@ struct SyncStrategyTests {
         return file
     }
 
-    // MARK: - removeFileArtifact path containment
+    // MARK: - removeFileArtifact
 
     @Test("Removes file within the artifact base")
     func removesFileInsideBase() throws {
@@ -39,11 +39,14 @@ struct SyncStrategyTests {
         let outsideFile = try makeOutsideFile(near: tmpDir)
         defer { try? FileManager.default.removeItem(at: outsideFile) }
 
-        _ = makeStrategy(projectPath: tmpDir).removeFileArtifact(
+        let counter = WarningCounter()
+        let removed = makeStrategy(projectPath: tmpDir).removeFileArtifact(
             relativePath: prefix + outsideFile.lastPathComponent,
-            output: CLIOutput(colorsEnabled: false)
+            output: CLIOutput(colorsEnabled: false, warningCounter: counter)
         )
 
+        #expect(removed)
+        #expect(counter.count == 1)
         #expect(FileManager.default.fileExists(atPath: outsideFile.path))
     }
 }

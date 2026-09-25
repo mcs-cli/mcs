@@ -212,7 +212,7 @@ extension SyncStrategy {
             relativePath: relativePath,
             within: fileArtifactBase
         ) else {
-            output.warn("Path '\(relativePath)' escapes \(fileArtifactBase.path) — clearing from tracking")
+            output.warn("  Path '\(relativePath)' escapes \(fileArtifactBase.path) — clearing from tracking")
             return true
         }
 

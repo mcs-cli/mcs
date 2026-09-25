@@ -247,7 +247,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         )
     }
 
-    // MARK: - File Removal
+    // MARK: - File Artifacts
 
     var fileArtifactBase: URL {
         projectPath
