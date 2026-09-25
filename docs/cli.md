@@ -251,6 +251,8 @@ Doctor resolves packs from: explicit `--pack` flag → project `.mcs-project` st
 
 **How `--fix` repairs.** When an install check fails (a missing MCP server, brew package, plugin, file, hook entry, settings key or gitignore entry), `--fix` re-syncs that scope onto the packs already configured there — the same re-apply `mcs update` runs, so no pack is ever added or removed. The prompt lists each scope to re-sync; re-syncing resets managed files you edited in that scope. Afterwards the failed checks run again and are reported as fixed or still failing. Checks a pack author wrote, and a missing hook interpreter, are never repaired by a re-sync — doctor prints their hint instead. Drift warnings (edited files or settings) are left alone. Without `--fix`, doctor ends with a line saying how many issues `--fix` could repair.
 
+**Exit status:** doctor exits 1 when a check is still failing — with `--fix`, a failure counts unless its fix was reported as applied, so a declined prompt or a hint-only failure still exits 1 — or when a pack named in `--pack` is not registered or failed to load. Warnings, checks skipped during diagnosis, and components excluded via `--customize` never change the exit status.
+
 ## `mcs cleanup`
 
 Find and delete timestamped backup files created during sync.

@@ -5,6 +5,12 @@ struct DoctorSummary {
     let passed: Int
     let warnings: Int
     let issues: Int
+    var remainingIssues: Int
+    let hasUnloadedFilteredPack: Bool
+
+    var isHealthy: Bool {
+        remainingIssues == 0 && !hasUnloadedFilteredPack
+    }
 }
 
 /// Orchestrates all doctor checks grouped by section, with optional fix mode.
@@ -215,9 +221,14 @@ struct DoctorRunner {
         // scope line above lists the ID either way, so a pack that failed to load would otherwise
         // be skipped in silence. The cause is not determined here, so the message names both.
         let availableIDs = registry.availablePackIDs
+        var hasUnloadedFilteredPack = false
         for scope in scopes {
             for id in scope.packIDs.sorted() where !availableIDs.contains(id) {
                 output.warn("Pack \"\(id)\" is not registered or failed to load \u{2014} no checks will be run for it")
+                // A pack the caller named explicitly would otherwise read as healthy; inferred ones only warn.
+                if packFilter != nil {
+                    hasUnloadedFilteredPack = true
+                }
             }
         }
 
@@ -307,11 +318,13 @@ struct DoctorRunner {
         }
 
         // Summary (before fixes, so the user sees the full picture first).
-        // Capture once: fix-phase warnings (below) must not alter the reported total.
-        let summary = DoctorSummary(
+        // Fix-phase warnings (below) must not alter the reported total; only `remainingIssues` updates after fixes.
+        var summary = DoctorSummary(
             passed: passCount,
             warnings: warningCounter.count,
-            issues: failCount
+            issues: failCount,
+            remainingIssues: failCount,
+            hasUnloadedFilteredPack: hasUnloadedFilteredPack
         )
         output.header("Summary")
         output.doctorSummary(
@@ -324,22 +337,27 @@ struct DoctorRunner {
         // Phase 2: Confirm and execute pending fixes (after summary)
         if fixMode {
             executePendingFixes()
+            summary.remainingIssues = failCount - fixedCount
             if fixedCount > 0 {
                 output.plain("")
                 output.success("Applied \(fixedCount) fix\(fixedCount == 1 ? "" : "es").")
             }
         } else {
-            let ownFixCount = pendingFixes.count { $0.check.fixCommandPreview != nil }
-            let resyncCount = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
-                .planned.reduce(0) { $0 + $1.checks.count }
-            let repairable = ownFixCount + resyncCount
-            if repairable > 0 {
-                output.plain("")
-                output.info("Run 'mcs doctor --fix' to repair \(repairable) issue\(repairable == 1 ? "" : "s").")
-            }
+            printRepairHint()
         }
 
         return summary
+    }
+
+    private func printRepairHint() {
+        let ownFixCount = pendingFixes.count { $0.check.fixCommandPreview != nil }
+        let resyncCount = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
+            .planned.reduce(0) { $0 + $1.checks.count }
+        let repairable = ownFixCount + resyncCount
+        if repairable > 0 {
+            output.plain("")
+            output.info("Run 'mcs doctor --fix' to repair \(repairable) issue\(repairable == 1 ? "" : "s").")
+        }
     }
 
     // MARK: - Scope resolution
