@@ -30,23 +30,6 @@ struct TechPackRegistry {
         packs.first { $0.identifier == identifier }
     }
 
-    /// Get all components from all packs.
-    var allPackComponents: [ComponentDefinition] {
-        availablePacks.flatMap(\.components)
-    }
-
-    /// Get supplementary doctor checks only for installed packs.
-    /// These are pack-level checks that cannot be auto-derived from components.
-    func supplementaryDoctorChecks(installedPacks ids: Set<String>, projectRoot: URL?) -> [any DoctorCheck] {
-        availablePacks.filter { ids.contains($0.identifier) }
-            .flatMap { $0.supplementaryDoctorChecks(projectRoot: projectRoot) }
-    }
-
-    /// Get template contributions for a specific pack.
-    func templateContributions(for packIdentifier: String) throws -> [TemplateContribution] {
-        try pack(for: packIdentifier)?.templates ?? []
-    }
-
     /// Create a registry from external packs loaded from disk.
     /// This is the primary entry point for command-level code.
     static func loadWithExternalPacks(

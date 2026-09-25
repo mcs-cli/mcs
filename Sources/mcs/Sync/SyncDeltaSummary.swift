@@ -17,10 +17,6 @@ struct SyncDeltaSummary {
         !removals.isEmpty
     }
 
-    var hasAnyChange: Bool {
-        !additions.isEmpty || !removals.isEmpty
-    }
-
     /// True when the delta is "remove every previously configured pack with nothing to keep or add."
     /// Callers use this to render a stronger warning before confirming a full wipe.
     var isFullWipe: Bool {

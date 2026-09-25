@@ -101,35 +101,6 @@ struct ComponentDefinition: Identifiable {
         self.installAction = installAction
         self.supplementaryChecks = supplementaryChecks
     }
-
-    #if DEBUG
-    /// Convenience initializer accepting a static array of checks (used in tests).
-    init(
-        id: String,
-        displayName: String,
-        description: String,
-        type: ComponentType,
-        packIdentifier: String?,
-        dependencies: [String],
-        isRequired: Bool,
-        hookRegistration: HookRegistration? = nil,
-        installAction: ComponentInstallAction,
-        supplementaryChecks checks: [any DoctorCheck]
-    ) {
-        self.init(
-            id: id,
-            displayName: displayName,
-            description: description,
-            type: type,
-            packIdentifier: packIdentifier,
-            dependencies: dependencies,
-            isRequired: isRequired,
-            hookRegistration: hookRegistration,
-            installAction: installAction,
-            supplementaryChecks: { _, _ in checks }
-        )
-    }
-    #endif
 }
 
 extension ComponentDefinition {

@@ -194,10 +194,6 @@ The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack 
 
 The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it. The additive-default + explicit-`--prune` shape matches the convention Homebrew Bundle, Kubernetes (`kubectl apply --prune`), and npm (`install` vs `prune`) settled on for declarative-file + external-state workflows.
 
-## Dependency Resolution
-
-`DependencyResolver` performs a topological sort of selected components plus their transitive dependencies. It detects cycles and auto-adds dependencies that weren't explicitly selected (marking them as "(auto-resolved)" in the summary).
-
 ## Component Model
 
 Each installable unit is a `ComponentDefinition` with:

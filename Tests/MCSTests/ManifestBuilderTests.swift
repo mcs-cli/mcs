@@ -117,20 +117,19 @@ struct ManifestBuilderTests {
             )
         )
 
-        // 1. Verify typed manifest metadata
-        let manifest = result.manifest
-        #expect(manifest.schemaVersion == 1)
-        #expect(manifest.identifier == "test-pack")
-        #expect(manifest.displayName == "Test Pack")
-        #expect(manifest.author == "Test Author")
-
-        // 2. Write YAML to file, parse back, normalize, validate
+        // 1. Write YAML to file, parse back, normalize, validate
         let yamlFile = tmpDir.appendingPathComponent("techpack.yaml")
         try result.manifestYAML.write(to: yamlFile, atomically: true, encoding: .utf8)
 
         let loaded = try ExternalPackManifest.load(from: yamlFile)
         let normalized = try loaded.normalized()
         try normalized.validate()
+
+        // 2. Verify metadata
+        #expect(normalized.schemaVersion == 1)
+        #expect(normalized.identifier == "test-pack")
+        #expect(normalized.displayName == "Test Pack")
+        #expect(normalized.author == "Test Author")
 
         // 3. Verify component counts — 2 MCP + 1 hook + 1 skill + 1 cmd + 1 agent + 1 plugin + 1 settings + 1 gitignore = 9
         let components = try #require(normalized.components)
@@ -299,13 +298,6 @@ struct ManifestBuilderTests {
             )
         )
 
-        // Typed manifest should have no components
-        #expect(result.manifest.components == nil)
-        #expect(result.manifest.templates == nil)
-        #expect(result.manifest.prompts == nil)
-        #expect(result.manifest.author == nil)
-
-        // YAML round-trip should still parse and validate
         let yamlFile = tmpDir.appendingPathComponent("techpack.yaml")
         try result.manifestYAML.write(to: yamlFile, atomically: true, encoding: .utf8)
 
@@ -314,70 +306,10 @@ struct ManifestBuilderTests {
         try normalized.validate()
 
         #expect(normalized.identifier == "empty-pack")
-    }
-
-    // MARK: - Typed manifest direct assertion
-
-    @Test("BuildResult exposes typed manifest matching input")
-    func typedManifestDirectAssertion() throws {
-        var config = ConfigurationDiscovery.DiscoveredConfiguration()
-        config.plugins = ["my-plugin@org"]
-        config.mcpServers = [
-            ConfigurationDiscovery.DiscoveredMCPServer(
-                name: "test-server", command: "uvx",
-                args: ["test-mcp"],
-                env: ["TOKEN": "secret"],
-                url: nil, scope: "local"
-            ),
-        ]
-
-        let metadata = ManifestBuilder.Metadata(
-            identifier: "direct-test",
-            displayName: "Direct Test",
-            description: "Test typed manifest",
-            author: "Tester"
-        )
-
-        let result = ManifestBuilder().build(
-            from: config, metadata: metadata,
-            options: ManifestBuilder.BuildOptions(
-                selectedMCPServers: Set(config.mcpServers.map(\.name)),
-                selectedHookFiles: [], selectedSkillFiles: [],
-                selectedCommandFiles: [], selectedAgentFiles: [],
-                selectedPlugins: Set(config.plugins),
-                selectedSections: [],
-                includeUserContent: false, includeGitignore: false, includeSettings: false
-            )
-        )
-
-        let manifest = result.manifest
-        #expect(manifest.identifier == "direct-test")
-        #expect(manifest.author == "Tester")
-
-        let components = try #require(manifest.components)
-        #expect(components.count == 2) // 1 MCP + 1 plugin
-
-        // MCP server should have TOKEN replaced with placeholder
-        let mcpComp = try #require(components.first { $0.type == .mcpServer })
-        guard case let .mcpServer(mcpConfig) = mcpComp.installAction else {
-            Issue.record("Expected mcpServer action")
-            return
-        }
-        #expect(mcpConfig.command == "uvx")
-        #expect(mcpConfig.env?["TOKEN"] == "__TOKEN__")
-
-        // Plugin
-        let pluginComp = try #require(components.first { $0.type == .plugin })
-        guard case let .plugin(name) = pluginComp.installAction else {
-            Issue.record("Expected plugin action")
-            return
-        }
-        #expect(name == "my-plugin@org")
-
-        // Prompt auto-generated for TOKEN
-        let prompts = try #require(manifest.prompts)
-        #expect(prompts.count == 1)
-        #expect(prompts[0].key == "TOKEN")
+        #expect(normalized.components == nil)
+        #expect(normalized.templates == nil)
+        #expect(normalized.prompts == nil)
+        #expect(normalized.author == nil)
     }
 
     // MARK: - Duplicate prompt key deduplication (#183)
@@ -418,14 +350,19 @@ struct ManifestBuilderTests {
             )
         )
 
+        let yamlFile = tmpDir.appendingPathComponent("techpack.yaml")
+        try result.manifestYAML.write(to: yamlFile, atomically: true, encoding: .utf8)
+        let normalized = try ExternalPackManifest.load(from: yamlFile).normalized()
+        try normalized.validate()
+
         // Two unique prompt keys: API_KEY and API_KEY_2
-        let prompts = try #require(result.manifest.prompts)
+        let prompts = try #require(normalized.prompts)
         #expect(prompts.count == 2)
         let keys = Set(prompts.map(\.key))
         #expect(keys == ["API_KEY", "API_KEY_2"])
 
         // Each server's env uses the correct placeholder
-        let components = try #require(result.manifest.components)
+        let components = try #require(normalized.components)
         let figmaComp = try #require(components.first { $0.id.contains("figma") })
         guard case let .mcpServer(figmaConfig) = figmaComp.installAction else {
             Issue.record("Expected mcpServer install action for figma")
@@ -439,13 +376,6 @@ struct ManifestBuilderTests {
             return
         }
         #expect(atlassianConfig.env?["API_KEY"] == "__API_KEY_2__")
-
-        // Round-trip: YAML → load → validate passes
-        let yamlFile = tmpDir.appendingPathComponent("techpack.yaml")
-        try result.manifestYAML.write(to: yamlFile, atomically: true, encoding: .utf8)
-        let loaded = try ExternalPackManifest.load(from: yamlFile)
-        let normalized = try loaded.normalized()
-        try normalized.validate()
     }
 
     // MARK: - YAML quoting edge cases

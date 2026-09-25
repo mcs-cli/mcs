@@ -49,7 +49,6 @@ struct SyncDeltaSummaryTests {
         #expect(summary.additions.isEmpty)
         #expect(summary.removals.isEmpty)
         #expect(summary.keeps == ["ios", "swift"])
-        #expect(summary.hasAnyChange == false)
         #expect(summary.hasRemovals == false)
     }
 

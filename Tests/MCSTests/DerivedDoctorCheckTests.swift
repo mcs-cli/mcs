@@ -21,7 +21,7 @@ struct DerivedDoctorCheckTests {
             dependencies: [],
             isRequired: isRequired,
             installAction: installAction,
-            supplementaryChecks: supplementaryChecks
+            supplementaryChecks: { _, _ in supplementaryChecks }
         )
     }
 

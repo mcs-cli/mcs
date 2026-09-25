@@ -357,7 +357,7 @@ components:
       args: ["-y", "my-server@latest"]
 ```
 
-Dependencies are installed in order (topological sort). Circular dependencies are detected and rejected.
+Each intra-pack dependency must name a component in the same pack, and excluding a component also drops the templates that depend on it. Dependencies do not reorder installation yet: brew packages and plugins install first, then the remaining components in declaration order, so declare a dependency before the components that need it ([#419](https://github.com/mcs-cli/mcs/issues/419)).
 
 For cross-pack dependencies, use the full `pack.component` form:
 

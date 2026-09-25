@@ -14,19 +14,12 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
         let scope: String
     }
 
-    struct PluginCall: Equatable {
-        let name: String
-    }
-
     var isAvailable: Bool {
         true
     }
 
     var mcpAddCalls: [MCPAddCall] = []
     var mcpRemoveCalls: [MCPRemoveCall] = []
-    var pluginMarketplaceAddCalls: [String] = []
-    var pluginInstallCalls: [PluginCall] = []
-    var pluginRemoveCalls: [PluginCall] = []
 
     /// Result to return from all operations. Defaults to success.
     var result = ShellResult(exitCode: 0, stdout: "", stderr: "")
@@ -44,21 +37,18 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     }
 
     @discardableResult
-    func pluginMarketplaceAdd(repo: String) -> ShellResult {
-        pluginMarketplaceAddCalls.append(repo)
-        return result
+    func pluginMarketplaceAdd(repo _: String) -> ShellResult {
+        result
     }
 
     @discardableResult
-    func pluginInstall(ref: PluginRef) -> ShellResult {
-        pluginInstallCalls.append(PluginCall(name: ref.bareName))
-        return result
+    func pluginInstall(ref _: PluginRef) -> ShellResult {
+        result
     }
 
     @discardableResult
-    func pluginRemove(ref: PluginRef) -> ShellResult {
-        pluginRemoveCalls.append(PluginCall(name: ref.bareName))
-        return result
+    func pluginRemove(ref _: PluginRef) -> ShellResult {
+        result
     }
 }
 
@@ -72,13 +62,6 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
         let interactive: Bool
     }
 
-    struct ShellCall: Equatable {
-        let command: String
-        let workingDirectory: String?
-        let additionalEnvironment: [String: String]
-        let interactive: Bool
-    }
-
     let environment: Environment
 
     /// Mock is `@unchecked Sendable` and may be called concurrently from
@@ -86,7 +69,6 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
     private let lock = NSLock()
 
     var runCalls: [RunCall] = []
-    var shellCalls: [ShellCall] = []
     var commandExistsCalls: [String] = []
 
     /// Default result when neither queue below produces a value.
@@ -101,9 +83,6 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
     /// where `concurrentPerform` interleaves calls — every matching call returns the same
     /// canned response regardless of order.
     var runResultsByFirstArg: [String: ShellResult] = [:]
-
-    /// Positional queue for `shell()`. Same precedence model as `runResults`.
-    var shellResults: [ShellResult] = []
 
     /// Controls what `commandExists()` returns. Defaults to `true`.
     var commandExistsResult = true
@@ -147,23 +126,12 @@ final class MockShellRunner: ShellRunning, @unchecked Sendable {
 
     @discardableResult
     func shell(
-        _ command: String,
-        workingDirectory: String?,
-        additionalEnvironment: [String: String],
-        interactive: Bool
+        _: String,
+        workingDirectory _: String?,
+        additionalEnvironment _: [String: String],
+        interactive _: Bool
     ) -> ShellResult {
-        lock.lock()
-        defer { lock.unlock() }
-        shellCalls.append(ShellCall(
-            command: command,
-            workingDirectory: workingDirectory,
-            additionalEnvironment: additionalEnvironment,
-            interactive: interactive
-        ))
-        if !shellResults.isEmpty {
-            return shellResults.removeFirst()
-        }
-        return result
+        result
     }
 }
 
