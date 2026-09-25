@@ -859,10 +859,12 @@ struct Configurator {
             allValues.merge(sharedValues) { existing, _ in existing }
         }
 
-        let context = strategy.makeConfigContext(
-            output: output, resolvedValues: allValues, priorValues: priorValues
-        )
+        // Rebuilt per pack so a key an earlier pack produced is never asked or scanned again,
+        // making "first declaring pack wins" literal rather than an artefact of the merge.
         for pack in packs {
+            let context = strategy.makeConfigContext(
+                output: output, resolvedValues: allValues, priorValues: priorValues
+            )
             let packValues = try pack.templateValues(context: context)
             allValues.merge(packValues) { existing, _ in existing }
         }

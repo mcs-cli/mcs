@@ -2384,6 +2384,24 @@ struct PromptValueReuseLifecycleTests {
         #expect(try bed.projectState().resolvedValues?["BRANCH_PREFIX"] == "b-default")
     }
 
+    @Test("A key an earlier pack computes by script is not asked again by a later pack")
+    func scriptFirstKeyIsNotReAsked() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let script = PromptDefinition(
+            key: "VERSION", type: .script, label: nil, defaultValue: nil,
+            options: nil, detectPatterns: nil, scriptCommand: "echo 1.2.3"
+        )
+        let computing = bed.adapterPack(identifier: "pack-a", displayName: "Pack A", prompts: [script])
+        let asking = bed.adapterPack(identifier: "pack-b", displayName: "Pack B", prompts: [inputPrompt("VERSION")])
+        let packs: [any TechPack] = [computing, asking]
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["VERSION"] == "1.2.3")
+    }
+
     @Test("--customize forces re-ask even when priors are available")
     func customizeForceReAsk() throws {
         let bed = try LifecycleTestBed()
