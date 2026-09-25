@@ -14,26 +14,8 @@ struct PackWriterTests {
         return dir
     }
 
-    private func minimalManifest() -> ExternalPackManifest {
-        ExternalPackManifest(
-            schemaVersion: 1,
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            description: "A test pack",
-            author: nil,
-            minMCSVersion: nil,
-            components: nil,
-            templates: nil,
-            prompts: nil,
-            configureProject: nil,
-            supplementaryDoctorChecks: nil,
-            ignore: nil
-        )
-    }
-
     private func minimalResult() -> ManifestBuilder.BuildResult {
         ManifestBuilder.BuildResult(
-            manifest: minimalManifest(),
             manifestYAML: "schemaVersion: 1\nidentifier: test-pack\n",
             filesToCopy: [],
             settingsToWrite: nil,
@@ -58,7 +40,6 @@ struct PackWriterTests {
         )
 
         let result = ManifestBuilder.BuildResult(
-            manifest: minimalManifest(),
             manifestYAML: "schemaVersion: 1\n",
             filesToCopy: [
                 ManifestBuilder.FileCopy(
@@ -99,7 +80,6 @@ struct PackWriterTests {
         // Reference a non-existent source file to trigger a copy failure
         let bogusSource = tmpDir.appendingPathComponent("does-not-exist.sh")
         let result = ManifestBuilder.BuildResult(
-            manifest: minimalManifest(),
             manifestYAML: "schemaVersion: 1\n",
             filesToCopy: [
                 ManifestBuilder.FileCopy(

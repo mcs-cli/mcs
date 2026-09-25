@@ -15,8 +15,6 @@ struct ManifestBuilder {
     }
 
     struct BuildResult {
-        /// The typed manifest model — use for programmatic assertions and schema coupling.
-        let manifest: ExternalPackManifest
         /// The fully rendered techpack.yaml content as a string.
         let manifestYAML: String
         let filesToCopy: [FileCopy]
@@ -85,7 +83,6 @@ struct ManifestBuilder {
         let yaml = renderYAML(manifest: output.manifest, brewHints: output.brewHints)
 
         return BuildResult(
-            manifest: output.manifest,
             manifestYAML: yaml,
             filesToCopy: output.filesToCopy,
             settingsToWrite: output.settingsToWrite,

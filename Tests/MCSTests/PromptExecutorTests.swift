@@ -23,12 +23,6 @@ struct PromptExecutorTests {
         )
     }
 
-    /// Write a script file to disk with executable permission.
-    private func writeScript(_ content: String, at url: URL) throws {
-        try content.write(to: url, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
-    }
-
     // MARK: - File Detection (static method)
 
     @Test("detectFiles finds files matching extension pattern")
@@ -172,7 +166,6 @@ struct PromptExecutorTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project
             type: fileDetect
@@ -197,7 +190,6 @@ struct PromptExecutorTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project
             type: fileDetect

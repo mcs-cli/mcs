@@ -57,7 +57,7 @@ extension ExternalPackManifest {
             throw ManifestError.invalidIdentifier(identifier)
         }
 
-        // Component ID prefix and dependency resolution
+        // Component ID prefix and dependency references
         var seenComponentIDs = Set<String>()
         if let components {
             let expectedPrefix = "\(identifier)."

@@ -124,7 +124,7 @@ When a user runs `mcs sync`, these get installed via `brew install`. The engine 
 
 A tap-qualified package (`owner/tap/formula`) works too, but note that installing one taps a third-party repository without asking anyone; `mcs pack validate` warns when your pack declares one.
 
-Need to depend on Homebrew itself? That's a special case — Homebrew can't install itself, so use `shell:` with an explicit doctor check:
+Need to depend on Homebrew itself? That's a special case — Homebrew can't install itself, so use `shell:` with an explicit doctor check. In a project sync this component runs after every `brew:` component, so it cannot bootstrap them; it only helps later components and global syncs:
 
 ```yaml
   - id: homebrew
@@ -339,14 +339,8 @@ Components can depend on other components. Use short IDs — the engine auto-pre
 identifier: my-pack
 
 components:
-  - id: homebrew
-    description: Package manager
-    type: brewPackage
-    shell: '/bin/bash -c "$(curl -fsSL https://brew.sh)"'
-
   - id: node
     description: JavaScript runtime
-    dependencies: [homebrew]       # → my-pack.homebrew
     brew: node
 
   - id: my-server
@@ -357,9 +351,9 @@ components:
       args: ["-y", "my-server@latest"]
 ```
 
-Dependencies are installed in order (topological sort). Circular dependencies are detected and rejected.
+Component `dependencies` are declarative only for now ([#419](https://github.com/mcs-cli/mcs/issues/419)): validation rejects a short or `my-pack.`-prefixed reference that names no component in the pack, and nothing else reads them. They do not reorder installation — a project sync installs every brew package and plugin first, then the remaining components in declaration order, while a global sync installs all components in declaration order. Declare a dependency before the components that need it, and don't make a brew or plugin component depend on any other kind of component, since in a project sync it installs before them. (Excluding a component does drop templates, but through the template's own `dependencies:` — see [Templates](#templates).)
 
-For cross-pack dependencies, use the full `pack.component` form:
+A cross-pack dependency uses the full `pack.component` form; it is not validated:
 
 ```yaml
   - id: my-tool

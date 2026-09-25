@@ -1,7 +1,6 @@
 import Foundation
 
-/// Shared component installation logic used by `PackInstaller` and
-/// `Configurator`. Ensures consistent behavior across install paths.
+/// Component installation logic shared by `Configurator` and its sync strategies.
 struct ComponentExecutor {
     let environment: Environment
     let output: CLIOutput

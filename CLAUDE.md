@@ -100,7 +100,6 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PromptDefinition.swift` — PromptDefinition, PromptType, PromptOption (prompt types used by TechPack protocol)
 - `HookInterpreter.swift` — hook interpreter resolution (explicit → extension inference → bash), token validation, and the parsing counterpart used to recognize mcs-managed hook commands
 - `TechPackRegistry.swift` — registry of available packs (external only), filtering by installed state
-- `DependencyResolver.swift` — topological sort of component dependencies with cycle detection
 
 ### External Pack System (`Sources/mcs/ExternalPack/`)
 - `ExternalPackManifest.swift` — YAML `techpack.yaml` schema (Codable models for components, templates, hooks, doctor checks, configure scripts). Supports **shorthand syntax** (`brew:`, `mcp:`, `plugin:`, `hook:`, `command:`, `skill:`, `agent:`, `settingsFile:`, `gitignore:`, `shell:`) that infers `type` + `installAction` from a single key. `shellInteractive: true` alongside `shell:` allocates a PTY for commands needing terminal access (e.g. `sudo`)
@@ -149,7 +148,6 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ComponentExecutor.swift` — dispatches install actions (brew, MCP servers, plugins, gitignore, project-scoped file copy/removal)
 - `CrossPackPromptResolver.swift` — deduplicates shared prompt keys across multiple packs (groups by key, executes once for shared `input`/`select` prompts)
 - `DestinationCollisionResolver.swift` — auto-namespaces `copyPackFile` destinations when multiple packs target the same `(destination, fileType)` pair
-- `PackInstaller.swift` — auto-installs missing pack components
 - `PackUpdater.swift` — shared fetch → validate → trust cycle for updating a single git pack (used by `UpdatePack` and `UpdateCommand`)
 - `ResourceRefCounter.swift` — two-tier reference counting (global artifacts + project index manifests) for safe removal of brew packages, plugins and gitignore entries; decoded state is cached per instance so one removal pass reads each state file once
 - `SyncDeltaSummary.swift` — computes add/remove/keep deltas between previous and selected pack sets and renders the review-changes summary shown before destructive sync operations

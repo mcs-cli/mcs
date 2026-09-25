@@ -11,6 +11,14 @@ struct ExternalPackManifestTests {
         return dir
     }
 
+    private func loadManifest(_ yaml: String) throws -> ExternalPackManifest {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+        return try ExternalPackManifest.load(from: file)
+    }
+
     // MARK: - Complete manifest parsing
 
     @Test("Parse a complete manifest with all fields")
@@ -20,11 +28,10 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: A test tech pack
-        version: "1.0.0"
+        author: "Jane Doe"
         minMCSVersion: "2.0.0"
-        peerDependencies:
-          - pack: ios
-            minVersion: "1.0.0"
+        ignore:
+          - docs/
         components:
           - id: my-pack.server
             displayName: My Server
@@ -77,19 +84,15 @@ struct ExternalPackManifestTests {
             command: my-tool
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
 
         #expect(manifest.schemaVersion == 1)
         #expect(manifest.identifier == "my-pack")
         #expect(manifest.displayName == "My Pack")
         #expect(manifest.description == "A test tech pack")
+        #expect(manifest.author == "Jane Doe")
         #expect(manifest.minMCSVersion == "2.0.0")
+        #expect(manifest.ignore == ["docs/"])
 
         // Components
         #expect(manifest.components?.count == 2)
@@ -138,16 +141,9 @@ struct ExternalPackManifestTests {
         identifier: minimal
         displayName: Minimal Pack
         description: Just the basics
-        version: "0.1.0"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
 
         #expect(manifest.schemaVersion == 1)
@@ -161,24 +157,37 @@ struct ExternalPackManifestTests {
         #expect(manifest.supplementaryDoctorChecks == nil)
     }
 
+    /// `version` and `peerDependencies` were retired in #179; packs published before then still carry them.
+    @Test("Retired top-level keys still load and validate")
+    func retiredKeysAreIgnored() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: legacy-pack
+        displayName: Legacy Pack
+        description: Published before version and peerDependencies were retired
+        version: "1.0.0"
+        peerDependencies:
+          - pack: ios
+            minVersion: "1.0.0"
+        """
+
+        let manifest = try loadManifest(yaml)
+        try manifest.validate()
+        #expect(manifest.identifier == "legacy-pack")
+    }
+
     // MARK: - Author field
 
     @Test("Parse manifest with author field")
     func parseAuthorField() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
         let yaml = """
         schemaVersion: 1
         identifier: authored-pack
         displayName: Authored Pack
         description: A pack with author
-        version: "1.0.0"
         author: "Jane Doe"
         """
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
 
         #expect(manifest.author == "Jane Doe")
@@ -186,20 +195,14 @@ struct ExternalPackManifestTests {
 
     @Test("Normalized manifest preserves author")
     func normalizedPreservesAuthor() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
         let yaml = """
         schemaVersion: 1
         identifier: my-pack
         displayName: My Pack
         description: A pack
-        version: "1.0.0"
         author: "John Smith"
         """
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let normalized = try manifest.normalized()
 
         #expect(normalized.author == "John Smith")
@@ -214,83 +217,25 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.unsupportedSchemaVersion(99)) {
             try manifest.validate()
         }
     }
 
-    @Test("Validation rejects invalid identifier with uppercase")
-    func rejectUppercaseIdentifier() throws {
+    @Test("Validation rejects malformed identifiers", arguments: ["MyPack", "", "-bad"])
+    func rejectInvalidIdentifier(identifier: String) throws {
         let yaml = """
         schemaVersion: 1
-        identifier: MyPack
+        identifier: "\(identifier)"
         displayName: Test
         description: Test
-        version: "1.0.0"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
-        #expect(throws: ManifestError.invalidIdentifier("MyPack")) {
-            try manifest.validate()
-        }
-    }
-
-    @Test("Validation rejects empty identifier")
-    func rejectEmptyIdentifier() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: ""
-        displayName: Test
-        description: Test
-        version: "1.0.0"
-        """
-
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
-        #expect(throws: ManifestError.invalidIdentifier("")) {
-            try manifest.validate()
-        }
-    }
-
-    @Test("Validation rejects identifier starting with hyphen")
-    func rejectHyphenStartIdentifier() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: "-bad"
-        displayName: Test
-        description: Test
-        version: "1.0.0"
-        """
-
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
-        #expect(throws: ManifestError.invalidIdentifier("-bad")) {
+        let manifest = try loadManifest(yaml)
+        #expect(throws: ManifestError.invalidIdentifier(identifier)) {
             try manifest.validate()
         }
     }
@@ -302,7 +247,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: wrong-prefix.server
             displayName: Server
@@ -315,13 +259,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.componentIDPrefixViolation(
             componentID: "wrong-prefix.server",
             expectedPrefix: "my-pack."
@@ -337,7 +275,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.server
             displayName: Server 1
@@ -359,13 +296,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server2@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.duplicateComponentID("my-pack.server")) {
             try manifest.validate()
         }
@@ -378,19 +309,12 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: other-pack
             contentFile: templates/section.md
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.templateSectionMismatch(
             sectionIdentifier: "other-pack",
             packIdentifier: "my-pack"
@@ -406,19 +330,12 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: my-pack.extra
             contentFile: templates/extra.md
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
     }
 
@@ -429,7 +346,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project
             type: input
@@ -442,13 +358,7 @@ struct ExternalPackManifestTests {
                 label: A
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.duplicatePromptKey("project")) {
             try manifest.validate()
         }
@@ -461,7 +371,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.lint-hook
             description: Lint hook
@@ -475,13 +384,7 @@ struct ExternalPackManifestTests {
               destination: lint.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.duplicateDestination(
             destination: "lint.sh",
             fileType: "hook",
@@ -498,7 +401,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.sync-on-start
             description: Sync on session start
@@ -514,13 +416,7 @@ struct ExternalPackManifestTests {
               destination: sync.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
     }
 
@@ -531,7 +427,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.lint-hook
             description: Lint hook
@@ -545,13 +440,7 @@ struct ExternalPackManifestTests {
               destination: lint.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
     }
 
@@ -562,7 +451,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.file-a
             displayName: First file
@@ -582,13 +470,7 @@ struct ExternalPackManifestTests {
               destination: config.yaml
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.duplicateDestination(
             destination: "config.yaml",
             fileType: "generic",
@@ -605,16 +487,9 @@ struct ExternalPackManifestTests {
         identifier: my-pack-2
         displayName: Test
         description: Test
-        version: "1.0.0"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
     }
 
@@ -625,20 +500,13 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: hookEventExists
             name: Bad hook check
             section: Hooks
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.self) {
             try manifest.validate()
         }
@@ -651,7 +519,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: hookEventExists
             name: Bad hook check
@@ -659,13 +526,7 @@ struct ExternalPackManifestTests {
             event: BogusEvent
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.self) {
             try manifest.validate()
         }
@@ -678,7 +539,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: hookEventExists
             name: Bad hook check
@@ -687,13 +547,7 @@ struct ExternalPackManifestTests {
             matcher: ""
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         // An empty matcher compares equal to a group with no matcher at all, so it reads as an
         // assertion while asserting nothing. Omitting the key is the way to skip it.
         #expect(throws: ManifestError.self) {
@@ -708,7 +562,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: hookEventExists
             name: Gate hook
@@ -718,13 +571,7 @@ struct ExternalPackManifestTests {
             command: kb-gate.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
 
         let check = manifest.supplementaryDoctorChecks?.first
@@ -739,7 +586,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: settingsKeyEquals
             name: Bad settings check
@@ -747,13 +593,7 @@ struct ExternalPackManifestTests {
             expectedValue: plan
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.self) {
             try manifest.validate()
         }
@@ -766,7 +606,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: settingsKeyEquals
             name: Bad settings check
@@ -774,13 +613,7 @@ struct ExternalPackManifestTests {
             keyPath: permissions.defaultMode
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.self) {
             try manifest.validate()
         }
@@ -795,7 +628,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.server
             displayName: Server
@@ -813,13 +645,7 @@ struct ExternalPackManifestTests {
               transport: stdio
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .mcpServer(config) = manifest.components?[0].installAction else {
             Issue.record("Expected mcpServer install action")
             return
@@ -839,7 +665,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.http-server
             displayName: HTTP Server
@@ -852,13 +677,7 @@ struct ExternalPackManifestTests {
               url: https://example.com/mcp
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .mcpServer(config) = manifest.components?[0].installAction else {
             Issue.record("Expected mcpServer install action")
             return
@@ -882,7 +701,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.plugin
             displayName: Plugin
@@ -893,13 +711,7 @@ struct ExternalPackManifestTests {
               name: my-plugin@1.0.0
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .plugin(name) = manifest.components?[0].installAction else {
             Issue.record("Expected plugin install action")
             return
@@ -914,7 +726,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.brew
             displayName: Brew Pkg
@@ -925,13 +736,7 @@ struct ExternalPackManifestTests {
               package: my-package
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .brewInstall(package) = manifest.components?[0].installAction else {
             Issue.record("Expected brewInstall install action")
             return
@@ -946,7 +751,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.skill
             displayName: Skill
@@ -957,13 +761,7 @@ struct ExternalPackManifestTests {
               command: "npx -y skills add my-skill -g -a claude-code -y"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .shellCommand(command, _) = manifest.components?[0].installAction else {
             Issue.record("Expected shellCommand install action")
             return
@@ -978,7 +776,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.install
             displayName: Install tool
@@ -990,13 +787,7 @@ struct ExternalPackManifestTests {
               interactive: true
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .shellCommand(command, interactive) = manifest.components?[0].installAction else {
             Issue.record("Expected shellCommand install action")
             return
@@ -1012,7 +803,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.gitignore
             displayName: Gitignore
@@ -1025,13 +815,7 @@ struct ExternalPackManifestTests {
                 - "*.generated"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .gitignoreEntries(entries) = manifest.components?[0].installAction else {
             Issue.record("Expected gitignoreEntries install action")
             return
@@ -1046,7 +830,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.settings
             displayName: Settings
@@ -1056,13 +839,7 @@ struct ExternalPackManifestTests {
               type: settingsMerge
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case .settingsMerge = manifest.components?[0].installAction else {
             Issue.record("Expected settingsMerge install action")
             return
@@ -1076,7 +853,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.settings-file
             displayName: Settings File
@@ -1087,13 +863,7 @@ struct ExternalPackManifestTests {
               source: config/settings.json
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .settingsFile(source) = manifest.components?[0].installAction else {
             Issue.record("Expected settingsFile install action")
             return
@@ -1108,7 +878,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.hook
             displayName: Hook
@@ -1121,13 +890,7 @@ struct ExternalPackManifestTests {
               fileType: hook
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
@@ -1144,7 +907,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.agent
             displayName: Code Reviewer
@@ -1157,13 +919,7 @@ struct ExternalPackManifestTests {
               fileType: agent
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
@@ -1182,7 +938,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: commandExists
             name: Tool check
@@ -1213,13 +968,7 @@ struct ExternalPackManifestTests {
             fixCommand: "touch /tmp/ready"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let checks = try #require(manifest.supplementaryDoctorChecks)
 
         #expect(checks.count == 6)
@@ -1243,7 +992,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: fileExists
             name: Project config
@@ -1253,13 +1001,7 @@ struct ExternalPackManifestTests {
             fixScript: scripts/fix-config.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let check = try #require(manifest.supplementaryDoctorChecks?[0])
 
         #expect(check.scope == .project)
@@ -1273,7 +1015,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: hookEventExists
             name: SessionStart hook
@@ -1282,13 +1023,7 @@ struct ExternalPackManifestTests {
             isOptional: false
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
 
         let check = try #require(manifest.supplementaryDoctorChecks?[0])
@@ -1304,7 +1039,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: settingsKeyEquals
             name: Plan mode
@@ -1313,13 +1047,7 @@ struct ExternalPackManifestTests {
             expectedValue: plan
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
 
         let check = try #require(manifest.supplementaryDoctorChecks?[0])
@@ -1337,7 +1065,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project_file
             type: fileDetect
@@ -1361,13 +1088,7 @@ struct ExternalPackManifestTests {
             scriptCommand: "cat VERSION"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let prompts = try #require(manifest.prompts)
 
         #expect(prompts.count == 4)
@@ -1441,38 +1162,24 @@ struct ExternalPackManifestTests {
         #expect(config.env == [:])
     }
 
-    @Test("ExternalMCPServerConfig passes scope through to MCPServerConfig")
-    func mcpServerConfigScopePassthrough() {
+    @Test(
+        "ExternalMCPServerConfig passes scope through for both transports",
+        arguments: [ExternalTransport.stdio, .http], [ExternalScope.local, .user, .project]
+    )
+    func mcpServerConfigScopePassthrough(transport: ExternalTransport, scope: ExternalScope) {
         let external = ExternalMCPServerConfig(
             name: "test-server",
             command: "node",
             args: ["server.js"],
             env: nil,
-            transport: .stdio,
-            url: nil,
-            scope: .local
+            transport: transport,
+            url: "https://example.com/mcp",
+            scope: scope
         )
 
         let config = external.toMCPServerConfig()
-        #expect(config.scope == "local")
-        #expect(config.resolvedScope == "local")
-    }
-
-    @Test("ExternalMCPServerConfig with project scope passes through")
-    func mcpServerConfigProjectScope() {
-        let external = ExternalMCPServerConfig(
-            name: "team-server",
-            command: "node",
-            args: [],
-            env: nil,
-            transport: nil,
-            url: nil,
-            scope: .project
-        )
-
-        let config = external.toMCPServerConfig()
-        #expect(config.scope == "project")
-        #expect(config.resolvedScope == "project")
+        #expect(config.scope == scope.rawValue)
+        #expect(config.resolvedScope == scope.rawValue)
     }
 
     @Test("MCPServerConfig resolvedScope defaults to local when nil")
@@ -1484,15 +1191,11 @@ struct ExternalPackManifestTests {
 
     @Test("ExternalScope includes local variant")
     func externalScopeLocal() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
         let yaml = """
         schemaVersion: 1
         identifier: scope-test
         displayName: Scope Test
         description: Test scope
-        version: "1.0.0"
         components:
           - id: scope-test.server
             displayName: Server
@@ -1505,8 +1208,7 @@ struct ExternalPackManifestTests {
               args: ["server.js"]
               scope: local
         """
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let component = try #require(manifest.components?.first)
         if case let .mcpServer(config) = component.installAction {
             #expect(config.scope == .local)
@@ -1524,7 +1226,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.server
             displayName: Server
@@ -1542,13 +1243,7 @@ struct ExternalPackManifestTests {
                 path: ~/.server/config.json
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let component = try #require(manifest.components?[0])
 
         #expect(component.doctorChecks?.count == 1)
@@ -1565,7 +1260,6 @@ struct ExternalPackManifestTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: test.basic
             displayName: Basic
@@ -1575,13 +1269,7 @@ struct ExternalPackManifestTests {
               type: settingsMerge
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let component = try #require(manifest.components?[0])
 
         #expect(component.dependencies == nil)
@@ -1600,7 +1288,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: server
             displayName: Server
@@ -1620,13 +1307,7 @@ struct ExternalPackManifestTests {
               package: my-pkg
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.components?[0].id == "my-pack.server")
@@ -1640,7 +1321,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.server
             displayName: Server
@@ -1653,13 +1333,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         #expect(throws: ManifestError.dotInRawID("my-pack.server")) {
             try raw.normalized()
         }
@@ -1672,7 +1346,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: brew
             displayName: Brew
@@ -1694,13 +1367,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.components?[1].dependencies == ["my-pack.brew"])
@@ -1713,7 +1380,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: server
             displayName: Server
@@ -1729,13 +1395,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.components?[0].dependencies == ["other-pack.tool", "my-pack.brew"])
@@ -1748,16 +1408,9 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.components == nil)
@@ -1771,7 +1424,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: server
             displayName: Server
@@ -1784,13 +1436,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         // Should not throw — normalized IDs now have the correct prefix
@@ -1806,19 +1452,14 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: ios
             contentFile: templates/ios.md
           - sectionIdentifier: git
             contentFile: templates/git.md
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.templates?[0].sectionIdentifier == "my-pack.ios")
@@ -1832,17 +1473,12 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: my-pack.ios
             contentFile: templates/ios.md
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         #expect(throws: ManifestError.dotInRawID("my-pack.ios")) {
             try raw.normalized()
         }
@@ -1855,17 +1491,12 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: ios
             contentFile: templates/ios.md
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         // Should not throw — normalized section IDs now have the correct prefix
@@ -1881,7 +1512,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: serena
             displayName: Serena
@@ -1898,12 +1528,8 @@ struct ExternalPackManifestTests {
             dependencies:
               - serena
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(normalized.templates?[0].dependencies == ["my-pack.serena"])
@@ -1916,19 +1542,14 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: my-pack.serena
             contentFile: templates/serena.md
             dependencies:
               - my-pack.nonexistent
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.templateDependencyMismatch(
             sectionIdentifier: "my-pack.serena",
             componentID: "my-pack.nonexistent"
@@ -1944,19 +1565,14 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: serena
             contentFile: templates/serena.md
             dependencies:
               - my-pack.serena
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         #expect(throws: ManifestError.dotInRawID("my-pack.serena")) {
             try raw.normalized()
         }
@@ -1969,17 +1585,12 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         templates:
           - sectionIdentifier: my-pack.main
             contentFile: templates/main.md
         """
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
 
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
         #expect(manifest.templates?[0].dependencies == nil)
     }
@@ -1993,7 +1604,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: server
             displayName: Server
@@ -2008,13 +1618,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         #expect(throws: ManifestError.unresolvedDependency(
@@ -2032,7 +1636,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: server
             displayName: Server
@@ -2047,13 +1650,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         // Should not throw — cross-pack deps are not validated
@@ -2067,7 +1664,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         components:
           - id: brew
             displayName: Brew
@@ -2089,13 +1685,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
+        let raw = try loadManifest(yaml)
         let normalized = try raw.normalized()
 
         // Should not throw — "brew" normalizes to "my-pack.brew" which exists
@@ -2145,7 +1735,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: hook
             description: A hook
@@ -2155,14 +1744,8 @@ struct ExternalPackManifestTests {
               destination: test.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
         #expect(throws: (any Error).self) {
-            try ExternalPackManifest.load(from: file)
+            try loadManifest(yaml)
         }
     }
 
@@ -2174,7 +1757,6 @@ struct ExternalPackManifestTests {
             identifier: my-pack
             displayName: My Pack
             description: Test
-            version: "1.0.0"
             components:
               - id: hook
                 description: A hook
@@ -2196,71 +1778,28 @@ struct ExternalPackManifestTests {
         }
     }
 
-    @Test("Validation rejects negative hookTimeout")
-    func rejectNegativeHookTimeout() throws {
+    @Test("Validation rejects non-positive hookTimeout", arguments: [-5, 0])
+    func rejectNonPositiveHookTimeout(timeout: Int) throws {
         let yaml = """
         schemaVersion: 1
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: hook
             description: A hook
             hookEvent: SessionStart
-            hookTimeout: -5
+            hookTimeout: \(timeout)
             hook:
               source: hooks/test.sh
               destination: test.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
-        let manifest = try raw.normalized()
+        let manifest = try loadManifest(yaml).normalized()
 
         #expect(throws: ManifestError.invalidHookMetadata(
             componentID: "my-pack.hook",
-            reason: "hookTimeout must be positive (got -5)"
-        )) {
-            try manifest.validate()
-        }
-    }
-
-    @Test("Validation rejects zero hookTimeout")
-    func rejectZeroHookTimeout() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: My Pack
-        description: Test
-        version: "1.0.0"
-        components:
-          - id: hook
-            description: A hook
-            hookEvent: SessionStart
-            hookTimeout: 0
-            hook:
-              source: hooks/test.sh
-              destination: test.sh
-        """
-
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let raw = try ExternalPackManifest.load(from: file)
-        let manifest = try raw.normalized()
-
-        #expect(throws: ManifestError.invalidHookMetadata(
-            componentID: "my-pack.hook",
-            reason: "hookTimeout must be positive (got 0)"
+            reason: "hookTimeout must be positive (got \(timeout))"
         )) {
             try manifest.validate()
         }
@@ -2332,13 +1871,7 @@ struct ExternalPackManifestTests {
               destination: gate.ts
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file).normalized()
+        let manifest = try loadManifest(yaml).normalized()
         try manifest.validate()
 
         let registration = manifest.components?.first?.hookRegistration
@@ -2368,13 +1901,7 @@ struct ExternalPackManifestTests {
               destination: gate.js
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file).normalized()
+        let manifest = try loadManifest(yaml).normalized()
         #expect(throws: ManifestError.self) {
             try manifest.validate()
         }
@@ -2441,14 +1968,8 @@ struct ExternalPackManifestTests {
               destination: gate.js
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
         do {
-            _ = try ExternalPackManifest.load(from: file)
+            _ = try loadManifest(yaml)
             Issue.record("Expected DecodingError for hookInterpreter without hookEvent")
         } catch let DecodingError.dataCorrupted(context) {
             #expect(context.debugDescription.contains("hookInterpreter"))
@@ -2464,7 +1985,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.node
             description: Node.js
@@ -2475,14 +1995,8 @@ struct ExternalPackManifestTests {
               package: node
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
         do {
-            _ = try ExternalPackManifest.load(from: file)
+            _ = try loadManifest(yaml)
             Issue.record("Expected DecodingError for orphaned hook metadata")
         } catch let DecodingError.dataCorrupted(context) {
             #expect(context.debugDescription.contains("hookStatusMessage/hookInterpreter"))
@@ -2501,20 +2015,13 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.node
             description: JavaScript runtime
             brew: node
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .brewPackage)
@@ -2534,7 +2041,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.serena
             description: Semantic navigation
@@ -2548,13 +2054,7 @@ struct ExternalPackManifestTests {
               scope: local
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .mcpServer)
@@ -2577,7 +2077,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.sosumi
             description: Apple docs
@@ -2585,13 +2084,7 @@ struct ExternalPackManifestTests {
               url: https://sosumi.ai/mcp
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .mcpServer)
@@ -2616,7 +2109,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.docs-mcp-server
             description: Docs search
@@ -2625,13 +2117,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "docs-mcp-server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .mcpServer(config) = manifest.components?.first?.installAction else {
             Issue.record("Expected mcpServer"); return
         }
@@ -2647,20 +2133,13 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.pr-review
             description: PR review toolkit
             plugin: "pr-review-toolkit@claude-plugins-official"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .plugin)
@@ -2679,7 +2158,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.xcode-skill
             description: Install via shell
@@ -2687,13 +2165,7 @@ struct ExternalPackManifestTests {
             shell: "npx -y skills add xcodebuildmcp -g"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .skill)
@@ -2710,7 +2182,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.installer
             description: Install via interactive shell
@@ -2719,13 +2190,7 @@ struct ExternalPackManifestTests {
             shellInteractive: true
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         guard case let .shellCommand(command, interactive) = comp.installAction else {
@@ -2742,7 +2207,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.tool
             description: Install via shell
@@ -2750,13 +2214,7 @@ struct ExternalPackManifestTests {
             shell: "echo hello"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         guard case let .shellCommand(_, interactive) = comp.installAction else {
@@ -2774,7 +2232,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.session-start
             description: Session start hook
@@ -2784,13 +2241,7 @@ struct ExternalPackManifestTests {
               destination: session_start.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .hookFile)
@@ -2810,7 +2261,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.lint-hook
             description: Lint hook with metadata
@@ -2823,13 +2273,7 @@ struct ExternalPackManifestTests {
               destination: lint.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.hookRegistration?.event == .postToolUse)
@@ -2846,7 +2290,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.lint-hook
             description: Lint on Edit/Write
@@ -2858,13 +2301,7 @@ struct ExternalPackManifestTests {
               destination: lint.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.hookRegistration?.event == .postToolUse)
@@ -2879,7 +2316,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.session-start
             description: Session start hook
@@ -2889,13 +2325,7 @@ struct ExternalPackManifestTests {
               destination: session_start.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.hookRegistration?.matcher == nil)
@@ -2908,7 +2338,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.node
             description: Node.js
@@ -2919,14 +2348,8 @@ struct ExternalPackManifestTests {
               package: node
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
         do {
-            _ = try ExternalPackManifest.load(from: file)
+            _ = try loadManifest(yaml)
             Issue.record("Expected DecodingError for orphaned hookMatcher")
         } catch let DecodingError.dataCorrupted(context) {
             #expect(context.debugDescription.contains("hookMatcher"))
@@ -2943,7 +2366,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.session-start
             description: Plain hook
@@ -2953,13 +2375,7 @@ struct ExternalPackManifestTests {
               destination: session_start.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         let reg = try #require(comp.hookRegistration)
@@ -2977,7 +2393,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.pr
             description: PR command
@@ -2986,13 +2401,7 @@ struct ExternalPackManifestTests {
               destination: pr.md
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .command)
@@ -3012,7 +2421,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.learning
             description: Continuous learning
@@ -3021,13 +2429,7 @@ struct ExternalPackManifestTests {
               destination: continuous-learning
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .skill)
@@ -3047,7 +2449,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.code-reviewer
             description: Expert code reviewer subagent
@@ -3056,13 +2457,7 @@ struct ExternalPackManifestTests {
               destination: code-reviewer.md
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .agent)
@@ -3082,20 +2477,13 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.settings
             description: Settings
             settingsFile: config/settings.json
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .configuration)
@@ -3114,7 +2502,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.gitignore
             description: Gitignore entries
@@ -3123,13 +2510,7 @@ struct ExternalPackManifestTests {
               - .xcodebuildmcp
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .configuration)
@@ -3141,27 +2522,23 @@ struct ExternalPackManifestTests {
 
     // MARK: - Shorthand: displayName defaults to id
 
-    @Test("displayName defaults to id when omitted")
-    func shorthandDisplayNameDefault() throws {
+    @Test("displayName defaults to id when omitted", arguments: [
+        "    brew: gh",
+        "    type: brewPackage\n    installAction:\n      type: brewInstall\n      package: gh",
+    ])
+    func displayNameDefaultsToID(installLines: String) throws {
         let yaml = """
         schemaVersion: 1
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.gh
             description: GitHub CLI
-            brew: gh
-        """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        """ + installLines
 
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.displayName == "my-pack.gh")
@@ -3174,7 +2551,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.gh
             displayName: GitHub CLI
@@ -3182,47 +2558,10 @@ struct ExternalPackManifestTests {
             brew: gh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.displayName == "GitHub CLI")
-    }
-
-    // MARK: - Shorthand: displayName defaults to id in verbose form too
-
-    @Test("displayName defaults to id when omitted in verbose form")
-    func verboseDisplayNameDefault() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: My Pack
-        description: Test
-        version: "1.0.0"
-        components:
-          - id: my-pack.node
-            description: Node.js runtime
-            type: brewPackage
-            installAction:
-              type: brewInstall
-              package: node
-        """
-
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
-        let comp = try #require(manifest.components?.first)
-
-        #expect(comp.displayName == "my-pack.node")
     }
 
     // MARK: - Shorthand: mixed verbose and shorthand in same manifest
@@ -3234,7 +2573,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.homebrew
             displayName: Homebrew
@@ -3254,13 +2592,7 @@ struct ExternalPackManifestTests {
               args: ["-y", "my-server@latest"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comps = try #require(manifest.components)
         #expect(comps.count == 3)
 
@@ -3294,7 +2626,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: node
             description: Node.js
@@ -3306,13 +2637,7 @@ struct ExternalPackManifestTests {
             shell: "brew --version"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let normalized = try manifest.normalized()
 
         let comps = try #require(normalized.components)
@@ -3330,7 +2655,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: serena
             description: Code nav
@@ -3339,13 +2663,7 @@ struct ExternalPackManifestTests {
               args: ["serena", "start-mcp-server"]
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .mcpServer(config) = manifest.components?.first?.installAction else {
             Issue.record("Expected mcpServer"); return
         }
@@ -3370,7 +2688,6 @@ struct ExternalPackManifestTests {
         identifier: my-pack
         displayName: My Pack
         description: Test
-        version: "1.0.0"
         components:
           - id: my-pack.session-hook
             description: Session start hook
@@ -3386,13 +2703,7 @@ struct ExternalPackManifestTests {
                 event: SessionStart
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .hookFile)

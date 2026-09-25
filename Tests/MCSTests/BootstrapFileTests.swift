@@ -72,83 +72,20 @@ struct BootstrapFileTests {
         }
     }
 
-    @Test("Rejects unsupported schemaVersion")
-    func rejectsFutureSchema() throws {
+    @Test("Rejects malformed bootstrap files with a specific error", arguments: [
+        ("schemaVersion: 99\npacks:\n  - source: user/repo", BootstrapFileError.unsupportedSchemaVersion(found: 99, expected: 1)),
+        ("schemaVersion: 1\npacks: []", .emptyPackList),
+        ("schemaVersion: 1\npacks:\n  - source: user/repo\n  - source: user/repo", .duplicateSource("user/repo")),
+        ("schemaVersion: 1\npacks:\n  - source: \"   \"", .blankSource),
+        ("schemaVersion: 1\npacks:\n  - source: user/repo\n    scope: global", .reservedScope(source: "user/repo", scope: "global")),
+    ])
+    func rejectsInvalidFile(yaml: String, expected: BootstrapFileError) throws {
         let tmp = try makeDir()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
-        let path = try write("""
-        schemaVersion: 99
-        packs:
-          - source: user/repo
-        """, to: tmp)
+        let path = try write(yaml, to: tmp)
 
-        #expect(throws: BootstrapFileError.unsupportedSchemaVersion(found: 99, expected: 1)) {
-            _ = try BootstrapFile.load(from: path)
-        }
-    }
-
-    @Test("Rejects an empty packs list")
-    func rejectsEmptyPackList() throws {
-        let tmp = try makeDir()
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let path = try write("""
-        schemaVersion: 1
-        packs: []
-        """, to: tmp)
-
-        #expect(throws: BootstrapFileError.emptyPackList) {
-            _ = try BootstrapFile.load(from: path)
-        }
-    }
-
-    @Test("Rejects duplicate source entries")
-    func rejectsDuplicateSource() throws {
-        let tmp = try makeDir()
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let path = try write("""
-        schemaVersion: 1
-        packs:
-          - source: user/repo
-          - source: user/repo
-        """, to: tmp)
-
-        #expect(throws: BootstrapFileError.duplicateSource("user/repo")) {
-            _ = try BootstrapFile.load(from: path)
-        }
-    }
-
-    @Test("Rejects a blank source")
-    func rejectsBlankSource() throws {
-        let tmp = try makeDir()
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let path = try write("""
-        schemaVersion: 1
-        packs:
-          - source: "   "
-        """, to: tmp)
-
-        #expect(throws: BootstrapFileError.blankSource) {
-            _ = try BootstrapFile.load(from: path)
-        }
-    }
-
-    @Test("Rejects a scope value other than 'project'")
-    func rejectsReservedScope() throws {
-        let tmp = try makeDir()
-        defer { try? FileManager.default.removeItem(at: tmp) }
-
-        let path = try write("""
-        schemaVersion: 1
-        packs:
-          - source: user/repo
-            scope: global
-        """, to: tmp)
-
-        #expect(throws: BootstrapFileError.reservedScope(source: "user/repo", scope: "global")) {
+        #expect(throws: expected) {
             _ = try BootstrapFile.load(from: path)
         }
     }

@@ -1127,14 +1127,6 @@ struct UpdateCheckerHookTests {
         #expect(groups.first?.hooks?.first?.command == "bash .claude/hooks/startup.sh")
     }
 
-    @Test("addHook + removeHook round-trip leaves settings clean")
-    func hookRoundTrip() {
-        var settings = Settings()
-        UpdateChecker.addHook(to: &settings)
-        UpdateChecker.removeHook(from: &settings)
-        #expect(settings.hooks == nil)
-    }
-
     @Test("syncHook adds hook when config enabled")
     func syncHookAdds() throws {
         let tmpDir = try makeTmpDir()

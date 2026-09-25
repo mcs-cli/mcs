@@ -24,8 +24,7 @@ private func makeCollisionComponent(
         packIdentifier: pack,
         dependencies: [],
         isRequired: false,
-        installAction: .copyPackFile(source: collisionTestDummySource, destination: destination, fileType: fileType),
-        supplementaryChecks: []
+        installAction: .copyPackFile(source: collisionTestDummySource, destination: destination, fileType: fileType)
     )
 }
 

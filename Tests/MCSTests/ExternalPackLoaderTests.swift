@@ -35,7 +35,6 @@ struct ExternalPackLoaderTests {
         identifier: \(identifier)
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         templates:
           - sectionIdentifier: \(identifier)
             contentFile: \(contentFile)
@@ -142,7 +141,6 @@ struct ExternalPackLoaderTests {
         identifier: test-pack
         displayName: Test
         description: Test
-        version: "1.0.0"
         """
         let manifestURL = packDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: manifestURL, atomically: true, encoding: .utf8)
@@ -438,7 +436,6 @@ struct ExternalPackLoaderTests {
         identifier: invalid-pack
         displayName: Invalid
         description: Bad
-        version: "1.0.0"
         """
         try badYAML.write(
             to: invalidDir.appendingPathComponent("techpack.yaml"),
@@ -589,69 +586,34 @@ struct ExternalPackLoaderTests {
 
     // MARK: - VersionCompare
 
-    @Test("VersionCompare.isCompatible with equal versions")
-    func versionCompareEqual() {
-        #expect(VersionCompare.isCompatible(current: "2.0.1", required: "2.0.1"))
+    @Test("VersionCompare.isCompatible is current >= required, ignoring pre-release suffixes", arguments: [
+        ("2.0.1", "2.0.1", true),
+        ("2.0.2", "2.0.1", true),
+        ("2.1.0", "2.0.1", true),
+        ("3.0.0", "2.0.1", true),
+        ("1.9.9", "2.0.0", false),
+        ("2.0.0", "2.0.1", false),
+        ("2.1.0-alpha", "2.1.0", true),
+        ("2.1.0-alpha", "2.0.0", true),
+        ("2.1.0-alpha", "2.2.0", false),
+        ("2.1.0", "2.1.0-beta", true),
+    ])
+    func versionCompareIsCompatible(current: String, required: String, compatible: Bool) {
+        #expect(VersionCompare.isCompatible(current: current, required: required) == compatible)
     }
 
-    @Test("VersionCompare.isCompatible with current higher patch")
-    func versionCompareHigherPatch() {
-        #expect(VersionCompare.isCompatible(current: "2.0.2", required: "2.0.1"))
-    }
-
-    @Test("VersionCompare.isCompatible with current higher minor")
-    func versionCompareHigherMinor() {
-        #expect(VersionCompare.isCompatible(current: "2.1.0", required: "2.0.1"))
-    }
-
-    @Test("VersionCompare.isCompatible with current higher major")
-    func versionCompareHigherMajor() {
-        #expect(VersionCompare.isCompatible(current: "3.0.0", required: "2.0.1"))
-    }
-
-    @Test("VersionCompare.isCompatible returns false when current is lower")
-    func versionCompareIncompatible() {
-        #expect(!VersionCompare.isCompatible(current: "1.9.9", required: "2.0.0"))
-    }
-
-    @Test("VersionCompare.isCompatible returns false when current patch is lower")
-    func versionCompareLowerPatch() {
-        #expect(!VersionCompare.isCompatible(current: "2.0.0", required: "2.0.1"))
-    }
-
-    @Test("VersionCompare.parse extracts components correctly")
+    @Test("VersionCompare.parse extracts numeric components and strips pre-release suffixes")
     func versionCompareParse() {
         let v = VersionCompare.parse("3.14.159")
-        #expect(v != nil)
         #expect(v?.major == 3)
         #expect(v?.minor == 14)
         #expect(v?.patch == 159)
-    }
 
-    @Test("VersionCompare.parse handles invalid input gracefully")
-    func versionCompareParseInvalid() {
-        let v = VersionCompare.parse("invalid")
-        #expect(v == nil)
-    }
+        let pre = VersionCompare.parse("2.1.0-alpha")
+        #expect(pre?.major == 2)
+        #expect(pre?.minor == 1)
+        #expect(pre?.patch == 0)
 
-    @Test("VersionCompare.parse strips pre-release suffix")
-    func versionCompareParsePreRelease() {
-        let v = VersionCompare.parse("2.1.0-alpha")
-        #expect(v != nil)
-        #expect(v?.major == 2)
-        #expect(v?.minor == 1)
-        #expect(v?.patch == 0)
-    }
-
-    @Test("VersionCompare.isCompatible with pre-release current version")
-    func versionComparePreReleaseCompatible() {
-        #expect(VersionCompare.isCompatible(current: "2.1.0-alpha", required: "2.1.0"))
-        #expect(VersionCompare.isCompatible(current: "2.1.0-alpha", required: "2.0.0"))
-        #expect(!VersionCompare.isCompatible(current: "2.1.0-alpha", required: "2.2.0"))
-    }
-
-    @Test("VersionCompare.isCompatible with pre-release required version")
-    func versionComparePreReleaseRequired() {
-        #expect(VersionCompare.isCompatible(current: "2.1.0", required: "2.1.0-beta"))
+        #expect(VersionCompare.parse("invalid") == nil)
     }
 }

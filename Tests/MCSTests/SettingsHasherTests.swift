@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 @testable import mcs
 import Testing
@@ -8,15 +9,6 @@ struct SettingsHasherTests {
         let json: [String: Any] = ["foo": "bar"]
         let result = SettingsHasher.hash(keyPaths: [], in: json)
         #expect(result == nil)
-    }
-
-    @Test("deterministic hash for single top-level key")
-    func singleTopLevelKey() {
-        let json: [String: Any] = ["alwaysThinkingEnabled": true]
-        let hash1 = SettingsHasher.hash(keyPaths: ["alwaysThinkingEnabled"], in: json)
-        let hash2 = SettingsHasher.hash(keyPaths: ["alwaysThinkingEnabled"], in: json)
-        #expect(hash1 != nil)
-        #expect(hash1 == hash2)
     }
 
     @Test("dotted key path extracts nested value")
@@ -52,14 +44,21 @@ struct SettingsHasherTests {
         #expect(hash != hashExisting)
     }
 
-    @Test("nested dict value is deterministic with sortedKeys")
-    func nestedDictDeterministic() {
-        // JSON dictionaries are unordered, but sortedKeys ensures consistent output
-        let json: [String: Any] = ["env": ["Z_KEY": "last", "A_KEY": "first", "M_KEY": "middle"]]
-        let hash1 = SettingsHasher.hash(keyPaths: ["env"], in: json)
-        let hash2 = SettingsHasher.hash(keyPaths: ["env"], in: json)
-        #expect(hash1 != nil)
-        #expect(hash1 == hash2)
+    /// The digest is persisted in `.mcs-project`, so its canonical input is a storage format:
+    /// changing it (or dropping `.sortedKeys`) turns every recorded hash into phantom drift.
+    @Test("hash is SHA-256 of sorted key paths with sorted-key JSON values")
+    func canonicalForm() {
+        let json: [String: Any] = [
+            "env": ["Z_KEY": "last", "A_KEY": "first", "M_KEY": "middle"],
+            "alwaysThinkingEnabled": true,
+        ]
+        let canonical = """
+        alwaysThinkingEnabled=true
+        env={"A_KEY":"first","M_KEY":"middle","Z_KEY":"last"}
+
+        """
+        let expected = SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
+        #expect(SettingsHasher.hash(keyPaths: ["env", "alwaysThinkingEnabled"], in: json) == expected)
     }
 
     @Test("different values produce different hashes")
@@ -76,18 +75,5 @@ struct SettingsHasherTests {
         let json: [String: Any] = ["env": 42]
         let result = SettingsHasher.extractValue("env.FOO", from: json)
         #expect(result == nil)
-    }
-
-    @Test("same values always produce same hash")
-    func sameValues() {
-        let json: [String: Any] = [
-            "env": ["FOO": "bar"],
-            "enabledPlugins": ["myPlugin": true],
-            "alwaysThinkingEnabled": true,
-        ]
-        let keys = ["env.FOO", "enabledPlugins.myPlugin", "alwaysThinkingEnabled"]
-        let hash1 = SettingsHasher.hash(keyPaths: keys, in: json)
-        let hash2 = SettingsHasher.hash(keyPaths: keys, in: json)
-        #expect(hash1 == hash2)
     }
 }

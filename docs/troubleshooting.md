@@ -36,7 +36,7 @@ Follow the system dialog to complete installation, then re-run `mcs sync`.
 
 **Symptom**: MCP servers that use `npx` fail to start or install.
 
-**Fix**: Node.js is auto-resolved as a dependency if your pack declares it. Re-run:
+**Fix**: `mcs` installs Node.js only when a pack declares it as a component (`brew: node`). Add one to the pack that needs it, then re-run:
 ```bash
 mcs sync
 ```

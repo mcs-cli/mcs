@@ -13,7 +13,7 @@ Sources/mcs/
     Sync/                        # Convergence engine, project configuration, installation logic
     Bootstrap/                   # Declarative mcs.yaml loader + shared pack-add pipeline (BootstrapFile, PackAdder)
     Export/                      # Export wizard (ConfigurationDiscovery, ManifestBuilder, PackWriter)
-    TechPack/                    # Tech pack protocol, component model, dependency resolver
+    TechPack/                    # Tech pack protocol, component model, pack registry
     Templates/                   # Template engine and section-based file composition
     Doctor/                      # Diagnostic checks and fix logic
     ExternalPack/                # YAML manifest parsing, Git fetching, adapter, script runner
@@ -154,22 +154,23 @@ Verbose form is also supported — see [Tech Pack Schema](techpack-schema.md).
 
 `Configurator` (with `ProjectSyncStrategy`) is the per-project convergence engine:
 
-1. **Multi-select**: shows all registered packs, pre-selects previously configured packs
+1. **Select packs** (`SyncCommand`): multi-select pre-checks previously configured packs; `--pack`/`--all` skip it
 2. **Compute diff**: `removals = previous - selected`, `additions = selected - previous`
-3. **Resolve template values** (multi-step):
-   - **3a.** Resolve built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`)
-   - **3b–3c.** Collect all prompt definitions from packs via `declaredPrompts()`, group shared keys (same key from 2+ packs, `input`/`select` types only)
-   - **3d.** Execute shared prompts once via `CrossPackPromptResolver` with combined display
-   - **3e.** Execute remaining per-pack prompts (skip already-resolved keys)
-4. **Scan for undeclared placeholders**: warn about `__KEY__` tokens in copyPackFile sources, settings files, and MCP configs that have no matching prompt
-5. **Unconfigure removed packs**: remove MCP servers (via CLI), delete project files, using stored `PackArtifactRecord`
-6. **Auto-install global deps**: brew packages and plugins for all selected packs
-7. **Install per-project artifacts**: copy skills/hooks/commands to `<project>/.claude/`, register MCP servers with `local` scope (with placeholder substitution in env/command/args)
-8. **Compose `settings.local.json`**: build from all selected packs' hook entries and settings files (with placeholder substitution)
-9. **Compose `CLAUDE.local.md`**: gather template sections from all selected packs
-10. **Run pack configure hooks**: pack-specific setup (e.g., generate config files)
-11. **Ensure gitignore entries**: add `.claude/` entries to global gitignore
-12. **Save project state**: write `.mcs-project` with artifact records for each pack
+3. **Non-interactive preflight** (stdin not a TTY only): resolve every prompt from seeded/stored values and declared defaults, and throw `PromptResolutionError` before anything is removed or installed if any key stays unresolved
+4. **Confirm and unconfigure removed packs**: show the removal summary and ask (unless `confirmRemovals` is off), then remove each pack's MCP servers, files, brew packages, plugins and gitignore entries using its stored `PackArtifactRecord`
+5. **Remove newly excluded components' artifacts** (`--customize`)
+6. **Auto-install global deps**: brew packages and plugins for all selected packs, before any other component
+7. **Resolve template values** (single pass):
+   - Built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`), then stored values from earlier syncs that are still valid (a `select` answer must still be an option), reused unless `--customize` is set or the user declines the reuse prompt
+   - Shared prompts (same key from 2+ packs, `input`/`select` only) once via `CrossPackPromptResolver`
+   - Each pack's remaining prompts, skipping keys an earlier pack produced
+   - Undeclared `__KEY__` placeholders in copyPackFile sources, settings files, MCP configs and templates are prompted inline, defaulting to the stored value
+8. **Install per-project artifacts**: per pack in selection order, install components in declaration order (skills/hooks/commands to `<project>/.claude/`, MCP servers with `local` scope, placeholders substituted), then remove artifacts the pack no longer declares
+9. **Compose `settings.local.json`**: build from all selected packs' hook entries and settings files (with placeholder substitution)
+10. **Compose `CLAUDE.local.md`**: gather template sections from all selected packs, dropping templates whose `dependencies:` name an excluded component
+11. **Run pack configure hooks**: pack-specific setup (e.g., generate config files)
+12. **Ensure gitignore entries**: add `.claude/` entries to global gitignore
+13. **Save state**: write `.mcs-project` with artifact records for each pack and update `~/.mcs/projects.yaml`
 
 The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack web`.
 
@@ -177,9 +178,13 @@ The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack 
 
 `Configurator` (with `GlobalSyncStrategy`) handles global-scope installation:
 
-1. **Selection**: interactive multi-select, `--pack <name>`, or `--all`
-2. **Component install**: brew packages, MCP servers (user scope), plugins
-3. **Record state**: update `~/.mcs/global-state.json`
+It runs the same `Configurator.configure` pipeline with these differences:
+
+- Brew packages and plugins install inline with the other components, in declaration order, instead of in an up-front pass (step 6)
+- MCP servers are registered with `user` scope
+- Settings compose into `~/.claude/settings.json` (preserving keys mcs does not own) and templates into `~/.claude/CLAUDE.md`; templates are not scanned for undeclared placeholders
+- Pack configure hooks do not run
+- State is recorded in `~/.mcs/global-state.json`
 
 ### Bootstrap (`mcs bootstrap`)
 
@@ -193,10 +198,6 @@ The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack 
 6. **Divergence footer**: after an additive sync, if any packs were preserved (present in project but not in the file), print an informational list pointing at `--prune` as the remedy. Non-blocking — keeps the divergence visible without a wall-style prompt.
 
 The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it. The additive-default + explicit-`--prune` shape matches the convention Homebrew Bundle, Kubernetes (`kubectl apply --prune`), and npm (`install` vs `prune`) settled on for declarative-file + external-state workflows.
-
-## Dependency Resolution
-
-`DependencyResolver` performs a topological sort of selected components plus their transitive dependencies. It detects cycles and auto-adds dependencies that weren't explicitly selected (marking them as "(auto-resolved)" in the summary).
 
 ## Component Model
 

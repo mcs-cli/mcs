@@ -525,24 +525,35 @@ struct SettingsKeysCheckTests {
 // MARK: - PackGitignoreCheck
 
 struct PackGitignoreCheckTests {
-    @Test("pass when all entries are present")
+    @Test("pass when all entries are present in the global gitignore")
     func passWhenAllPresent() throws {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-test-\(UUID().uuidString)")
-        try ".build\n.swiftpm\n".write(to: url, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: url) }
+        let home = try makeGlobalTmpDir(label: "pack-gitignore-pass")
+        defer { try? FileManager.default.removeItem(at: home) }
 
-        // PackGitignoreCheck uses GitignoreManager internally, so we test the struct's
-        // logic directly using a known gitignore path. Since we can't inject the path,
-        // we test the check struct's interface consistency instead.
-        let check = PackGitignoreCheck(entries: [".build", ".swiftpm"], packName: "test-pack")
-        // The actual result depends on the system's global gitignore — just verify the struct works
-        let result = check.check()
-        // Result will be either .pass or .fail depending on system state — no assertion on value
-        switch result {
-        case .pass, .fail: break
-        default: Issue.record("Expected .pass or .fail, got \(result)")
+        let check = PackGitignoreCheck(
+            entries: GitignoreManager.coreEntries, packName: "test-pack", environment: Environment(home: home)
+        )
+        guard case .pass = check.check() else {
+            Issue.record("Expected .pass")
+            return
         }
+    }
+
+    @Test("fail names the entries missing from the global gitignore")
+    func failListsMissingEntries() throws {
+        let home = try makeGlobalTmpDir(label: "pack-gitignore-fail")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let check = PackGitignoreCheck(
+            entries: GitignoreManager.coreEntries + ["pack-only-entry"],
+            packName: "test-pack",
+            environment: Environment(home: home)
+        )
+        guard case let .fail(message) = check.check() else {
+            Issue.record("Expected .fail")
+            return
+        }
+        #expect(message == "missing entries: pack-only-entry")
     }
 
     @Test("name includes pack name")
