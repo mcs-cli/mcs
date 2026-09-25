@@ -352,6 +352,10 @@ struct GlobalSyncStrategy: SyncStrategy {
 
     // MARK: - File Removal
 
+    var fileArtifactBase: URL {
+        environment.claudeDirectory
+    }
+
     func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool {
         let fm = FileManager.default
         guard let fullPath = PathContainment.safePath(

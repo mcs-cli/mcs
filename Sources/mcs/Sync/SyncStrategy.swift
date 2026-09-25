@@ -90,6 +90,8 @@ protocol SyncStrategy {
     /// Project scope computes relative to the project root.
     func fileRelativePath(destination: String, fileType: CopyFileType) -> String
 
+    var fileArtifactBase: URL { get }
+
     /// Remove a file artifact during pack unconfiguration.
     ///
     /// Project scope uses `ComponentExecutor.removeProjectFile`.

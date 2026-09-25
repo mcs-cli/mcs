@@ -157,7 +157,8 @@ struct ComponentExecutor {
                 }
                 // Hash all files recursively (directories can't be hashed directly)
                 let hashResult = try FileHasher.directoryFileHashes(at: destURL)
-                for (nestedRelPath, hash) in hashResult.hashes {
+                for (nestedRelPath, hash) in hashResult.hashes
+                    where Self.sourceShips(nestedRelPath, source: source) {
                     let fullPath = destURL.appendingPathComponent(nestedRelPath)
                     let relPath = PathContainment.relativePath(
                         of: fullPath.path,
@@ -243,7 +244,8 @@ struct ComponentExecutor {
                 }
                 // Hash all files recursively (directories can't be hashed directly)
                 let hashResult = try FileHasher.directoryFileHashes(at: destURL)
-                for (nestedRelPath, hash) in hashResult.hashes {
+                for (nestedRelPath, hash) in hashResult.hashes
+                    where Self.sourceShips(nestedRelPath, source: source) {
                     let fullPath = destURL.appendingPathComponent(nestedRelPath)
                     let relPath = projectRelativePath(fullPath, projectPath: projectPath)
                     installedHashes[relPath] = hash
@@ -268,6 +270,12 @@ struct ComponentExecutor {
             output.warn(error.localizedDescription)
             return ([], [:])
         }
+    }
+
+    private static func sourceShips(_ nestedRelPath: String, source: URL) -> Bool {
+        // A destination file the source no longer ships stays out of `fileHashes`, which is how
+        // `reconcileStaleArtifacts` finds and removes files a pack dropped from a directory.
+        FileManager.default.fileExists(atPath: source.appendingPathComponent(nestedRelPath).path)
     }
 
     /// Copy a file or directory, substituting `__PLACEHOLDER__` values in text files.

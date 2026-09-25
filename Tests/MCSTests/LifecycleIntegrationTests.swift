@@ -4101,3 +4101,97 @@ private struct TemplateFailingPack: TechPack {
         }
     }
 }
+
+// MARK: - Directory-sourced skills drop files upstream
+
+struct DroppedDirectoryFileTests {
+    private enum Scope: CaseIterable {
+        case project, global
+    }
+
+    private func configure(_ bed: LifecycleTestBed, scope: Scope, pack: MockTechPack) throws {
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = switch scope {
+        case .project: bed.makeConfigurator(registry: registry)
+        case .global: bed.makeGlobalSyncConfigurator(registry: registry)
+        }
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+    }
+
+    private func installedSkill(_ bed: LifecycleTestBed, scope: Scope) -> URL {
+        switch scope {
+        case .project: bed.project.appendingPathComponent(".claude/skills/my-skill")
+        case .global: bed.env.skillsDirectory.appendingPathComponent("my-skill")
+        }
+    }
+
+    private func fileHashes(_ bed: LifecycleTestBed, scope: Scope) throws -> [String: String] {
+        let state = switch scope {
+        case .project: try bed.projectState()
+        case .global: try bed.globalState()
+        }
+        return state.artifacts(for: "my-pack")?.fileHashes ?? [:]
+    }
+
+    private func write(_ content: String, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try content.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func makePack(_ bed: LifecycleTestBed, source: URL) -> MockTechPack {
+        MockTechPack(
+            identifier: "my-pack",
+            displayName: "My Pack",
+            components: [bed.skillComponent(pack: "my-pack", id: "skill", source: source, destination: "my-skill")]
+        )
+    }
+
+    @Test("Re-sync removes files the pack dropped and prunes emptied directories", arguments: Scope.allCases)
+    private func removesDroppedFiles(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        try write("old", to: source.appendingPathComponent("old.md"))
+        try write("old ref", to: source.appendingPathComponent("references/old-ref.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        let installed = installedSkill(bed, scope: scope)
+        let fm = FileManager.default
+        #expect(fm.fileExists(atPath: installed.appendingPathComponent("old.md").path))
+        #expect(fm.fileExists(atPath: installed.appendingPathComponent("references/old-ref.md").path))
+
+        try fm.removeItem(at: source.appendingPathComponent("old.md"))
+        try fm.removeItem(at: source.appendingPathComponent("references"))
+        try write("new", to: source.appendingPathComponent("new.md"))
+        try configure(bed, scope: scope, pack: pack)
+
+        #expect(!fm.fileExists(atPath: installed.appendingPathComponent("old.md").path))
+        #expect(!fm.fileExists(atPath: installed.appendingPathComponent("references").path))
+        #expect(fm.fileExists(atPath: installed.appendingPathComponent("SKILL.md").path))
+        #expect(fm.fileExists(atPath: installed.appendingPathComponent("new.md").path))
+
+        let trackedNames = try Set(fileHashes(bed, scope: scope).keys.map { ($0 as NSString).lastPathComponent })
+        #expect(trackedNames == ["SKILL.md", "new.md"])
+    }
+
+    @Test("A file the user adds inside an installed skill survives re-sync untracked", arguments: Scope.allCases)
+    private func preservesUserFile(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        let userFile = installedSkill(bed, scope: scope).appendingPathComponent("notes.md")
+        try write("mine", to: userFile)
+        try configure(bed, scope: scope, pack: pack)
+
+        #expect(FileManager.default.fileExists(atPath: userFile.path))
+        #expect(try !fileHashes(bed, scope: scope).keys.contains { $0.hasSuffix("notes.md") })
+    }
+}

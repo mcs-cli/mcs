@@ -246,6 +246,10 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     // MARK: - File Removal
 
+    var fileArtifactBase: URL {
+        projectPath
+    }
+
     func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool {
         let fm = FileManager.default
         guard let fullPath = PathContainment.safePath(
