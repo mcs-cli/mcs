@@ -201,6 +201,10 @@ struct MockTechPack: TechPack {
 /// (falling back to a `defaultAnswer` closure when no prior exists). Simulates the
 /// adapter's "skip keys already in resolvedValues" filter so tests can verify the
 /// full reuse pipeline without needing interactive stdin.
+///
+/// A prompt declared without a default is advertised with `defaultAnswer` as its default,
+/// so the non-interactive preflight sees the same answer the mock will give. Tests about
+/// unanswerable prompts use a real `ExternalPackAdapter` instead.
 struct MockPromptTechPack: TechPack {
     let identifier: String
     let displayName: String
@@ -231,7 +235,14 @@ struct MockPromptTechPack: TechPack {
     }
 
     func declaredPrompts(context _: ProjectConfigContext) -> [PromptDefinition] {
-        prompts
+        prompts.map { prompt in
+            PromptDefinition(
+                key: prompt.key, type: prompt.type, label: prompt.label,
+                defaultValue: prompt.defaultValue ?? defaultAnswer(prompt.key),
+                options: prompt.options, detectPatterns: prompt.detectPatterns,
+                scriptCommand: prompt.scriptCommand
+            )
+        }
     }
 
     func templateValues(context: ProjectConfigContext) -> [String: String] {

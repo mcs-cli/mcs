@@ -60,7 +60,7 @@ struct BootstrapCommand: LockedCommand {
 
         let desiredIdentifiers = try installPacks(file: file, ctx: ctx)
 
-        var projectState: ProjectState
+        let projectState: ProjectState
         do {
             projectState = try ProjectState(projectRoot: cwd)
         } catch {
@@ -74,11 +74,12 @@ struct BootstrapCommand: LockedCommand {
             file: file, desiredIdentifiers: desiredIdentifiers,
             registry: registry, cwd: cwd, env: ctx.env, output: ctx.output
         )
-        try seedPromptValues(file: file, state: &projectState, output: ctx.output)
+        let seededValues = seedValues(from: file, output: ctx.output)
         try runSync(
             projectRoot: cwd,
             desiredIdentifiers: desiredIdentifiers,
             projectState: projectState,
+            seededValues: seededValues,
             env: ctx.env,
             output: ctx.output,
             shell: ctx.shell,
@@ -405,18 +406,16 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Prompt priors
 
-    /// Merge the bootstrap file's `values` into `state.resolvedValues`. Sync reuses them
-    /// silently for keys a resolved pack declares as a prompt or references as a
-    /// `__PLACEHOLDER__`; any other key is dropped when sync rewrites the state.
-    private func seedPromptValues(
-        file: BootstrapFile,
-        state: inout ProjectState,
-        output: CLIOutput
-    ) throws {
-        // Fold in manifest order; warn when a later pack overrides an earlier pack's
-        // value for the same key so the divergence is visible. Values themselves stay
-        // out of the log: bootstrap `values` commonly hold MCP env vars (API keys,
-        // tokens), and a CI log is a common secret-exfil path.
+    /// The bootstrap file's `values`, folded in manifest order. Sync merges them into
+    /// `state.resolvedValues` and reuses them silently for keys a resolved pack declares as a
+    /// prompt or references as a `__PLACEHOLDER__`; any other key is dropped.
+    ///
+    /// Returned rather than saved: sync merges them only after its removals,
+    /// so pruning a removed pack's values can't take seeds meant for a pack being added.
+    private func seedValues(from file: BootstrapFile, output: CLIOutput) -> [String: String] {
+        // Warn when a later pack overrides an earlier pack's value for the same key so the
+        // divergence is visible. Values themselves stay out of the log: bootstrap `values`
+        // commonly hold MCP env vars (API keys, tokens), and a CI log is a common secret-exfil path.
         var merged: [String: String] = [:]
         var seedCount = 0
         for pack in file.packs {
@@ -432,27 +431,10 @@ struct BootstrapCommand: LockedCommand {
                 merged[key] = value
             }
         }
-        guard !merged.isEmpty else { return }
-
-        if dryRun {
+        if dryRun, !merged.isEmpty {
             output.dimmed("  would seed \(seedCount) prompt value(s) into project state")
-            return
         }
-
-        var current = state.resolvedValues ?? [:]
-        for (key, value) in merged {
-            current[key] = value
-        }
-        state.setResolvedValues(current)
-        // Failing to persist priors is not recoverable: the declarative contract is that
-        // sync will not re-prompt for these keys, and that depends on the priors reaching
-        // disk. Surface the failure and abort.
-        do {
-            try state.save()
-        } catch {
-            output.error("Failed to seed prompt values: \(error.localizedDescription)")
-            throw ExitCode.failure
-        }
+        return merged
     }
 
     /// A seeded key nothing consumes is most likely a typo, and sync drops it without a
@@ -520,6 +502,7 @@ struct BootstrapCommand: LockedCommand {
         projectRoot: URL,
         desiredIdentifiers: [String],
         projectState: ProjectState,
+        seededValues: [String: String] = [:],
         env: Environment,
         output: CLIOutput,
         shell: ShellRunner,
@@ -614,15 +597,16 @@ struct BootstrapCommand: LockedCommand {
         output.info(label: "Packs", filteredPacks.map(\.displayName).joined(separator: ", "))
 
         if dryRun {
-            try configurator.dryRun(packs: filteredPacks)
+            try configurator.dryRun(packs: filteredPacks, seededValues: seededValues)
         } else {
-            // seedPromptValues already answered every declared prompt — the
-            // interactive Y/n gate would contradict that. New prompts still execute.
+            // Seeded and stored values must not re-prompt behind the interactive Y/n gate;
+            // prompts nothing answers still execute.
             try configurator.configure(
                 packs: filteredPacks,
                 confirmRemovals: !yes,
                 excludedComponents: projectState.allExcludedComponents,
-                reusePriorValuesSilently: true
+                reusePriorValuesSilently: true,
+                seededValues: seededValues
             )
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")

@@ -9,6 +9,8 @@ import Foundation
 enum CrossPackPromptResolver {
     /// A prompt definition paired with the pack that declares it.
     struct PackPromptInfo {
+        /// Identity of the declaring pack; display names need not be unique.
+        let packID: String
         let packName: String
         let prompt: PromptDefinition
     }
@@ -131,6 +133,132 @@ enum CrossPackPromptResolver {
         return (reusable, newKeys)
     }
 
+    /// Where every value resolution starts: the keys a pack set consumes, partitioned against
+    /// the priors. Sync and the non-interactive preflight both build it here, so they cannot
+    /// disagree about which keys exist or which priors survive.
+    struct ValuePlan {
+        let declared: [PromptDefinition]
+        /// `__KEY__` placeholders no prompt declares, less the keys already in `context.resolvedValues`.
+        let undeclaredKeys: Set<String>
+        let reusableValues: [String: String]
+        let newKeys: Set<String>
+    }
+
+    static func planValues(
+        packs: [any TechPack],
+        context: ProjectConfigContext,
+        includeTemplates: Bool,
+        onWarning: ((String) -> Void)? = nil
+    ) -> ValuePlan {
+        let consumed = consumedKeys(
+            packs: packs, context: context, includeTemplates: includeTemplates, onWarning: onWarning
+        )
+        let undeclaredKeys = consumed.undeclared.subtracting(context.resolvedValues.keys)
+        // Nothing constrains an undeclared placeholder's value, so it partitions as `input`.
+        let placeholderPrompts = undeclaredKeys.map {
+            PromptDefinition(
+                key: $0, type: .input,
+                label: nil, defaultValue: nil, options: nil,
+                detectPatterns: nil, scriptCommand: nil
+            )
+        }
+        let (reusable, newKeys) = partitionDeclaredPrompts(
+            consumed.declared + placeholderPrompts,
+            priorValues: context.priorValues,
+            projectPath: context.projectPath
+        )
+        return ValuePlan(
+            declared: consumed.declared, undeclaredKeys: undeclaredKeys,
+            reusableValues: reusable, newKeys: newKeys
+        )
+    }
+
+    /// Every value a run without an interactive stdin will store, and every key it can't answer.
+    /// Replays sync's stages in sync's order, with `PromptExecutor.nonInteractiveValue` standing
+    /// in for each reader: reused priors when `reusesPriors`, then shared prompts, then each
+    /// pack in order for the keys still open, then undeclared placeholders from their prior.
+    /// A key a pack computes by `script` is claimed by that pack and left to its script.
+    static func resolveNonInteractively(
+        packs: [any TechPack],
+        context: ProjectConfigContext,
+        plan: ValuePlan,
+        reusesPriors: Bool,
+        includeTemplates: Bool
+    ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
+        let priors = context.priorValues
+        var answered = context.resolvedValues
+        var resolved: [String: String] = [:]
+        var claimed = Set<String>()
+        var unresolved: [UnresolvedPrompt] = []
+
+        func answer(_ key: String, _ value: String) {
+            answered[key] = value
+            resolved[key] = value
+        }
+
+        if reusesPriors {
+            for (key, value) in plan.reusableValues where answered[key] == nil {
+                answer(key, value)
+            }
+        }
+
+        let sharedContext = ProjectConfigContext(
+            projectPath: context.projectPath, repoName: context.repoName, output: context.output,
+            resolvedValues: answered, priorValues: priors, isGlobalScope: context.isGlobalScope
+        )
+        let shared = groupSharedPrompts(packs: packs, context: sharedContext)
+        for key in shared.keys.sorted() {
+            let infos = shared[key, default: []]
+            claimed.insert(key)
+            if let value = PromptExecutor.nonInteractiveValue(
+                declarations: infos.map(\.prompt), prior: priors[key], projectPath: context.projectPath
+            ) {
+                answer(key, value)
+            } else {
+                unresolved.append(UnresolvedPrompt(packNames: infos.map(\.packName), key: key))
+            }
+        }
+
+        for pack in packs {
+            let open = pack.declaredPrompts(context: context)
+                .filter { answered[$0.key] == nil && !claimed.contains($0.key) }
+            var seen = Set<String>()
+            for key in open.map(\.key) where seen.insert(key).inserted {
+                claimed.insert(key)
+                let declarations = open.filter { $0.key == key }
+                guard !declarations.contains(where: { $0.type == .script }) else { continue }
+                if let value = PromptExecutor.nonInteractiveValue(
+                    declarations: declarations, prior: priors[key], projectPath: context.projectPath
+                ) {
+                    answer(key, value)
+                } else {
+                    unresolved.append(UnresolvedPrompt(packNames: [pack.displayName], key: key))
+                }
+            }
+        }
+
+        let missing = plan.undeclaredKeys.filter { answered[$0] == nil && !claimed.contains($0) }
+        for key in missing {
+            if let prior = priors[key] { answer(key, prior) }
+        }
+        let stillMissing = Set(missing.filter { answered[$0] == nil })
+        if !stillMissing.isEmpty {
+            // Only on failure: naming who references a key costs a scan per pack.
+            var referencing: [String: [String]] = [:]
+            for pack in packs {
+                let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
+                    packs: [pack], includeTemplates: includeTemplates
+                )
+                for key in referenced.intersection(stillMissing) {
+                    referencing[key, default: []].append(pack.displayName)
+                }
+            }
+            unresolved += stillMissing.map { UnresolvedPrompt(packNames: referencing[$0, default: []], key: $0) }
+        }
+
+        return (resolved, unresolved.sorted { $0.key < $1.key })
+    }
+
     /// Keys whose value every declaring pack resolves by scanning, per `visibleValueTypes`.
     /// A key any pack declares as another type stays hidden — the same conservative rule the
     /// reuse partition applies to mixed declarations.
@@ -155,21 +283,23 @@ enum CrossPackPromptResolver {
         packs: [any TechPack],
         context: ProjectConfigContext
     ) -> [String: [PackPromptInfo]] {
-        var byKey: [String: [PackPromptInfo]] = [:]
-        let alreadyResolved = Set(context.resolvedValues.keys)
+        promptInfosByKey(packs: packs, context: context)
+            .mapValues { $0.filter { deduplicableTypes.contains($0.prompt.type) } }
+            .filter { $0.value.count > 1 }
+    }
 
+    /// Every declaration of every key not yet in `context.resolvedValues`, in pack order.
+    private static func promptInfosByKey(
+        packs: [any TechPack],
+        context: ProjectConfigContext
+    ) -> [String: [PackPromptInfo]] {
+        var byKey: [String: [PackPromptInfo]] = [:]
         for pack in packs {
-            for prompt in pack.declaredPrompts(context: context) {
-                guard deduplicableTypes.contains(prompt.type) else { continue }
-                guard !alreadyResolved.contains(prompt.key) else { continue }
-                byKey[prompt.key, default: []].append(
-                    PackPromptInfo(packName: pack.displayName, prompt: prompt)
-                )
+            for prompt in pack.declaredPrompts(context: context) where context.resolvedValues[prompt.key] == nil {
+                byKey[prompt.key, default: []].append(PackPromptInfo(packID: pack.identifier, packName: pack.displayName, prompt: prompt))
             }
         }
-
-        // Only return keys shared by 2+ packs
-        return byKey.filter { $0.value.count > 1 }
+        return byKey
     }
 
     /// Execute shared prompts once, showing a combined label from all packs.
@@ -181,12 +311,26 @@ enum CrossPackPromptResolver {
     static func resolveSharedPrompts(
         _ shared: [String: [PackPromptInfo]],
         output: CLIOutput,
-        priorValues: [String: String] = [:]
-    ) -> [String: String] {
+        priorValues: [String: String] = [:],
+        projectPath: URL,
+        isGlobalScope: Bool
+    ) throws -> [String: String] {
         var resolved: [String: String] = [:]
+        var unresolved: [UnresolvedPrompt] = []
 
         for key in shared.keys.sorted() {
             guard let infos = shared[key], !infos.isEmpty else { continue }
+
+            if !output.hasInteractiveStdin {
+                if let value = PromptExecutor.nonInteractiveValue(
+                    declarations: infos.map(\.prompt), prior: priorValues[key], projectPath: projectPath
+                ) {
+                    resolved[key] = value
+                } else {
+                    unresolved.append(UnresolvedPrompt(packNames: infos.map(\.packName), key: key))
+                }
+                continue
+            }
 
             // Display combined prompt header
             let packNames = infos.map(\.packName).joined(separator: ", ")
@@ -227,7 +371,7 @@ enum CrossPackPromptResolver {
                 }
                 let items = mergedOptions.map { (name: $0.label, description: $0.value) }
                 let label = "Select value for \(key)"
-                let initialIndex = PromptOption.index(of: prior, in: mergedOptions)
+                let initialIndex = PromptOption.index(of: prior, in: mergedOptions, fallback: declaredDefault)
                 let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
                 resolved[key] = mergedOptions[selected].value
             } else {
@@ -243,6 +387,36 @@ enum CrossPackPromptResolver {
             }
         }
 
+        if !unresolved.isEmpty {
+            throw PromptResolutionError(unresolved: unresolved, isGlobalScope: isGlobalScope)
+        }
         return resolved
+    }
+}
+
+/// A prompt key no source can answer, with the packs whose declarations failed to answer it.
+struct UnresolvedPrompt: Equatable {
+    let packNames: [String]
+    let key: String
+}
+
+/// Raised instead of storing whatever a closed stdin yields. Names keys only: prompt
+/// values commonly hold secrets, and this message lands in CI logs.
+struct PromptResolutionError: Error, Equatable, LocalizedError {
+    let unresolved: [UnresolvedPrompt]
+    /// Bootstrap seeds project scope only, so the remedy differs by scope.
+    let isGlobalScope: Bool
+
+    var errorDescription: String? {
+        lines.joined(separator: "\n")
+    }
+
+    var lines: [String] {
+        ["Cannot resolve \(unresolved.count) prompt value(s) without an interactive terminal:"]
+            + unresolved.map { "  - \($0.packNames.joined(separator: ", ")): \($0.key)" }
+            + [isGlobalScope
+                ? "Re-run 'mcs sync --global' from a terminal to answer them; later unattended runs reuse the answers."
+                : "Declare them under 'values:' in \(BootstrapFile.defaultFilename) and run 'mcs bootstrap',"
+                + " or re-run from a terminal."]
     }
 }

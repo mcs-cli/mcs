@@ -10,6 +10,7 @@ struct PromptExecutor {
     enum PromptError: Error, Equatable, LocalizedError {
         case noFilesDetected(pattern: String)
         case scriptFailed(key: String, stderr: String)
+        case unresolved(key: String)
 
         var errorDescription: String? {
             switch self {
@@ -17,6 +18,8 @@ struct PromptExecutor {
                 "No files matching '\(pattern)' were found"
             case let .scriptFailed(key, stderr):
                 "Script for prompt '\(key)' failed: \(stderr)"
+            case let .unresolved(key):
+                "Prompt '\(key)' has no seeded, stored or default value and stdin is not interactive"
             }
         }
     }
@@ -37,7 +40,15 @@ struct PromptExecutor {
         projectPath: URL,
         priorValue: String? = nil
     ) throws -> String {
-        switch prompt.type {
+        if !output.hasInteractiveStdin, prompt.type != .script {
+            guard let value = Self.nonInteractiveValue(
+                declarations: [prompt], prior: priorValue, projectPath: projectPath
+            ) else {
+                throw PromptError.unresolved(key: prompt.key)
+            }
+            return value
+        }
+        return switch prompt.type {
         case .fileDetect:
             try executeFileDetect(prompt: prompt, projectPath: projectPath, priorValue: priorValue)
         case .input:
@@ -79,9 +90,10 @@ struct PromptExecutor {
 
     // MARK: - File Detect
 
-    /// Scan for files matching one or more patterns and present a selector.
-    /// `priorValue` pre-selects the file chosen last sync — pattern order decides the
-    /// cursor otherwise, which can land on a sibling of the file the user actually picked.
+    /// Scan for files matching one or more patterns and present a selector (interactive only;
+    /// off a TTY `execute` resolves through `nonInteractiveValue` instead).
+    /// `priorValue` pre-selects the file chosen last sync, then the declared default — pattern
+    /// order decides the cursor otherwise, which can land on a sibling of the file the user picked.
     private func executeFileDetect(
         prompt: PromptDefinition,
         projectPath: URL,
@@ -111,7 +123,9 @@ struct PromptExecutor {
                 return (name: name, description: ext.isEmpty ? "File" : ext)
             }
             let label = prompt.label ?? "Select a file"
-            let initialIndex = priorValue.flatMap { files.firstIndex(of: $0) } ?? 0
+            let initialIndex = (priorValue.flatMap { files.firstIndex(of: $0) })
+                ?? (prompt.defaultValue.flatMap { files.firstIndex(of: $0) })
+                ?? 0
             let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
             return files[selected]
         }
@@ -202,9 +216,51 @@ struct PromptExecutor {
             (name: option.label, description: option.value)
         }
         let label = prompt.label ?? "Select value for \(prompt.key)"
-        let initialIndex = PromptOption.index(of: priorValue, in: options)
+        let initialIndex = PromptOption.index(of: priorValue, in: options, fallback: prompt.defaultValue)
         let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
         return options[selected].value
+    }
+
+    // MARK: - Non-Interactive
+
+    /// The value one key resolves to without a reader: the prior, then the first declared
+    /// default, each only if the declarations admit it. `nil` means the key is unanswerable
+    /// and the run must fail rather than store whatever EOF yields.
+    ///
+    /// `declarations` are the ones the answering sync step would use: one pack's, or a shared
+    /// group's — never a `script`. Any `input` declaration admits a value verbatim; a set that
+    /// is all `fileDetect` scans every declaration's patterns and follows the executor's
+    /// zero-, one- and many-match branches; otherwise the merged `select` options constrain it.
+    static func nonInteractiveValue(
+        declarations: [PromptDefinition],
+        prior: String?,
+        projectPath: URL
+    ) -> String? {
+        let types = Set(declarations.map(\.type))
+        guard !types.isEmpty else { return nil }
+        let declaredDefault = declarations.compactMap(\.defaultValue).first
+        let candidates = [prior, declaredDefault].compactMap(\.self)
+
+        if types.contains(.input) {
+            return candidates.first
+        }
+
+        if types == [.fileDetect] {
+            let files = detectFiles(matching: declarations.flatMap { $0.detectPatterns ?? ["*"] }, in: projectPath)
+            switch files.count {
+            case 0:
+                // A default is the only way to name a file the scan can't see, and an empty
+                // one is rejected here just as the interactive zero-match branch rejects it.
+                return declaredDefault.flatMap { $0.isEmpty ? nil : $0 }
+            case 1:
+                return files[0]
+            default:
+                return candidates.first { files.contains($0) }
+            }
+        }
+
+        let constrained = Set(declarations.flatMap { $0.options ?? [] }.map(\.value))
+        return candidates.first { constrained.isEmpty || constrained.contains($0) }
     }
 
     // MARK: - Script

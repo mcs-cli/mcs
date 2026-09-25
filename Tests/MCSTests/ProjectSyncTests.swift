@@ -5,7 +5,7 @@ import Testing
 // MARK: - Dry Run Tests
 
 struct DryRunTests {
-    private let output = CLIOutput(colorsEnabled: false)
+    private let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -156,7 +156,7 @@ struct DryRunTests {
 // MARK: - Settings Merge Tests
 
 struct PackSettingsMergeTests {
-    private let output = CLIOutput(colorsEnabled: false)
+    private let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -396,7 +396,7 @@ struct PackSettingsMergeTests {
 // MARK: - installProjectFile Substitution Tests
 
 struct InstallProjectFileSubstitutionTests {
-    private let output = CLIOutput(colorsEnabled: false)
+    private let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -549,7 +549,7 @@ struct InstallProjectFileSubstitutionTests {
 // MARK: - Auto-Derived Hook & Plugin Tests
 
 struct AutoDerivedSettingsTests {
-    private let output = CLIOutput(colorsEnabled: false)
+    private let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
@@ -1306,7 +1306,7 @@ struct StaleArtifactReconciliationTests {
         let env = Environment(home: home)
         return Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
             claudeCLI: mockCLI
@@ -1606,7 +1606,7 @@ struct StaleArtifactReconciliationTests {
 // MARK: - Corrupt State Abort Tests
 
 struct CorruptStateAbortTests {
-    private let output = CLIOutput(colorsEnabled: false)
+    private let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory

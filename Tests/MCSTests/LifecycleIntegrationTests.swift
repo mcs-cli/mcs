@@ -24,7 +24,7 @@ private struct LifecycleTestBed {
     func makeConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
@@ -49,7 +49,7 @@ private struct LifecycleTestBed {
     ) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter),
+            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: GlobalSyncStrategy(environment: env),
@@ -1845,6 +1845,35 @@ struct HookMetadataLifecycleTests {
     }
 }
 
+extension LifecycleTestBed {
+    /// A real adapter, so prompts go through `PromptExecutor` rather than a mock's simulation.
+    func adapterPack(
+        identifier: String = "adapter-pack",
+        displayName: String = "Adapter Pack",
+        prompts: [PromptDefinition]
+    ) -> ExternalPackAdapter {
+        ExternalPackAdapter(
+            manifest: ExternalPackManifest(
+                schemaVersion: 1,
+                identifier: identifier,
+                displayName: displayName,
+                description: "Pack with real prompt execution",
+                author: nil,
+                minMCSVersion: nil,
+                components: [],
+                templates: nil,
+                prompts: prompts,
+                configureProject: nil,
+                supplementaryDoctorChecks: nil,
+                ignore: nil
+            ),
+            packPath: home,
+            shell: ShellRunner(environment: env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+}
+
 // MARK: - Prompt Value Reuse Lifecycle
 
 struct PromptValueReuseLifecycleTests {
@@ -1857,10 +1886,12 @@ struct PromptValueReuseLifecycleTests {
         )
     }
 
-    private func fileDetectPrompt(_ key: String, patterns: [String]) -> PromptDefinition {
+    private func fileDetectPrompt(
+        _ key: String, patterns: [String], defaultValue: String? = nil
+    ) -> PromptDefinition {
         PromptDefinition(
             key: key, type: .fileDetect,
-            label: nil, defaultValue: nil, options: nil,
+            label: nil, defaultValue: defaultValue, options: nil,
             detectPatterns: patterns, scriptCommand: nil
         )
     }
@@ -2072,16 +2103,19 @@ struct PromptValueReuseLifecycleTests {
         try touch("App.xcodeproj", in: bed.project)
         try touch("App.xcworkspace", in: bed.project)
 
+        // Off-TTY, two matches with no prior resolve only through a default that is one of them.
         let pack = MockPromptTechPack(
             identifier: "detect-pack",
             displayName: "Detect Pack",
-            prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"])],
+            prompts: [fileDetectPrompt(
+                "PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"], defaultValue: "App.xcodeproj"
+            )],
             defaultAnswer: { _ in "re-asked" }
         )
         let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
 
         try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcodeproj")
 
         var state = try bed.projectState()
         state.setResolvedValues(["PROJECT": "App.xcworkspace"])
@@ -2111,8 +2145,9 @@ struct PromptValueReuseLifecycleTests {
         state.setResolvedValues(["PROJECT": "Removed.xcworkspace"])
         try state.save()
 
+        // The re-scan finds only App.xcodeproj, so the stale prior is replaced by that match.
         try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "re-asked")
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcodeproj")
     }
 
     @Test("Non-interactive sync reuses priors silently")
@@ -2258,45 +2293,213 @@ struct PromptValueReuseLifecycleTests {
         #expect(final.resolvedValues?["KEY_A"] == "user-a")
     }
 
-    @Test("--customize forces re-ask even when priors are available")
-    func customizeForceReAsk() throws {
+    // MARK: Non-interactive resolution
+
+    @Test("Non-TTY sync fails naming pack and key for an unseeded input with no default")
+    func nonInteractiveUnresolvedInputFails() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        // Track whether templateValues saw unresolved keys (re-ask path)
-        // by using defaultAnswer that differs per call.
-        let pack = MockPromptTechPack(
-            identifier: "customize-pack",
-            displayName: "Customize",
-            prompts: [inputPrompt("SETTING")],
-            defaultAnswer: { _ in "mock-re-asked" }
+        let prompted = bed.adapterPack(prompts: [inputPrompt("API_KEY")])
+        let cmdSource = try bed.makeCommandSource(name: "doc.md")
+        let bystander = MockTechPack(
+            identifier: "bystander",
+            displayName: "Bystander",
+            components: [bed.commandComponent(pack: "bystander", id: "doc", source: cmdSource, destination: "doc.md")],
+            templates: []
         )
+        let packs: [any TechPack] = [prompted, bystander]
+
+        #expect(throws: PromptResolutionError(unresolved: [
+            UnresolvedPrompt(packNames: ["Adapter Pack"], key: "API_KEY"),
+        ], isGlobalScope: false)) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
+                .configure(packs: packs, confirmRemovals: false)
+        }
+
+        let stateFile = bed.project.appendingPathComponent(".claude/\(Constants.FileNames.mcsProject)")
+        #expect(!FileManager.default.fileExists(atPath: stateFile.path))
+        #expect(!FileManager.default.fileExists(
+            atPath: bed.project.appendingPathComponent(".claude/commands/doc.md").path
+        ))
+    }
+
+    @Test("Non-TTY sync stores the declared default when nothing is seeded")
+    func nonInteractiveUsesDefault() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let level = PromptDefinition(
+            key: "LOG_LEVEL", type: .select, label: nil, defaultValue: "debug",
+            options: ["info", "debug"].map { PromptOption(value: $0, label: $0) },
+            detectPatterns: nil, scriptCommand: nil
+        )
+        let pack = bed.adapterPack(prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "feature"), level])
 
         try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
             .configure(packs: [pack], confirmRemovals: false)
+
+        let values = try bed.projectState().resolvedValues
+        #expect(values?["BRANCH_PREFIX"] == "feature")
+        #expect(values?["LOG_LEVEL"] == "debug")
+    }
+
+    @Test("Non-TTY sync fails for an undeclared placeholder with no stored value")
+    func nonInteractiveUnresolvedPlaceholderFails() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try placeholderPack(bed: bed)
+
+        #expect(throws: PromptResolutionError(unresolved: [
+            UnresolvedPrompt(packNames: ["Placeholder Pack"], key: "MEMORIES_BRANCH"),
+        ], isGlobalScope: false)) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+                .configure(packs: [pack], confirmRemovals: false)
+        }
+    }
+
+    @Test("Non-TTY sync swapping packs that share a key does not inherit the removed pack's value")
+    func nonInteractiveSwapAsksFresh() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let packA = bed.adapterPack(
+            identifier: "pack-a", displayName: "Pack A",
+            prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "a-default")]
+        )
+        let packB = bed.adapterPack(
+            identifier: "pack-b", displayName: "Pack B",
+            prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "b-default")]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA], confirmRemovals: false)
 
         var state = try bed.projectState()
-        state.setResolvedValues(["SETTING": "user-previous"])
+        state.setResolvedValues(["BRANCH_PREFIX": "chosen-for-a"])
         try state.save()
 
-        // Without --customize: non-interactive reuses → state stays "user-previous"
-        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
-            .configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["SETTING"] == "user-previous")
+        try bed.makeConfigurator(registry: registry).configure(packs: [packB], confirmRemovals: false)
 
-        // With --customize: seed bypass → mock's templateValues sees no seeded key
-        // and returns priorValues["SETTING"] (still "user-previous" since MockPromptTechPack
-        // uses context.priorValues as its answer source). This mirrors real behavior:
-        // prompts would run but with priors as defaults. To verify the bypass, seed a
-        // different prior and assert templateValues received it, not a pre-seeded resolve.
-        state = try bed.projectState()
-        state.setResolvedValues(["SETTING": "prior-updated"])
+        #expect(try bed.projectState().resolvedValues?["BRANCH_PREFIX"] == "b-default")
+    }
+
+    @Test("A key an earlier pack computes by script is not asked again by a later pack")
+    func scriptFirstKeyIsNotReAsked() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let script = PromptDefinition(
+            key: "VERSION", type: .script, label: nil, defaultValue: nil,
+            options: nil, detectPatterns: nil, scriptCommand: "echo 1.2.3"
+        )
+        let computing = bed.adapterPack(identifier: "pack-a", displayName: "Pack A", prompts: [script])
+        let asking = bed.adapterPack(identifier: "pack-b", displayName: "Pack B", prompts: [inputPrompt("VERSION")])
+        let packs: [any TechPack] = [computing, asking]
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["VERSION"] == "1.2.3")
+    }
+
+    /// Two packs detect `PROJECT` with different patterns, and only the second's file exists.
+    private func splitDetectPacks(bed: LifecycleTestBed) throws -> [any TechPack] {
+        try touch("App.xcworkspace", in: bed.project)
+        return [
+            bed.adapterPack(
+                identifier: "pack-a", displayName: "Pack A",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj"])]
+            ),
+            bed.adapterPack(
+                identifier: "pack-b", displayName: "Pack B",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcworkspace"])]
+            ),
+        ]
+    }
+
+    private func storePrior(_ values: [String: String], bed: LifecycleTestBed) throws {
+        var state = try bed.projectState()
+        state.setResolvedValues(values)
         try state.save()
+    }
 
-        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
-            .configure(packs: [pack], confirmRemovals: false, customize: true)
-        // Under --customize, templateValues runs (nothing seeded), returns priorValues["SETTING"]
-        #expect(try bed.projectState().resolvedValues?["SETTING"] == "prior-updated")
+    @Test("Non-TTY sync keeps a fileDetect prior that any declaring pack's scan still finds")
+    func nonInteractiveSplitFileDetectKeepsPrior() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packs = try splitDetectPacks(bed: bed)
+        try storePrior(["PROJECT": "App.xcworkspace"], bed: bed)
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcworkspace")
+    }
+
+    @Test("Non-TTY sync reuses a prior verbatim when any pack declares the key as input")
+    func nonInteractiveMixedTypesKeepPrior() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packs: [any TechPack] = [
+            bed.adapterPack(
+                identifier: "pack-a", displayName: "Pack A",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj"])]
+            ),
+            bed.adapterPack(identifier: "pack-b", displayName: "Pack B", prompts: [inputPrompt("PROJECT")]),
+        ]
+        try storePrior(["PROJECT": "Legacy.xcodeproj"], bed: bed)
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "Legacy.xcodeproj")
+    }
+
+    @Test("--customize off-TTY bypasses reuse: a prior only helps a pack whose own prompt accepts it")
+    func customizeBypassesReuseOffTTY() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packs = try splitDetectPacks(bed: bed)
+        try storePrior(["PROJECT": "App.xcworkspace"], bed: bed)
+
+        // Reuse would keep the prior (see the split-fileDetect test); without it the first
+        // declaring pack answers alone, and its scan finds nothing.
+        #expect(throws: PromptResolutionError(
+            unresolved: [UnresolvedPrompt(packNames: ["Pack A"], key: "PROJECT")], isGlobalScope: false
+        )) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
+                .configure(packs: packs, confirmRemovals: false, customize: true)
+        }
+    }
+
+    @Test(
+        "Non-TTY sync fails before removing anything when a selected pack can't be answered",
+        arguments: [false, true]
+    )
+    func nonInteractiveFailureLeavesStateUntouched(confirmRemovals: Bool) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let cmdSource = try bed.makeCommandSource(name: "keep.md")
+        let kept = MockTechPack(
+            identifier: "kept",
+            displayName: "Kept",
+            components: [bed.commandComponent(pack: "kept", id: "keep", source: cmdSource, destination: "keep.md")]
+        )
+        let unanswerable = bed.adapterPack(prompts: [inputPrompt("API_KEY")])
+        let registry = TechPackRegistry(packs: [kept, unanswerable])
+        try bed.makeConfigurator(registry: registry).configure(packs: [kept], confirmRemovals: false)
+        try storePrior(["UNRELATED": "value"], bed: bed)
+        let before = try bed.projectState()
+
+        #expect(throws: PromptResolutionError.self) {
+            try bed.makeConfigurator(registry: registry)
+                .configure(packs: [unanswerable], confirmRemovals: confirmRemovals)
+        }
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == before.configuredPacks)
+        #expect(after.resolvedValues == before.resolvedValues)
+        #expect(FileManager.default.fileExists(
+            atPath: bed.project.appendingPathComponent(".claude/commands/keep.md").path
+        ))
     }
 }
 
@@ -2484,6 +2687,59 @@ struct UpdateReapplyLifecycleTests {
         // and unconfigured it from the project without a prompt.
         #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
         #expect(try bed.globalState().configuredPacks.contains("shared-pack"))
+        #expect(FileManager.default.fileExists(atPath: projectHook.path))
+    }
+
+    @Test("A scope with unresolvable prompts is reported while later scopes still re-apply")
+    func unresolvedScopeDoesNotStrandOthers() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let branchSource = try bed.makeCommandSource(name: "branch.md", content: "branch: __MEMORIES_BRANCH__")
+        let globalPack = MockTechPack(
+            identifier: "global-pack",
+            displayName: "Global Pack",
+            components: [bed.commandComponent(
+                pack: "global-pack", id: "branch", source: branchSource, destination: "branch.md"
+            )]
+        )
+        let hookSource = try bed.makeHookSource(name: "check.sh")
+        let projectPack = MockTechPack(
+            identifier: "project-pack",
+            displayName: "Project Pack",
+            components: [bed.hookComponent(pack: "project-pack", id: "check", source: hookSource, destination: "check.sh")]
+        )
+        let registry = TechPackRegistry(packs: [globalPack, projectPack])
+
+        var globalState = try bed.globalState()
+        globalState.setResolvedValues(["MEMORIES_BRANCH": "main"])
+        try globalState.save()
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [globalPack], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [projectPack], confirmRemovals: false)
+
+        // The global run can no longer answer its placeholder; the project run must still happen.
+        globalState = try bed.globalState()
+        globalState.setResolvedValues([:])
+        try globalState.save()
+        let projectHook = bed.project.appendingPathComponent(".claude/hooks/project-pack/check.sh")
+        try FileManager.default.removeItem(at: projectHook)
+
+        let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))
+            .resolve(filter: .all, projectRoot: bed.project)
+        #expect(runs.count == 2)
+
+        let unresolved = try UpdateCommand.reapplyScopes(
+            runs,
+            skippedPackIDs: [],
+            registry: registry,
+            dryRun: false,
+            env: bed.env,
+            shell: ShellRunner(environment: bed.env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            claudeCLI: bed.mockCLI
+        )
+
+        #expect(unresolved == [runs[0].label])
         #expect(FileManager.default.fileExists(atPath: projectHook.path))
     }
 
@@ -3265,6 +3521,11 @@ struct BrewPackageDoctorTests {
 // MARK: - Bootstrap: additive-vs-prune convergence
 
 struct BootstrapIntegrationTests {
+    private let tokenPrompt = PromptDefinition(
+        key: "API_TOKEN", type: .input, label: nil, defaultValue: nil,
+        options: nil, detectPatterns: nil, scriptCommand: nil
+    )
+
     /// Build a pair of packs, seed both into the project's configured set via a first
     /// `Configurator.configure`, and hand back everything BootstrapCommand.runSync needs.
     private func seedTwoPackProject(
@@ -3290,6 +3551,58 @@ struct BootstrapIntegrationTests {
         try bed.makeConfigurator(registry: registry)
             .configure(packs: [packA, packB], confirmRemovals: false)
         return (packA, packB, registry)
+    }
+
+    @Test("--prune swapping in a pack still gets the values mcs.yaml seeds for it")
+    func pruneSwapKeepsSeededValues() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+        let incoming = bed.adapterPack(
+            identifier: "pack-c", displayName: "Pack C", prompts: [tokenPrompt]
+        )
+        let registry = TechPackRegistry(packs: [seeded.packA, seeded.packB, incoming])
+
+        try BootstrapCommand.parse(["--prune", "--yes"]).runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [incoming.identifier],
+            projectState: bed.projectState(),
+            seededValues: ["API_TOKEN": "seeded"],
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == [incoming.identifier])
+        #expect(after.resolvedValues?["API_TOKEN"] == "seeded")
+    }
+
+    @Test("Bootstrap dry-run counts seeded values as answers")
+    func dryRunSeesSeededValues() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = bed.adapterPack(prompts: [tokenPrompt])
+        let registry = TechPackRegistry(packs: [pack])
+
+        func warnings(seededValues: [String: String]) throws -> Int {
+            let counter = WarningCounter()
+            try BootstrapCommand.parse(["--dry-run"]).runSync(
+                projectRoot: bed.project,
+                desiredIdentifiers: [pack.identifier],
+                projectState: bed.projectState(),
+                seededValues: seededValues,
+                env: bed.env,
+                output: CLIOutput(colorsEnabled: false, warningCounter: counter, interactiveStdin: false),
+                shell: ShellRunner(environment: bed.env),
+                registry: registry
+            )
+            return counter.count
+        }
+
+        #expect(try warnings(seededValues: [:]) == 1)
+        #expect(try warnings(seededValues: ["API_TOKEN": "seeded"]) == 0)
     }
 
     @Test("Additive default preserves a previously-configured pack absent from mcs.yaml")
