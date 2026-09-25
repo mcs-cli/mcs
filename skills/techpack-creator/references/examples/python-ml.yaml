@@ -94,14 +94,6 @@ components:
     isRequired: true
     settingsFile: config/settings.json
 
-  - id: gitignore
-    description: Global gitignore entries
-    isRequired: true
-    gitignore:
-      - .claude/memories
-      - .claude/settings.local.json
-      - .claude/.mcs-project
-
 templates:
   - sectionIdentifier: instructions
     contentFile: templates/instructions.md

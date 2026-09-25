@@ -59,17 +59,16 @@ Maps repository file signals to tech stack detection and recommended pack compon
 
 ## MCP Server Recommendations
 
-Only include servers with clear evidence of need. Do NOT add speculatively.
+Only include servers with clear evidence of need.
 
 ### By Language/Framework
 
 | Stack | MCP Server | Command | Dep |
 |-------|-----------|---------|-----|
 | Xcode/iOS/macOS (`.xcodeproj` or `.xcworkspace`) | XcodeBuildMCP | `npx -y xcodebuildmcp@latest` | node |
-| PostgreSQL (in docker-compose or deps) | postgres-mcp-server | `npx -y @anthropic/postgres-mcp-server` | node |
-| SQLite (in deps) | sqlite-mcp-server | `npx -y @anthropic/sqlite-mcp-server` | node |
-| GitHub (`.github/` directory, heavy GH usage) | github-mcp-server | `npx -y @anthropic/github-mcp-server` | node |
-| Puppeteer/Playwright detected | puppeteer-mcp-server | `npx -y @anthropic/puppeteer-mcp-server` | node |
+
+For databases, GitHub, or browser automation, take the server command from the repo's existing MCP
+registration (`.claude.json`, `.mcp.json`) rather than naming a package from memory.
 
 ### MCP Scope Guide
 
@@ -142,16 +141,8 @@ Only include servers with clear evidence of need. Do NOT add speculatively.
 
 ## Gitignore Recommendations
 
-Standard entries for every pack:
-
-```yaml
-gitignore:
-  - .claude/memories
-  - .claude/settings.local.json
-  - .claude/.mcs-project
-```
-
-Stack-specific additions:
+`mcs` itself adds `.claude`, `*.local.*` and `.claude/.mcs-project` to the global gitignore and owns
+those lines, so a pack declares only stack-specific entries:
 
 | Stack | Extra Entries |
 |-------|-------------|
@@ -191,7 +182,7 @@ Stack-specific additions:
 - template: build/test commands, Swift conventions
 - prompt: fileDetect for .xcodeproj/.xcworkspace
 - settings: plan mode
-- gitignore: standard + .xcodebuildmcp
+- gitignore: .xcodebuildmcp
 - doctor: xcode-select check
 
 ### Node.js Web Project
@@ -201,7 +192,6 @@ Stack-specific additions:
 - template: build/test/lint commands, framework conventions
 - prompt: select for package manager if ambiguous
 - settings: plan mode
-- gitignore: standard
 
 ### Python Project
 - brew: python (if needed)
@@ -209,17 +199,14 @@ Stack-specific additions:
 - hook: SessionStart for dependency check
 - template: venv setup, test runner, linting
 - settings: plan mode, env vars from .env.example
-- gitignore: standard
 
 ### Rust Project
 - template: cargo commands, clippy conventions
 - settings: plan mode
-- gitignore: standard
 
 ### Go Project
 - template: go build/test/vet, module conventions
 - settings: plan mode
-- gitignore: standard
 
 ### Multi-Language Monorepo
 - One brew component per detected runtime

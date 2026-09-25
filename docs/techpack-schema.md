@@ -296,9 +296,10 @@ Infers: `type: configuration`, `installAction: settingsFile`
   description: Global gitignore
   isRequired: true
   gitignore:
-    - .claude/memories
-    - .claude/settings.local.json
+    - .xcodebuildmcp
 ```
+
+`mcs` already adds `.claude`, `*.local.*` and `.claude/.mcs-project` to the global gitignore and owns those lines, so a pack lists only entries specific to its stack.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -758,8 +759,7 @@ components:
     description: Gitignore entries
     isRequired: true
     gitignore:
-      - .claude/memories
-      - .claude/settings.local.json
+      - .eslintcache
 
 templates:
   - sectionIdentifier: instructions

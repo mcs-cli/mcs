@@ -93,12 +93,6 @@ components:
     isRequired: true
     settingsFile: config/settings.json
 
-  - id: gitignore
-    description: Global gitignore entries
-    isRequired: true
-    gitignore:
-      - "*.local.*"
-
 templates:
   - sectionIdentifier: git
     contentFile: templates/git.md
