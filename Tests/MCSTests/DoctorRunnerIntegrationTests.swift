@@ -53,10 +53,7 @@ struct DoctorRunnerIntegrationTests {
         let (home, project) = try makeSandboxProject(label: "runner-filter")
         defer { try? FileManager.default.removeItem(at: home) }
 
-        let registry = TechPackRegistry(packs: [
-            MockTechPack(identifier: "pack-a", displayName: "Pack A"),
-            missingHookPack("pack-b"),
-        ])
+        let registry = TechPackRegistry(packs: [missingHookPack("pack-a"), missingHookPack("pack-b")])
 
         var state = try ProjectState(projectRoot: project)
         state.recordPack("pack-a")
@@ -64,13 +61,17 @@ struct DoctorRunnerIntegrationTests {
         try state.save()
 
         var unfiltered = makeRunner(home: home, projectRoot: project, registry: registry)
-        #expect(try unfiltered.run().issues > 0)
+        let all = try unfiltered.run()
 
         var filtered = makeRunner(
             home: home, projectRoot: project,
             registry: registry, packFilter: "pack-a"
         )
-        #expect(try filtered.run().issues == 0)
+        let onlyA = try filtered.run()
+
+        // Each pack contributes one failing check: pack-a's still runs, pack-b's is filtered out.
+        #expect(onlyA.issues > 0)
+        #expect(onlyA.issues < all.issues)
     }
 
     @Test("runner with excluded components skips those checks")

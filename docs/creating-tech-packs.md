@@ -339,14 +339,8 @@ Components can depend on other components. Use short IDs — the engine auto-pre
 identifier: my-pack
 
 components:
-  - id: homebrew
-    description: Package manager
-    type: brewPackage
-    shell: '/bin/bash -c "$(curl -fsSL https://brew.sh)"'
-
   - id: node
     description: JavaScript runtime
-    dependencies: [homebrew]       # → my-pack.homebrew
     brew: node
 
   - id: my-server
@@ -357,7 +351,7 @@ components:
       args: ["-y", "my-server@latest"]
 ```
 
-Each intra-pack dependency must name a component in the same pack, and excluding a component also drops the templates that depend on it. Dependencies do not reorder installation yet: brew packages and plugins install first, then the remaining components in declaration order, so declare a dependency before the components that need it ([#419](https://github.com/mcs-cli/mcs/issues/419)).
+Each intra-pack dependency must name a component in the same pack, and excluding a component also drops the templates that depend on it. Dependencies do not reorder installation yet ([#419](https://github.com/mcs-cli/mcs/issues/419)): a project sync installs every brew package and plugin first, then the remaining components in declaration order, while a global sync installs all components in declaration order. Declare a dependency before the components that need it, and don't make a brew or plugin component depend on any other kind of component — in a project sync it installs before them.
 
 For cross-pack dependencies, use the full `pack.component` form:
 

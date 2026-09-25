@@ -13,7 +13,7 @@ Sources/mcs/
     Sync/                        # Convergence engine, project configuration, installation logic
     Bootstrap/                   # Declarative mcs.yaml loader + shared pack-add pipeline (BootstrapFile, PackAdder)
     Export/                      # Export wizard (ConfigurationDiscovery, ManifestBuilder, PackWriter)
-    TechPack/                    # Tech pack protocol, component model, dependency resolver
+    TechPack/                    # Tech pack protocol, component model, pack registry
     Templates/                   # Template engine and section-based file composition
     Doctor/                      # Diagnostic checks and fix logic
     ExternalPack/                # YAML manifest parsing, Git fetching, adapter, script runner

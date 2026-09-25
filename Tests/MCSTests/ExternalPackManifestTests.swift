@@ -11,7 +11,6 @@ struct ExternalPackManifestTests {
         return dir
     }
 
-    /// Write `yaml` as a pack's techpack.yaml and load it.
     private func loadManifest(_ yaml: String) throws -> ExternalPackManifest {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
