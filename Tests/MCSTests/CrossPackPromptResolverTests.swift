@@ -321,6 +321,56 @@ struct CrossPackPromptResolverTests {
         #expect(resolution.unresolved.isEmpty)
     }
 
+    @Test("resolveNonInteractively judges a key no packs share by its first declaring pack's patterns")
+    func resolveNonInteractivelyFileDetectPerPack() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mcs-preflight-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "".write(to: dir.appendingPathComponent("App.xcodeproj"), atomically: true, encoding: .utf8)
+        try "".write(to: dir.appendingPathComponent("App.xcworkspace"), atomically: true, encoding: .utf8)
+
+        let detect = { (pattern: String) in
+            PromptDefinition(
+                key: "PROJECT", type: .fileDetect, label: nil, defaultValue: nil,
+                options: nil, detectPatterns: [pattern], scriptCommand: nil
+            )
+        }
+        let packs = [
+            makeMockPack(name: "pack-a", prompts: [detect("*.xcodeproj")]),
+            makeMockPack(name: "pack-b", prompts: [detect("*.xcworkspace")]),
+        ]
+        let context = ProjectConfigContext(
+            projectPath: dir, repoName: "r", output: CLIOutput(colorsEnabled: false),
+            resolvedValues: [:], isGlobalScope: false
+        )
+
+        let resolution = CrossPackPromptResolver.resolveNonInteractively(
+            packs: packs, context: context, priorValues: [:], includeTemplates: false
+        )
+
+        #expect(resolution.resolved == ["PROJECT": "App.xcodeproj"])
+        #expect(resolution.unresolved.isEmpty)
+    }
+
+    @Test("resolveNonInteractively leaves a key to the script its first declaring pack runs")
+    func resolveNonInteractivelyScriptFirst() {
+        let script = PromptDefinition(
+            key: "VERSION", type: .script, label: nil, defaultValue: nil,
+            options: nil, detectPatterns: nil, scriptCommand: "echo 1"
+        )
+        let packs = [
+            makeMockPack(name: "pack-a", prompts: [script]),
+            makeMockPack(name: "pack-b", prompts: [input("VERSION")]),
+        ]
+
+        let resolution = CrossPackPromptResolver.resolveNonInteractively(
+            packs: packs, context: makeContext(), priorValues: [:], includeTemplates: false
+        )
+
+        #expect(resolution.resolved.isEmpty)
+        #expect(resolution.unresolved.isEmpty)
+    }
+
     @Test("Resolution error names packs and keys, never values")
     func resolutionErrorText() {
         let error = PromptResolutionError(unresolved: [
@@ -331,7 +381,7 @@ struct CrossPackPromptResolverTests {
             "Cannot resolve 2 prompt value(s) without an interactive terminal:",
             "  - iOS: API_KEY",
             "  - A, B: REGION",
-            "Seed them under 'values:' in mcs.yaml, or re-run from a terminal.",
+            "Declare them under 'values:' in mcs.yaml and run 'mcs bootstrap', or re-run from a terminal.",
         ])
     }
 

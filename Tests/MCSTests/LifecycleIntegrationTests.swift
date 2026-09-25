@@ -1845,6 +1845,35 @@ struct HookMetadataLifecycleTests {
     }
 }
 
+extension LifecycleTestBed {
+    /// A real adapter, so prompts go through `PromptExecutor` rather than a mock's simulation.
+    func adapterPack(
+        identifier: String = "adapter-pack",
+        displayName: String = "Adapter Pack",
+        prompts: [PromptDefinition]
+    ) -> ExternalPackAdapter {
+        ExternalPackAdapter(
+            manifest: ExternalPackManifest(
+                schemaVersion: 1,
+                identifier: identifier,
+                displayName: displayName,
+                description: "Pack with real prompt execution",
+                author: nil,
+                minMCSVersion: nil,
+                components: [],
+                templates: nil,
+                prompts: prompts,
+                configureProject: nil,
+                supplementaryDoctorChecks: nil,
+                ignore: nil
+            ),
+            packPath: home,
+            shell: ShellRunner(environment: env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+}
+
 // MARK: - Prompt Value Reuse Lifecycle
 
 struct PromptValueReuseLifecycleTests {
@@ -2266,35 +2295,12 @@ struct PromptValueReuseLifecycleTests {
 
     // MARK: Non-interactive resolution
 
-    /// A real adapter, so prompts go through `PromptExecutor` rather than the mock's simulation.
-    private func adapterPack(bed: LifecycleTestBed, prompts: [PromptDefinition]) -> ExternalPackAdapter {
-        ExternalPackAdapter(
-            manifest: ExternalPackManifest(
-                schemaVersion: 1,
-                identifier: "adapter-pack",
-                displayName: "Adapter Pack",
-                description: "Pack with real prompt execution",
-                author: nil,
-                minMCSVersion: nil,
-                components: [],
-                templates: nil,
-                prompts: prompts,
-                configureProject: nil,
-                supplementaryDoctorChecks: nil,
-                ignore: nil
-            ),
-            packPath: bed.home,
-            shell: ShellRunner(environment: bed.env),
-            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
-        )
-    }
-
     @Test("Non-TTY sync fails naming pack and key for an unseeded input with no default")
     func nonInteractiveUnresolvedInputFails() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        let prompted = adapterPack(bed: bed, prompts: [inputPrompt("API_KEY")])
+        let prompted = bed.adapterPack(prompts: [inputPrompt("API_KEY")])
         let cmdSource = try bed.makeCommandSource(name: "doc.md")
         let bystander = MockTechPack(
             identifier: "bystander",
@@ -2328,7 +2334,7 @@ struct PromptValueReuseLifecycleTests {
             options: ["info", "debug"].map { PromptOption(value: $0, label: $0) },
             detectPatterns: nil, scriptCommand: nil
         )
-        let pack = adapterPack(bed: bed, prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "feature"), level])
+        let pack = bed.adapterPack(prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "feature"), level])
 
         try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
             .configure(packs: [pack], confirmRemovals: false)
@@ -2351,6 +2357,31 @@ struct PromptValueReuseLifecycleTests {
             try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
                 .configure(packs: [pack], confirmRemovals: false)
         }
+    }
+
+    @Test("Non-TTY sync swapping packs that share a key does not inherit the removed pack's value")
+    func nonInteractiveSwapAsksFresh() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let packA = bed.adapterPack(
+            identifier: "pack-a", displayName: "Pack A",
+            prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "a-default")]
+        )
+        let packB = bed.adapterPack(
+            identifier: "pack-b", displayName: "Pack B",
+            prompts: [inputPrompt("BRANCH_PREFIX", defaultValue: "b-default")]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA], confirmRemovals: false)
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["BRANCH_PREFIX": "chosen-for-a"])
+        try state.save()
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [packB], confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["BRANCH_PREFIX"] == "b-default")
     }
 
     @Test("--customize forces re-ask even when priors are available")
@@ -2579,6 +2610,59 @@ struct UpdateReapplyLifecycleTests {
         // and unconfigured it from the project without a prompt.
         #expect(try bed.projectState().configuredPacks.contains("shared-pack"))
         #expect(try bed.globalState().configuredPacks.contains("shared-pack"))
+        #expect(FileManager.default.fileExists(atPath: projectHook.path))
+    }
+
+    @Test("A scope with unresolvable prompts is reported while later scopes still re-apply")
+    func unresolvedScopeDoesNotStrandOthers() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let branchSource = try bed.makeCommandSource(name: "branch.md", content: "branch: __MEMORIES_BRANCH__")
+        let globalPack = MockTechPack(
+            identifier: "global-pack",
+            displayName: "Global Pack",
+            components: [bed.commandComponent(
+                pack: "global-pack", id: "branch", source: branchSource, destination: "branch.md"
+            )]
+        )
+        let hookSource = try bed.makeHookSource(name: "check.sh")
+        let projectPack = MockTechPack(
+            identifier: "project-pack",
+            displayName: "Project Pack",
+            components: [bed.hookComponent(pack: "project-pack", id: "check", source: hookSource, destination: "check.sh")]
+        )
+        let registry = TechPackRegistry(packs: [globalPack, projectPack])
+
+        var globalState = try bed.globalState()
+        globalState.setResolvedValues(["MEMORIES_BRANCH": "main"])
+        try globalState.save()
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [globalPack], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [projectPack], confirmRemovals: false)
+
+        // The global run can no longer answer its placeholder; the project run must still happen.
+        globalState = try bed.globalState()
+        globalState.setResolvedValues([:])
+        try globalState.save()
+        let projectHook = bed.project.appendingPathComponent(".claude/hooks/project-pack/check.sh")
+        try FileManager.default.removeItem(at: projectHook)
+
+        let runs = try UpdateScopeResolver(environment: bed.env, output: CLIOutput(colorsEnabled: false))
+            .resolve(filter: .all, projectRoot: bed.project)
+        #expect(runs.count == 2)
+
+        let unresolved = try UpdateCommand.reapplyScopes(
+            runs,
+            skippedPackIDs: [],
+            registry: registry,
+            dryRun: false,
+            env: bed.env,
+            shell: ShellRunner(environment: bed.env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            claudeCLI: bed.mockCLI
+        )
+
+        #expect(unresolved == [runs[0].label])
         #expect(FileManager.default.fileExists(atPath: projectHook.path))
     }
 
@@ -3360,6 +3444,11 @@ struct BrewPackageDoctorTests {
 // MARK: - Bootstrap: additive-vs-prune convergence
 
 struct BootstrapIntegrationTests {
+    private let tokenPrompt = PromptDefinition(
+        key: "API_TOKEN", type: .input, label: nil, defaultValue: nil,
+        options: nil, detectPatterns: nil, scriptCommand: nil
+    )
+
     /// Build a pair of packs, seed both into the project's configured set via a first
     /// `Configurator.configure`, and hand back everything BootstrapCommand.runSync needs.
     private func seedTwoPackProject(
@@ -3385,6 +3474,58 @@ struct BootstrapIntegrationTests {
         try bed.makeConfigurator(registry: registry)
             .configure(packs: [packA, packB], confirmRemovals: false)
         return (packA, packB, registry)
+    }
+
+    @Test("--prune swapping in a pack still gets the values mcs.yaml seeds for it")
+    func pruneSwapKeepsSeededValues() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+        let incoming = bed.adapterPack(
+            identifier: "pack-c", displayName: "Pack C", prompts: [tokenPrompt]
+        )
+        let registry = TechPackRegistry(packs: [seeded.packA, seeded.packB, incoming])
+
+        try BootstrapCommand.parse(["--prune", "--yes"]).runSync(
+            projectRoot: bed.project,
+            desiredIdentifiers: [incoming.identifier],
+            projectState: bed.projectState(),
+            seededValues: ["API_TOKEN": "seeded"],
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: registry
+        )
+
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == [incoming.identifier])
+        #expect(after.resolvedValues?["API_TOKEN"] == "seeded")
+    }
+
+    @Test("Bootstrap dry-run counts seeded values as answers")
+    func dryRunSeesSeededValues() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = bed.adapterPack(prompts: [tokenPrompt])
+        let registry = TechPackRegistry(packs: [pack])
+
+        func warnings(seededValues: [String: String]) throws -> Int {
+            let counter = WarningCounter()
+            try BootstrapCommand.parse(["--dry-run"]).runSync(
+                projectRoot: bed.project,
+                desiredIdentifiers: [pack.identifier],
+                projectState: bed.projectState(),
+                seededValues: seededValues,
+                env: bed.env,
+                output: CLIOutput(colorsEnabled: false, warningCounter: counter, interactiveStdin: false),
+                shell: ShellRunner(environment: bed.env),
+                registry: registry
+            )
+            return counter.count
+        }
+
+        #expect(try warnings(seededValues: [:]) == 1)
+        #expect(try warnings(seededValues: ["API_TOKEN": "seeded"]) == 0)
     }
 
     @Test("Additive default preserves a previously-configured pack absent from mcs.yaml")

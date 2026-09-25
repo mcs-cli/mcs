@@ -83,24 +83,15 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
-        // One scope's unanswerable prompt must not strand every scope after it unrefreshed.
-        var unresolvedScopes: [String] = []
-        for run in runs {
-            do {
-                try Self.reapplyScope(
-                    run,
-                    skippedPackIDs: updatePhase.skipped,
-                    registry: techPackRegistry,
-                    dryRun: dryRun,
-                    env: env,
-                    shell: shell,
-                    output: output
-                )
-            } catch let error as PromptResolutionError {
-                error.lines.forEach { output.error($0) }
-                unresolvedScopes.append(run.label)
-            }
-        }
+        let unresolvedScopes = try Self.reapplyScopes(
+            runs,
+            skippedPackIDs: updatePhase.skipped,
+            registry: techPackRegistry,
+            dryRun: dryRun,
+            env: env,
+            shell: shell,
+            output: output
+        )
 
         if !dryRun {
             // Surface + persist any legacy MCSConfig migration from this write-safe
@@ -326,6 +317,40 @@ struct UpdateCommand: LockedCommand {
         let skipped: Set<String>
         let failed: Set<String>
         let attempted: Int
+    }
+
+    /// Re-apply every scope in order and return the labels of those whose prompts could not
+    /// be resolved. One scope's unanswerable prompt must not strand every scope after it
+    /// unrefreshed, so that failure is reported and the loop moves on; any other error aborts.
+    static func reapplyScopes(
+        _ runs: [UpdateScopeResolver.ScopeRun],
+        skippedPackIDs: Set<String>,
+        registry: TechPackRegistry,
+        dryRun: Bool,
+        env: Environment,
+        shell: any ShellRunning,
+        output: CLIOutput,
+        claudeCLI: (any ClaudeCLI)? = nil
+    ) throws -> [String] {
+        var unresolvedScopes: [String] = []
+        for run in runs {
+            do {
+                try reapplyScope(
+                    run,
+                    skippedPackIDs: skippedPackIDs,
+                    registry: registry,
+                    dryRun: dryRun,
+                    env: env,
+                    shell: shell,
+                    output: output,
+                    claudeCLI: claudeCLI
+                )
+            } catch let error as PromptResolutionError {
+                error.lines.forEach { output.error($0) }
+                unresolvedScopes.append(run.label)
+            }
+        }
+        return unresolvedScopes
     }
 
     /// Print one scope's header, resolve its configured packs, and converge the scope onto them.

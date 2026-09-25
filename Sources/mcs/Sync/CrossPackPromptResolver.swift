@@ -134,6 +134,10 @@ enum CrossPackPromptResolver {
     /// Every value a run without an interactive stdin can answer, and every key it can't,
     /// per `PromptExecutor.nonInteractiveValue`. Keys already in `context.resolvedValues`
     /// are skipped; a placeholder no prompt declares resolves only from its prior.
+    ///
+    /// Each key is judged the way sync will answer it: a `groupSharedPrompts` key by all its
+    /// declarations at once, any other key by its first declaring pack alone — that pack's
+    /// executor is the one whose value wins. A key that pack computes by `script` is left to it.
     static func resolveNonInteractively(
         packs: [any TechPack],
         context: ProjectConfigContext,
@@ -144,15 +148,17 @@ enum CrossPackPromptResolver {
         var unresolved: [String: [String]] = [:]
 
         let declarationsByKey = promptInfosByKey(packs: packs, context: context)
+        let shared = groupSharedPrompts(packs: packs, context: context)
         for (key, infos) in declarationsByKey {
-            let declarations = infos.map(\.prompt)
-            guard declarations.contains(where: { $0.type != .script }) else { continue }
+            let answering = shared[key] ?? infos.filter { $0.packName == infos[0].packName }
+            let declarations = answering.map(\.prompt)
+            guard !declarations.contains(where: { $0.type == .script }) else { continue }
             if let value = PromptExecutor.nonInteractiveValue(
                 declarations: declarations, prior: priorValues[key], projectPath: context.projectPath
             ) {
                 resolved[key] = value
             } else {
-                unresolved[key] = infos.map(\.packName)
+                unresolved[key] = answering.map(\.packName)
             }
         }
 
@@ -326,6 +332,9 @@ struct PromptResolutionError: Error, Equatable, LocalizedError {
     var lines: [String] {
         ["Cannot resolve \(unresolved.count) prompt value(s) without an interactive terminal:"]
             + unresolved.map { "  - \($0.packNames.joined(separator: ", ")): \($0.key)" }
-            + ["Seed them under 'values:' in \(BootstrapFile.defaultFilename), or re-run from a terminal."]
+            + [
+                "Declare them under 'values:' in \(BootstrapFile.defaultFilename) and run 'mcs bootstrap',"
+                    + " or re-run from a terminal.",
+            ]
     }
 }

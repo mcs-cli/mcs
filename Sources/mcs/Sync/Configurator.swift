@@ -186,7 +186,7 @@ struct Configurator {
     // MARK: - Dry Run
 
     /// Compute and display what `configure` would do, without making any changes.
-    func dryRun(packs: [any TechPack]) throws {
+    func dryRun(packs: [any TechPack], seededValues: [String: String] = [:]) throws {
         let state = try ProjectState(stateFile: scope.stateFile)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
@@ -204,7 +204,12 @@ struct Configurator {
 
         if !output.hasInteractiveStdin {
             let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
-            let unresolved = resolveNonInteractively(packs: packs, state: state, builtInValues: builtInValues).unresolved
+            let removals = state.configuredPacks.subtracting(packs.map(\.identifier))
+            let unresolved = resolveNonInteractively(
+                packs: packs,
+                priors: priorsAfterRemovals(state: state, removals: removals, seededValues: seededValues),
+                builtInValues: builtInValues
+            ).unresolved
             if !unresolved.isEmpty {
                 output.warn("A non-interactive sync would fail:")
                 for line in PromptResolutionError(unresolved: unresolved).lines {
@@ -241,7 +246,8 @@ struct Configurator {
         confirmRemovals: Bool = true,
         excludedComponents: [String: Set<String>] = [:],
         customize: Bool = false,
-        reusePriorValuesSilently: Bool = false
+        reusePriorValuesSilently: Bool = false,
+        seededValues: [String: String] = [:]
     ) throws {
         var state = try ProjectState(stateFile: scope.stateFile)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
@@ -257,7 +263,11 @@ struct Configurator {
         let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
         var nonInteractiveValues: [String: String] = [:]
         if !output.hasInteractiveStdin {
-            let resolution = resolveNonInteractively(packs: packs, state: state, builtInValues: builtInValues)
+            let resolution = resolveNonInteractively(
+                packs: packs,
+                priors: priorsAfterRemovals(state: state, removals: removals, seededValues: seededValues),
+                builtInValues: builtInValues
+            )
             guard resolution.unresolved.isEmpty else {
                 throw PromptResolutionError(unresolved: resolution.unresolved)
             }
@@ -314,6 +324,12 @@ struct Configurator {
                 let excluded = excludedComponents[pack.identifier] ?? []
                 autoInstallGlobalDependencies(pack, excludedIDs: excluded)
             }
+        }
+
+        // Seeds join the priors only now: merged before the removals above, the prune would drop
+        // any seeded for a pack this sync adds, since that pack isn't configured yet.
+        if !seededValues.isEmpty {
+            state.setResolvedValues((state.resolvedValues ?? [:]).merging(seededValues) { _, seeded in seeded })
         }
 
         // Snapshot prior values before resolveAllValues overwrites them via
@@ -596,17 +612,29 @@ struct Configurator {
     /// federated cleanup prune orphans — a later pack declaring the same key is asked fresh instead
     /// of seeing a stale "prior" from a removed pack.
     private func pruneOrphanResolvedValues(state: inout ProjectState) {
+        guard let kept = keysKeptByPrune(
+            survivors: state.configuredPacks, priors: state.resolvedValues ?? [:], reportWarnings: true
+        ) else { return }
+        state.pruneResolvedValues(keepingKeys: kept)
+    }
+
+    /// The keys `survivors` consume, or `nil` when pruning must be skipped because some of
+    /// them can't be enumerated.
+    private func keysKeptByPrune(
+        survivors: Set<String>,
+        priors: [String: String],
+        reportWarnings: Bool
+    ) -> Set<String>? {
         var survivingPacks: [any TechPack] = []
-        for packID in state.configuredPacks {
+        for packID in survivors {
             guard let pack = registry.pack(for: packID) else {
                 // Conservative fallback matching ResourceRefCounter: if any configured pack
                 // can't be loaded from the registry, we can't enumerate its declared keys,
                 // so skip pruning rather than risk dropping values that still belong.
-                return
+                return nil
             }
             survivingPacks.append(pack)
         }
-        let priors = state.resolvedValues ?? [:]
         let context = strategy.makeConfigContext(
             output: output, resolvedValues: priors, priorValues: priors
         )
@@ -616,13 +644,28 @@ struct Configurator {
             context: context,
             includeTemplates: scope.includeTemplatesInScan,
             onWarning: {
-                output.warn($0)
+                if reportWarnings { output.warn($0) }
                 templatesUnreadable = true
             }
         )
         // Same fallback as an unloadable pack: an unread template's placeholders are unknown.
-        guard !templatesUnreadable else { return }
-        state.pruneResolvedValues(keepingKeys: consumed.all)
+        return templatesUnreadable ? nil : consumed.all
+    }
+
+    /// Stored values as they will stand once `removals` are unconfigured, with `seededValues`
+    /// on top — the view `configure` resolves against, computed without touching state.
+    private func priorsAfterRemovals(
+        state: ProjectState,
+        removals: Set<String>,
+        seededValues: [String: String]
+    ) -> [String: String] {
+        var priors = state.resolvedValues ?? [:]
+        if !removals.isEmpty, let kept = keysKeptByPrune(
+            survivors: state.configuredPacks.subtracting(removals), priors: priors, reportWarnings: false
+        ) {
+            priors = priors.filter { kept.contains($0.key) }
+        }
+        return priors.merging(seededValues) { _, seeded in seeded }
     }
 
     /// Remove artifacts for components that were previously included but are now excluded.
@@ -839,16 +882,15 @@ struct Configurator {
 
     private func resolveNonInteractively(
         packs: [any TechPack],
-        state: ProjectState,
+        priors: [String: String],
         builtInValues: [String: String]
     ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
-        let priorValues = state.resolvedValues ?? [:]
-        return CrossPackPromptResolver.resolveNonInteractively(
+        CrossPackPromptResolver.resolveNonInteractively(
             packs: packs,
             context: strategy.makeConfigContext(
-                output: output, resolvedValues: builtInValues, priorValues: priorValues
+                output: output, resolvedValues: builtInValues, priorValues: priors
             ),
-            priorValues: priorValues,
+            priorValues: priors,
             includeTemplates: scope.includeTemplatesInScan
         )
     }
