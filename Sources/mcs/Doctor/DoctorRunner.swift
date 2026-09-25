@@ -9,9 +9,8 @@ struct DoctorSummary {
 
 /// Orchestrates all doctor checks grouped by section, with optional fix mode.
 ///
-/// **Scope of `--fix`**: Cleanup, migration, and trivial repairs only.
-/// Additive operations (install/register/copy) are deferred to `mcs sync`.
-/// See CoreDoctorChecks.swift header for the full responsibility boundary.
+/// **Scope of `--fix`**: a check's own cleanup or repair, or a re-sync of the scope a failed
+/// check belongs to. See CoreDoctorChecks.swift header for the full responsibility boundary.
 struct DoctorRunner {
     let fixMode: Bool
     /// Skip the confirmation prompt before executing fixes (e.g. `--yes` flag).
@@ -46,7 +45,27 @@ struct DoctorRunner {
     private var failCount = 0
     private var fixedCount = 0
     /// Failed checks collected during diagnosis, to be fixed after confirmation.
-    private var pendingFixes: [any DoctorCheck] = []
+    private var pendingFixes: [CollectedCheck] = []
+    private let shell: any ShellRunning
+    private let claudeCLI: (any ClaudeCLI)?
+
+    private enum SyncTarget: Hashable {
+        case global
+        case project(URL)
+
+        var projectRoot: URL? {
+            if case let .project(root) = self { return root }
+            return nil
+        }
+
+        var label: String {
+            projectRoot.map { "project \($0.lastPathComponent)" } ?? "the global scope"
+        }
+    }
+
+    /// `syncTarget` is nil when a re-sync cannot make the check pass: checks a pack author wrote,
+    /// standalone checks, and anything sync does not install.
+    private typealias CollectedCheck = (check: any DoctorCheck, isExcluded: Bool, syncTarget: SyncTarget?)
 
     /// A resolved scope for check collection. Each scope carries the pack IDs,
     /// effective project root, excluded components, and a display label.
@@ -56,6 +75,14 @@ struct DoctorRunner {
         let excludedComponentIDs: Set<String>
         let label: String
         let artifactsByPack: [String: PackArtifactRecord]
+        /// False when the scope's packs are not all configured where it points, so a re-sync there
+        /// would converge the wrong packs (`--pack` names a global-only pack from inside a project).
+        var canResync = true
+
+        var syncTarget: SyncTarget? {
+            guard canResync else { return nil }
+            return effectiveProjectRoot.map(SyncTarget.project) ?? .global
+        }
 
         /// Hook directory the commands in `artifactsByPack` were recorded with.
         ///
@@ -88,7 +115,9 @@ struct DoctorRunner {
         globalOnly: Bool = false,
         registry: TechPackRegistry,
         environment: Environment = Environment(),
-        projectRootOverride: URL? = nil
+        projectRootOverride: URL? = nil,
+        shell: (any ShellRunning)? = nil,
+        claudeCLI: (any ClaudeCLI)? = nil
     ) {
         self.fixMode = fixMode
         self.skipConfirmation = skipConfirmation
@@ -97,6 +126,8 @@ struct DoctorRunner {
         self.registry = registry
         self.environment = environment
         self.projectRootOverride = projectRootOverride
+        self.shell = shell ?? ShellRunner(environment: environment)
+        self.claudeCLI = claudeCLI
         output = CLIOutput(warningCounter: warningCounter)
     }
 
@@ -176,7 +207,7 @@ struct DoctorRunner {
 
         // === Layered check collection ===
 
-        var allChecks: [(check: any DoctorCheck, isExcluded: Bool)] = []
+        var allChecks: [CollectedCheck] = []
         var allPackIDs = Set<String>()
         let availablePacks = registry.availablePacks
 
@@ -199,24 +230,22 @@ struct DoctorRunner {
                 output: output, filesystemContext: scope.makeCollisionContext(environment: env)
             )
 
+            // Derived and artifact-record checks verify what sync installs or recorded, so a re-sync
+            // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
                 for component in pack.components {
                     let excluded = scope.excludedComponentIDs.contains(component.id)
-                    let checks = component.allDoctorChecks(projectRoot: scope.effectiveProjectRoot, environment: env)
-                    allChecks += checks.map { (check: $0, isExcluded: excluded) }
+                    if let derived = component.deriveDoctorCheck(projectRoot: scope.effectiveProjectRoot, environment: env) {
+                        allChecks.append((check: derived, isExcluded: excluded, syncTarget: scope.syncTarget))
+                    }
+                    allChecks += component.supplementaryChecks(scope.effectiveProjectRoot, env)
+                        .map { (check: $0, isExcluded: excluded, syncTarget: nil) }
                 }
-                // Pack-level supplementary checks (cannot be derived from components)
                 allChecks += pack.supplementaryDoctorChecks(projectRoot: scope.effectiveProjectRoot)
-                    .map { (check: $0, isExcluded: false) }
+                    .map { (check: $0, isExcluded: false, syncTarget: nil) }
 
-                // Artifact-record-driven checks from stored state
                 if let artifacts = scope.artifactsByPack[pack.identifier] {
-                    allChecks += artifactChecks(
-                        for: artifacts,
-                        pack: pack,
-                        scope: scope,
-                        env: env
-                    )
+                    allChecks += artifactChecks(for: artifacts, pack: pack, scope: scope, env: env)
                 }
             }
         }
@@ -256,7 +285,7 @@ struct DoctorRunner {
             syncHint: "mcs sync --global"
         ))
 
-        allChecks += nonComponentChecks.map { (check: $0, isExcluded: false) }
+        allChecks += nonComponentChecks.map { (check: $0, isExcluded: false, syncTarget: nil) }
 
         // Group by section
         let grouped = Dictionary(grouping: allChecks, by: \.check.section)
@@ -299,6 +328,15 @@ struct DoctorRunner {
                 output.plain("")
                 output.success("Applied \(fixedCount) fix\(fixedCount == 1 ? "" : "es").")
             }
+        } else {
+            let ownFixCount = pendingFixes.count { $0.check.fixCommandPreview != nil }
+            let resyncCount = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
+                .planned.reduce(0) { $0 + $1.checks.count }
+            let repairable = ownFixCount + resyncCount
+            if repairable > 0 {
+                output.plain("")
+                output.info("Run 'mcs doctor --fix' to repair \(repairable) issue\(repairable == 1 ? "" : "s").")
+            }
         }
 
         return summary
@@ -325,9 +363,11 @@ struct DoctorRunner {
             // Load artifacts and excluded components from the appropriate state
             var artifacts: [String: PackArtifactRecord] = [:]
             var excludedIDs: Set<String> = []
+            var configuredHere: Set<String> = []
             if let root = effectiveRoot {
                 do {
                     let state = try ProjectState(projectRoot: root)
+                    configuredHere = state.configuredPacks
                     if state.exists {
                         excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                         for id in packIDs {
@@ -341,6 +381,7 @@ struct DoctorRunner {
                 }
             } else {
                 // Global scope — use pre-loaded artifacts and exclusions
+                configuredHere = globallyConfiguredPackIDs
                 excludedIDs = globalExcludedComponentIDs
                 for id in packIDs {
                     if let record = globalArtifactsByPack[id] {
@@ -353,7 +394,8 @@ struct DoctorRunner {
                 effectiveProjectRoot: effectiveRoot,
                 excludedComponentIDs: excludedIDs,
                 label: "--pack flag",
-                artifactsByPack: artifacts
+                artifactsByPack: artifacts,
+                canResync: packIDs.isSubset(of: configuredHere)
             )]
         }
 
@@ -481,8 +523,8 @@ struct DoctorRunner {
         pack: any TechPack,
         scope: CheckScope,
         env: Environment
-    ) -> [(check: any DoctorCheck, isExcluded: Bool)] {
-        var checks: [(check: any DoctorCheck, isExcluded: Bool)] = []
+    ) -> [CollectedCheck] {
+        var checks: [CollectedCheck] = []
 
         let baseURL = scope.effectiveProjectRoot ?? env.claudeDirectory
         for (relativePath, expectedHash) in artifacts.fileHashes {
@@ -494,7 +536,8 @@ struct DoctorRunner {
                     path: fileURL,
                     expectedHash: expectedHash
                 ),
-                isExcluded: false
+                isExcluded: false,
+                syncTarget: scope.syncTarget
             ))
         }
 
@@ -512,7 +555,8 @@ struct DoctorRunner {
                         settingsPath: settingsPath,
                         packName: pack.displayName
                     ),
-                    isExcluded: false
+                    isExcluded: false,
+                    syncTarget: scope.syncTarget
                 ))
                 let interpreterBinaries = HookInterpreter.distinctCheckableBinaries(
                     inRegisteredCommands: artifacts.hookCommands,
@@ -525,7 +569,9 @@ struct DoctorRunner {
                             packName: pack.displayName,
                             environment: env
                         ),
-                        isExcluded: false
+                        isExcluded: false,
+                        // Sync does not install hook interpreters.
+                        syncTarget: nil
                     ))
                 }
             }
@@ -536,7 +582,8 @@ struct DoctorRunner {
                         settingsPath: settingsPath,
                         packName: pack.displayName
                     ),
-                    isExcluded: false
+                    isExcluded: false,
+                    syncTarget: scope.syncTarget
                 ))
                 if let expectedHash = artifacts.settingsHash {
                     checks.append((
@@ -546,7 +593,8 @@ struct DoctorRunner {
                             settingsPath: settingsPath,
                             packName: pack.displayName
                         ),
-                        isExcluded: false
+                        isExcluded: false,
+                        syncTarget: scope.syncTarget
                     ))
                 }
             }
@@ -559,7 +607,8 @@ struct DoctorRunner {
                     packName: pack.displayName,
                     environment: env
                 ),
-                isExcluded: false
+                isExcluded: false,
+                syncTarget: scope.syncTarget
             ))
         }
 
@@ -612,7 +661,7 @@ struct DoctorRunner {
 
     /// Phase 1: Diagnose all checks. Failures are collected into `pendingFixes`
     /// for later confirmation instead of being fixed immediately.
-    private mutating func runChecks(_ checks: [(check: any DoctorCheck, isExcluded: Bool)]) {
+    private mutating func runChecks(_ checks: [CollectedCheck]) {
         for entry in checks {
             let result = entry.check.check()
             let name = entry.check.name
@@ -629,9 +678,7 @@ struct DoctorRunner {
                 docPass(name, msg)
             case let .fail(msg):
                 docFail(name, msg)
-                if fixMode {
-                    pendingFixes.append(entry.check)
-                }
+                pendingFixes.append(entry)
             case let .warn(msg):
                 docWarn(name, msg)
             case let .skip(msg):
@@ -640,50 +687,186 @@ struct DoctorRunner {
         }
     }
 
+    /// A scope re-sync planned for `--fix`: the scope's full configured set and the failed checks
+    /// it should repair.
+    private struct PlannedResync {
+        let target: SyncTarget
+        let run: UpdateScopeResolver.ScopeRun
+        let checks: [any DoctorCheck]
+    }
+
     /// Phase 2: Show a summary of pending fixes with their actual commands,
     /// prompt for confirmation, then execute.
     private mutating func executePendingFixes() {
-        // Separate fixable checks (have a preview command) from unfixable ones.
-        // Unfixable checks are shown as hints after the prompt, not in the confirmation list.
-        let fixable = pendingFixes.filter { $0.fixCommandPreview != nil }
-        let unfixable = pendingFixes.filter { $0.fixCommandPreview == nil }
+        let ownFixes = pendingFixes.map(\.check).filter { $0.fixCommandPreview != nil }
+        let (resyncs, hintOnly) = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
 
-        // Show unfixable hints immediately (no confirmation needed)
-        for check in unfixable {
-            let result = check.fix()
-            if case let .notFixable(msg) = result {
-                output.warn("    ↳ \(check.name): \(msg)")
-            }
+        // Runs before the prompt: a check with no preview has no fix of its own, so its `fix()`
+        // only returns the `.notFixable` hint. A check that mutates must declare a preview.
+        for check in hintOnly {
+            report(check.name, check.fix())
         }
 
-        guard !fixable.isEmpty else { return }
+        guard !ownFixes.isEmpty || !resyncs.isEmpty else { return }
 
         output.plain("")
         output.sectionHeader("Available fixes")
 
-        for check in fixable {
+        for check in ownFixes {
             output.plain("    • \(check.name): \(check.fixCommandPreview!)")
+        }
+        for resync in resyncs {
+            let packIDs = resync.run.configuredPackIDs.sorted()
+            let fixes = resync.checks.map(\.name).joined(separator: ", ")
+            output.plain("    • Re-sync \(resync.run.label): packs \(packIDs.joined(separator: ", ")) — fixes: \(fixes)")
+            if let firstPack = packIDs.first {
+                let preview = "mcs sync\(resync.run.isGlobal ? " --global" : "") --pack \(firstPack) --dry-run"
+                output.dimmed("      Resets managed files you edited in this scope. Preview: \(preview)")
+            }
         }
 
         output.plain("")
-        let fixLabel = fixable.count == 1 ? "fix" : "fixes"
+        let count = ownFixes.count + resyncs.count
+        let fixLabel = count == 1 ? "fix" : "fixes"
         if !skipConfirmation {
-            guard output.askYesNo("Apply \(fixable.count) \(fixLabel)?", default: false) else {
+            guard output.askYesNo("Apply \(count) \(fixLabel)?", default: false) else {
                 output.dimmed("  Skipped all fixes.")
                 return
             }
         }
 
         output.plain("")
-        for check in fixable {
-            switch check.fix() {
-            case let .fixed(msg):
-                docFixed(check.name, msg)
-            case let .failed(msg):
-                docFixFailed(check.name, msg)
-            case let .notFixable(msg):
-                output.warn("    ↳ \(check.name): \(msg)")
+        for check in ownFixes {
+            report(check.name, check.fix())
+        }
+        guard !resyncs.isEmpty else { return }
+        // An injected CLI stands in for the real binary; only the real one needs installing.
+        if claudeCLI == nil, !ensureClaudeCLI(shell: shell, environment: environment, output: output) {
+            for check in resyncs.flatMap(\.checks) {
+                docFixFailed(check.name, "re-sync needs the Claude Code CLI")
             }
+            return
+        }
+        for resync in resyncs {
+            applyResync(resync)
+        }
+    }
+
+    /// Splits failures without an own fix into per-scope re-syncs and hint-only checks. A scope
+    /// with no recorded configured packs has nothing to re-sync from, so its checks get hints too.
+    private func planResyncs(
+        _ entries: [CollectedCheck]
+    ) -> (planned: [PlannedResync], hintOnly: [any DoctorCheck]) {
+        var targets: [SyncTarget] = []
+        var checksByTarget: [SyncTarget: [any DoctorCheck]] = [:]
+        var hintOnly: [any DoctorCheck] = []
+        for entry in entries {
+            guard let target = entry.syncTarget else {
+                hintOnly.append(entry.check)
+                continue
+            }
+            if checksByTarget[target] == nil {
+                targets.append(target)
+            }
+            checksByTarget[target, default: []].append(entry.check)
+        }
+
+        let resolver = UpdateScopeResolver(environment: environment, output: output)
+        var planned: [PlannedResync] = []
+        for target in targets {
+            let checks = checksByTarget[target] ?? []
+            do {
+                if let run = try resolver.scopeRun(projectRoot: target.projectRoot) {
+                    planned.append(PlannedResync(target: target, run: run, checks: checks))
+                } else {
+                    hintOnly += checks
+                }
+            } catch {
+                output.warn("Could not read sync state for \(target.label): \(error.localizedDescription)")
+                hintOnly += checks
+            }
+        }
+        return (planned, hintOnly)
+    }
+
+    /// Re-syncs one scope, then re-runs its failed checks so a check the re-sync could not repair
+    /// reports as still failing rather than fixed.
+    ///
+    /// The run is resolved again here rather than reused from the prompt: an own fix applied just
+    /// before (`ScopeDuplicationCheck` unconfiguring a pack) may have changed the configured set,
+    /// and re-syncing the stale set would reinstall what that fix removed.
+    private mutating func applyResync(_ resync: PlannedResync) {
+        let run: UpdateScopeResolver.ScopeRun
+        do {
+            guard let current = try UpdateScopeResolver(environment: environment, output: output)
+                .scopeRun(projectRoot: resync.target.projectRoot)
+            else {
+                for check in resync.checks {
+                    docFixFailed(check.name, "\(resync.target.label) no longer has configured packs to re-sync")
+                }
+                return
+            }
+            run = current
+            if current.configuredPackIDs != resync.run.configuredPackIDs {
+                let packs = current.configuredPackIDs.sorted().joined(separator: ", ")
+                output.dimmed("  \(current.label) changed since the prompt; re-syncing packs \(packs)")
+            }
+        } catch {
+            for check in resync.checks {
+                docFixFailed(check.name, "could not read sync state: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        do {
+            let blocked = try ScopeReapplier.reapplyScope(
+                run,
+                skippedPackIDs: [],
+                registry: registry,
+                dryRun: false,
+                env: environment,
+                shell: shell,
+                output: output,
+                claudeCLI: claudeCLI
+            )
+            if blocked {
+                for check in resync.checks {
+                    docFixFailed(check.name, "scope was not re-synced")
+                }
+                return
+            }
+        } catch let error as PromptResolutionError {
+            error.lines.forEach { output.error($0) }
+        } catch {
+            output.error("Re-sync of \(run.label) failed: \(error.localizedDescription)")
+        }
+
+        // A throw can leave the scope partly written, so the checks report what is on disk now.
+        output.plain("")
+        for check in resync.checks {
+            switch check.check() {
+            case let .pass(msg):
+                docFixed(check.name, msg)
+            case let .skip(msg):
+                docSkip(check.name, msg)
+            // The check still holds the expectation recorded before the re-sync, so a pack whose
+            // source changed since then warns about drift even though the repair worked.
+            case let .warn(msg):
+                docFixed(check.name, "restored; differs from the last recorded state (\(msg))")
+            case let .fail(msg):
+                docFixFailed(check.name, "still failing after re-sync: \(msg)")
+            }
+        }
+    }
+
+    private mutating func report(_ name: String, _ result: FixResult) {
+        switch result {
+        case let .fixed(msg):
+            docFixed(name, msg)
+        case let .failed(msg):
+            docFixFailed(name, msg)
+        case let .notFixable(msg):
+            output.warn("    ↳ \(name): \(msg)")
         }
     }
 

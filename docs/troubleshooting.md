@@ -4,7 +4,7 @@ This guide covers common issues and how to resolve them. Start by running `mcs d
 
 ```bash
 mcs doctor           # Diagnose (project + global packs)
-mcs doctor --fix     # Diagnose and auto-fix what's possible
+mcs doctor --fix     # Diagnose, then repair after one confirmation (re-syncs scopes with missing artifacts)
 mcs doctor --global  # Check globally-configured packs only
 ```
 
@@ -162,7 +162,7 @@ Managed sections (inside `<!-- mcs:begin/end -->` markers) are updated. Content 
 
 ### .mcs-project file missing
 
-**Symptom**: `mcs doctor` warns "CLAUDE.local.md exists but .mcs-project missing."
+**Symptom**: `mcs doctor` fails with "CLAUDE.local.md exists but .mcs-project missing."
 
 **Fix**: `mcs doctor --fix` can create the state file by inferring packs from CLAUDE.local.md section markers. Or re-run sync:
 ```bash

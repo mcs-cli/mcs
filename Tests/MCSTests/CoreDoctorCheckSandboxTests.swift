@@ -543,122 +543,6 @@ struct PluginCheckSandboxTests {
     }
 }
 
-// MARK: - HookCheck Sandbox Tests
-
-struct HookCheckSandboxTests {
-    @Test("pass when hook file exists and is executable")
-    func passWhenExecutable() throws {
-        let home = try makeGlobalTmpDir(label: "hook-pass")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        let hooksDir = env.hooksDirectory
-        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
-        let hookFile = hooksDir.appendingPathComponent("lint.sh")
-        try "#!/bin/bash\necho lint".write(to: hookFile, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookFile.path)
-
-        var check = HookCheck(hookName: "lint.sh")
-        check.environment = env
-        let result = check.check()
-        guard case .pass = result else {
-            Issue.record("Expected .pass, got \(result)")
-            return
-        }
-    }
-
-    @Test("fail when hook file is missing")
-    func failWhenMissing() throws {
-        let home = try makeGlobalTmpDir(label: "hook-missing")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        var check = HookCheck(hookName: "nonexistent.sh")
-        check.environment = env
-        let result = check.check()
-        guard case .fail = result else {
-            Issue.record("Expected .fail, got \(result)")
-            return
-        }
-    }
-
-    @Test("skip when optional hook is missing")
-    func skipWhenOptionalMissing() throws {
-        let home = try makeGlobalTmpDir(label: "hook-optional")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        var check = HookCheck(hookName: "optional.sh", isOptional: true)
-        check.environment = env
-        let result = check.check()
-        guard case .skip = result else {
-            Issue.record("Expected .skip, got \(result)")
-            return
-        }
-    }
-
-    @Test("fail when hook file is not executable")
-    func failWhenNotExecutable() throws {
-        let home = try makeGlobalTmpDir(label: "hook-noexec")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        let hooksDir = env.hooksDirectory
-        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
-        let hookFile = hooksDir.appendingPathComponent("lint.sh")
-        try "#!/bin/bash\necho lint".write(to: hookFile, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: hookFile.path)
-
-        var check = HookCheck(hookName: "lint.sh")
-        check.environment = env
-        let result = check.check()
-        guard case .fail = result else {
-            Issue.record("Expected .fail, got \(result)")
-            return
-        }
-    }
-
-    @Test("fix makes non-executable hook executable")
-    func fixMakesExecutable() throws {
-        let home = try makeGlobalTmpDir(label: "hook-fix")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        let hooksDir = env.hooksDirectory
-        try FileManager.default.createDirectory(at: hooksDir, withIntermediateDirectories: true)
-        let hookFile = hooksDir.appendingPathComponent("lint.sh")
-        try "#!/bin/bash\necho lint".write(to: hookFile, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: hookFile.path)
-
-        var check = HookCheck(hookName: "lint.sh")
-        check.environment = env
-
-        let fixResult = check.fix()
-        guard case .fixed = fixResult else {
-            Issue.record("Expected .fixed, got \(fixResult)")
-            return
-        }
-
-        // Verify the file is now executable
-        #expect(FileManager.default.isExecutableFile(atPath: hookFile.path))
-    }
-
-    @Test("fix returns notFixable when hook file is missing")
-    func fixNotFixableWhenMissing() throws {
-        let home = try makeGlobalTmpDir(label: "hook-fix-missing")
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        var check = HookCheck(hookName: "nonexistent.sh")
-        check.environment = env
-        let fixResult = check.fix()
-        guard case .notFixable = fixResult else {
-            Issue.record("Expected .notFixable, got \(fixResult)")
-            return
-        }
-    }
-}
-
 // MARK: - ProjectIndexCheck Sandbox Tests
 
 struct ProjectIndexCheckSandboxTests {
@@ -886,8 +770,8 @@ struct DerivedDoctorCheckSandboxTests {
         }
     }
 
-    @Test("allDoctorChecks forwards environment to derived check")
-    func allDoctorChecksForwardsEnv() throws {
+    @Test("deriveDoctorCheck forwards environment to the derived check")
+    func deriveDoctorCheckForwardsEnv() throws {
         let home = try makeGlobalTmpDir(label: "derived-all")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
@@ -903,7 +787,7 @@ struct DerivedDoctorCheckSandboxTests {
             installAction: .plugin(name: "my-plugin")
         )
 
-        let checks = component.allDoctorChecks(environment: env)
+        let checks = [component.deriveDoctorCheck(environment: env)].compactMap(\.self)
         #expect(checks.count == 1)
 
         // The PluginCheck should use our sandbox settings path

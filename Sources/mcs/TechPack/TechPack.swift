@@ -110,9 +110,11 @@ extension TechPack {
 protocol DoctorCheck: Sendable {
     var section: String { get }
     var name: String { get }
-    /// The verbatim command or script that `fix()` will execute.
-    /// Shown in the `doctor --fix` confirmation prompt so the user sees exactly what will run.
-    /// Returns `nil` for built-in fixes that don't execute external commands.
+    /// What `fix()` will do, shown in the `doctor --fix` confirmation prompt. Pack fixes show the
+    /// verbatim command or script so a pack cannot hide one behind friendly text; built-in fixes
+    /// describe their change.
+    /// `nil` means the check has no fix of its own: `doctor --fix` then re-syncs its scope when
+    /// sync can repair it, and otherwise shows the `.notFixable` hint `fix()` returns.
     var fixCommandPreview: String? { get }
     func check() -> CheckResult
     func fix() -> FixResult

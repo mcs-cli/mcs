@@ -28,7 +28,7 @@ enum ProjectDoctorChecks {
 // MARK: - Project state file check
 
 /// Validates project state presence: passes if `.mcs-project` exists,
-/// warns on corruption or legacy state (CLAUDE.local.md without `.mcs-project`),
+/// fails on legacy state (CLAUDE.local.md without `.mcs-project`), warns on corruption,
 /// skips when neither file is present. Fix infers packs from section markers.
 struct ProjectStateFileCheck: DoctorCheck {
     let projectRoot: URL
@@ -41,6 +41,10 @@ struct ProjectStateFileCheck: DoctorCheck {
         "Project"
     }
 
+    var fixCommandPreview: String? {
+        "rebuild .mcs-project from the CLAUDE.local.md section markers"
+    }
+
     func check() -> CheckResult {
         do {
             let state = try ProjectState(projectRoot: projectRoot)
@@ -48,13 +52,17 @@ struct ProjectStateFileCheck: DoctorCheck {
                 return .pass(".mcs-project present")
             }
         } catch {
-            return .warn("corrupt .mcs-project: \(error.localizedDescription) — run 'mcs doctor --fix'")
+            // Rebuilding from section markers would drop every artifact record, orphaning what the
+            // packs installed, so a corrupt file is the user's call rather than a `--fix` target.
+            return .warn(
+                "corrupt .mcs-project: \(error.localizedDescription) — back it up, delete .claude/.mcs-project and re-run 'mcs sync'"
+            )
         }
 
         // No .mcs-project — legacy state needing migration?
         let claudeLocal = projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD)
         if FileManager.default.fileExists(atPath: claudeLocal.path) {
-            return .warn("CLAUDE.local.md exists but .mcs-project missing — run 'mcs doctor --fix'")
+            return .fail("CLAUDE.local.md exists but .mcs-project missing — run 'mcs doctor --fix'")
         }
 
         return .skip("no project state — run 'mcs sync'")
@@ -73,19 +81,13 @@ struct ProjectStateFileCheck: DoctorCheck {
         let sections = TemplateComposer.parseSections(from: content)
         let packIdentifiers = sections.map(\.identifier)
 
-        // Delete corrupt state file if present so we can rebuild cleanly
         let stateFile = projectRoot
             .appendingPathComponent(Constants.FileNames.claudeDirectory)
             .appendingPathComponent(Constants.FileNames.mcsProject)
-        if FileManager.default.fileExists(atPath: stateFile.path) {
-            do {
-                try FileManager.default.removeItem(at: stateFile)
-            } catch {
-                return .failed("could not delete corrupt .mcs-project: \(error.localizedDescription) — remove it manually and re-run")
-            }
+        guard !FileManager.default.fileExists(atPath: stateFile.path) else {
+            return .notFixable("a .mcs-project already exists — back it up, delete it and re-run 'mcs sync'")
         }
 
-        // After deletion, init cannot throw (file no longer exists), so build and save in one block
         do {
             var state = try ProjectState(projectRoot: projectRoot)
             for pack in packIdentifiers {

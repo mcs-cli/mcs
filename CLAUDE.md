@@ -16,7 +16,9 @@ swift build -c release --arch arm64 --arch x86_64  # Universal binary
 
 # CLI usage (after install)
 mcs sync [path]                  # Sync project: multi-select packs, compose artifacts (default command)
-mcs sync --pack ios              # Non-interactive: apply specific packs (repeatable)
+mcs sync --pack ios              # Non-interactive: add/update specific packs (repeatable), keeping other configured packs
+mcs sync --pack ios --prune      # Make the named packs the exact set — removes the rest after confirmation
+mcs sync --pack ios --prune --yes  # Prune without the removal-confirmation prompt (CI)
 mcs sync --all                   # Apply all registered packs without prompts
 mcs sync --dry-run               # Preview what would change
 mcs sync --customize             # Per-pack component selection
@@ -32,7 +34,7 @@ mcs update --project             # Refresh only the current project's scope
 mcs update --all-projects        # Refresh global + every project tracked in ~/.mcs/projects.yaml (asks confirmation)
 mcs update --dry-run             # Preview what would change
 mcs doctor                       # Diagnose installation health
-mcs doctor --fix                 # Diagnose and auto-fix issues
+mcs doctor --fix                 # Diagnose, then run fixes and re-sync scopes with repairable failures (one confirmation)
 mcs doctor --pack ios            # Only check a specific pack
 mcs doctor --global              # Check globally-configured packs only
 mcs pack add <source>            # Add a tech pack (git URL, GitHub shorthand, or local path)
@@ -115,15 +117,15 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths, third-party brew taps, `scope` declared on doctor check types that ignore it)
 
 ### Doctor (`Sources/mcs/Doctor/`)
-- `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution
-- `CoreDoctorChecks.swift` — check structs (BrewPackageCheck, MCPServerCheck, PluginCheck, HookCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
+- `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution. Tags each check with the scope a re-sync would repair it in, by origin: component-derived and artifact-record checks (except `HookInterpreterCheck`) can be repaired by sync; pack-authored and standalone checks cannot. `--fix` runs checks' own fixes and re-syncs each affected scope through `ScopeReapplier` (the scope's configured set re-read after own fixes, never a subset), then re-runs the re-synced checks
+- `CoreDoctorChecks.swift` — check structs (BrewPackageCheck, MCPServerCheck, PluginCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
 - `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition
 - `ProjectDoctorChecks.swift` — project-scoped checks (CLAUDE.local.md freshness, state file)
 - `ScopeDuplicationCheck.swift` — flags a pack configured in both the project and global scope, reporting only artifacts that genuinely exist twice; `--fix` removes the project copy via `Configurator.unconfigurePack`, gated on component subset, prompt-answer parity, and the recorded hash of every file it would delete
 - `SectionValidator.swift` — validation of CLAUDE.local.md section markers
 
 ### Commands (`Sources/mcs/Commands/`)
-- `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global` flags. `guardClaudeHomeCwd()` at the top of `perform()` rejects/redirects runs from `~/.claude` or `$HOME` to prevent silent corruption of the global scope
+- `SyncCommand.swift` — primary command (`mcs sync`), handles both project-scoped and global-scoped sync with `--pack`, `--all`, `--dry-run`, `--customize`, `--global`, `--prune`, `--yes` flags. `--pack` is additive (resolved through `ConfiguratorSupport.additivePackSet`, shared with bootstrap); `--prune` makes the named packs the exact set. `guardClaudeHomeCwd()` at the top of `perform()` rejects/redirects runs from `~/.claude` or `$HOME` to prevent silent corruption of the global scope
 - `BootstrapCommand.swift` — `mcs bootstrap` reads `./mcs.yaml` and syncs the current project. Additive by default (declared packs are installed / updated; extras are preserved and reported via a post-sync footer); `--prune` opts into authoritative mode (extras are unconfigured with a `Configurator.configure(confirmRemovals: !yes)` prompt). Installs missing packs via `PackAdder`, updates refs via `PackUpdater`, and hands `mcs.yaml` `values:` to `Configurator.configure(seededValues:)`, which merges them into `ProjectState.resolvedValues` only after removals so pruning a removed pack cannot drop seeds meant for a pack being added.
 - `DoctorCommand.swift` — health checks with optional --fix and --pack filter
 - `CleanupCommand.swift` — backup file management with --force flag
@@ -148,6 +150,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ComponentExecutor.swift` — dispatches install actions (brew, MCP servers, plugins, gitignore, project-scoped file copy/removal)
 - `CrossPackPromptResolver.swift` — deduplicates shared prompt keys across multiple packs (groups by key, executes once for shared `input`/`select` prompts)
 - `DestinationCollisionResolver.swift` — auto-namespaces `copyPackFile` destinations when multiple packs target the same `(destination, fileType)` pair
+- `ScopeReapplier.swift` — converges one scope onto its already-configured pack set (whole-scope skip when any configured pack cannot be produced); shared by `mcs update` and `mcs doctor --fix`
 - `PackUpdater.swift` — shared fetch → validate → trust cycle for updating a single git pack (used by `UpdatePack` and `UpdateCommand`)
 - `ResourceRefCounter.swift` — two-tier reference counting (global artifacts + project index manifests) for safe removal of brew packages, plugins and gitignore entries; decoded state is cached per instance so one removal pass reads each state file once
 - `SyncDeltaSummary.swift` — computes add/remove/keep deltas between previous and selected pack sets and renders the review-changes summary shown before destructive sync operations
@@ -202,7 +205,7 @@ swiftlint --fix
 ## Key Design Decisions
 
 - **Pure engine, zero bundled content**: `mcs` ships no templates, hooks, settings, or skills — all features come from external packs users add via `mcs pack add`
-- **`mcs sync` is the primary command**: per-project multi-select of registered packs, fully idempotent convergence (add/remove/update), per-project artifact placement. `--global` flag handles global-scope install
+- **`mcs sync` is the primary command**: per-project multi-select of registered packs, fully idempotent convergence (add/remove/update), per-project artifact placement. `--global` flag handles global-scope install. `--pack` follows bootstrap's additive-by-default model: named packs are added/updated and every other configured pack is kept (a configured pack missing from the registry aborts the run); `--prune` opts into the authoritative set with a removal confirmation, `--yes` skips it
 - **`mcs bootstrap` is project-scoped, additive-by-default, opt-in-authoritative**: reads `./mcs.yaml` (fixed filename, cwd only) and drives the current project's pack set. Like `mcs sync`, its non-dry-run tail refreshes the shared user-level update-check hook in `~/.claude/settings.json` — that hook is a per-user preference, not per-project. Default is additive — declared packs are installed / updated, and packs already configured but absent from the file are preserved (a footer reports them so divergence stays visible). `--prune` makes `mcs.yaml` the exact desired set — extras get unconfigured through the same `Configurator.configure(confirmRemovals:)` gate `mcs sync --pack` uses, with `--yes` to skip the confirmation, and `--prune` also bypasses the unloadable-scope guard so a broken configured pack can be pruned rather than blocking the run. Composes existing primitives (`PackAdder`, `PackUpdater`) rather than reimplementing them. `PackRef.scope` in the schema is reserved for a future release; v1 rejects any value other than `"project"`. The additive default matches the pattern that Homebrew Bundle, Kubernetes, and npm settled on for declarative-file + external-state workflows: safe default, explicit opt-in for destructive action.
 - **Non-interactive prompt resolution**: when stdin is not a TTY, every prompt resolves as seeded/stored value → declared default (a `select` default must be an option; a `fileDetect` default must be a match, or with zero matches any non-empty value; otherwise an explicit `""` counts) → failure. `CrossPackPromptResolver.planValues` builds the key set and reuse partition that both sync (`resolveAllValues`) and the preflight (`resolveNonInteractively`) start from, and the preflight replays sync's stages in order — reused priors (per `Configurator.priorReuse`), shared prompts, then each pack for the keys still open, since a pack skips keys an earlier pack produced — so the two cannot disagree. `Configurator.configure` runs it against the post-removal priors before any removal or install and throws `PromptResolutionError` (every `pack: key`, never values, with a scope-specific remedy), otherwise merges its answers so no prompt reader runs. `--dry-run` only warns; `mcs update` skips a failing scope, finishes the rest, then exits non-zero. Two older prompts still read stdin off-TTY (tracked in #417)
 - **Per-project artifacts**: skills, hooks, commands, and `settings.local.json` go to `<project>/.claude/`; only brew packages and plugins are global

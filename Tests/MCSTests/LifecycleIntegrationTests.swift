@@ -32,14 +32,15 @@ private struct LifecycleTestBed {
         )
     }
 
-    func makeDoctorRunner(registry: TechPackRegistry, packFilter: String? = nil) -> DoctorRunner {
+    func makeDoctorRunner(registry: TechPackRegistry, packFilter: String? = nil, fixMode: Bool = false) -> DoctorRunner {
         DoctorRunner(
-            fixMode: false,
+            fixMode: fixMode,
             skipConfirmation: true,
             packFilter: packFilter,
             registry: registry,
             environment: env,
-            projectRootOverride: project
+            projectRootOverride: project,
+            claudeCLI: mockCLI
         )
     }
 
@@ -231,6 +232,12 @@ private struct LifecycleTestBed {
 
     var settingsLocalPath: URL {
         project.appendingPathComponent(".claude/settings.local.json")
+    }
+
+    /// Every hook command composed into the project's settings under `event`.
+    func hookCommands(event: String) throws -> [String] {
+        let settings = try Settings.load(from: settingsLocalPath)
+        return (settings.hooks?[event] ?? []).flatMap { $0.hooks ?? [] }.compactMap(\.command)
     }
 
     var claudeLocalPath: URL {
@@ -2569,7 +2576,7 @@ struct GlobalPackBlockingLifecycleTests {
 
 /// End-to-end coverage for the `mcs update` re-apply phase.
 ///
-/// Drives the real `UpdateScopeResolver` and `UpdateCommand.reapplyScope` rather than
+/// Drives the real `UpdateScopeResolver` and `ScopeReapplier.reapplyScope` rather than
 /// `UpdateCommand.perform()`, which builds its own `Environment()` and cannot be pointed
 /// at a sandboxed home.
 struct UpdateReapplyLifecycleTests {
@@ -2611,7 +2618,7 @@ struct UpdateReapplyLifecycleTests {
         #expect(runs.count == (filter == .all ? 2 : 1))
 
         for run in runs {
-            let blocked = try UpdateCommand.reapplyScope(
+            let blocked = try ScopeReapplier.reapplyScope(
                 run,
                 skippedPackIDs: [],
                 registry: registry,
@@ -2671,7 +2678,7 @@ struct UpdateReapplyLifecycleTests {
             .resolve(filter: .all, projectRoot: bed.project)
         #expect(runs.count == 2)
 
-        let unresolved = try UpdateCommand.reapplyScopes(
+        let unresolved = try ScopeReapplier.reapplyScopes(
             runs,
             skippedPackIDs: [],
             registry: registry,
@@ -2731,7 +2738,7 @@ struct UpdateReapplyLifecycleTests {
         #expect(runs.count == 1)
 
         for run in runs {
-            let blocked = try UpdateCommand.reapplyScope(
+            let blocked = try ScopeReapplier.reapplyScope(
                 run,
                 skippedPackIDs: ["pack-b"],
                 registry: registry,
@@ -2799,7 +2806,7 @@ struct UpdateReapplyLifecycleTests {
         #expect(runs.count == 1)
 
         for run in runs {
-            let blocked = try UpdateCommand.reapplyScope(
+            let blocked = try ScopeReapplier.reapplyScope(
                 run,
                 skippedPackIDs: [],
                 registry: registryWithoutB,
@@ -3752,6 +3759,289 @@ struct BootstrapIntegrationTests {
         #expect(try BootstrapCommand.parse([]).trustPolicy == .prompt)
         #expect(try BootstrapCommand.parse(["--trust-all"]).trustPolicy == .autoAccept)
         #expect(try BootstrapCommand.parse(["--prune", "--yes"]).trustPolicy == .prompt)
+    }
+}
+
+// MARK: - Sync --pack: additive-vs-prune convergence
+
+struct SyncPackAdditiveTests {
+    /// Two configured packs: pack-a merges a settings key, pack-b registers a hook, so the
+    /// assertions cover both the state and what `configure` recomposes from the pack list.
+    private func seedTwoPackProject(
+        bed: LifecycleTestBed
+    ) throws -> (packA: MockTechPack, packB: MockTechPack, registry: TechPackRegistry) {
+        let settingsA = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_A_KEY": "valueA" } }
+        """)
+        let hookB = try bed.makeHookSource(name: "guard.sh")
+        let packA = MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [bed.settingsComponent(pack: "pack-a", id: "settings", source: settingsA)]
+        )
+        let packB = MockTechPack(
+            identifier: "pack-b",
+            displayName: "Pack B",
+            components: [bed.hookComponent(
+                pack: "pack-b", id: "guard", source: hookB, destination: "guard.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry)
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        return (packA, packB, registry)
+    }
+
+    private func sync(
+        _ arguments: [String],
+        bed: LifecycleTestBed,
+        registry: TechPackRegistry
+    ) throws {
+        try SyncCommand.parse(arguments).syncRequestedPacks(
+            configurator: bed.makeConfigurator(registry: registry),
+            registry: registry,
+            previouslyConfigured: bed.projectState().configuredPacks,
+            globallyInstalled: [],
+            excludedComponents: [:],
+            scopeLabel: "Project",
+            targetPath: bed.project.path,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+
+    private func preToolUseCommands(_ bed: LifecycleTestBed) throws -> [String] {
+        try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+    }
+
+    @Test("--pack keeps packs it does not name, including their composed hook entries")
+    func packKeepsUnnamedPacks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+        let hookCommand = bed.projectHookCommand("pack-b/guard.sh")
+        #expect(try preToolUseCommands(bed).contains(hookCommand))
+
+        try sync(["--pack", "pack-a"], bed: bed, registry: seeded.registry)
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
+        #expect(try preToolUseCommands(bed).contains(hookCommand))
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "valueA")
+    }
+
+    @Test("--pack --prune removes packs it does not name")
+    func pruneRemovesUnnamedPacks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        try sync(["--pack", "pack-a", "--prune", "--yes"], bed: bed, registry: seeded.registry)
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a"])
+        #expect(try !preToolUseCommands(bed).contains(bed.projectHookCommand("pack-b/guard.sh")))
+    }
+
+    @Test("--pack aborts on a configured pack the registry cannot produce instead of removing it")
+    func packAbortsOnUnresolvableExtra() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+        let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
+
+        #expect(throws: (any Error).self) {
+            try sync(["--pack", "pack-a"], bed: bed, registry: strippedRegistry)
+        }
+
+        #expect(try bed.projectState().configuredPacks.contains("pack-b"))
+        #expect(try preToolUseCommands(bed).contains(bed.projectHookCommand("pack-b/guard.sh")))
+    }
+
+    @Test("--prune refuses a --pack name it cannot resolve instead of pruning around it")
+    func pruneRefusesUnknownName() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        #expect(throws: (any Error).self) {
+            try sync(["--pack", "pack-a", "--pack", "pack-bb", "--prune", "--yes"], bed: bed, registry: seeded.registry)
+        }
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
+    }
+}
+
+// MARK: - Doctor --fix: scope re-sync
+
+/// A check a pack author wrote. A re-sync cannot satisfy it, so it must never trigger one.
+private struct UnsatisfiableCheck: DoctorCheck {
+    let name = "Pack-authored check"
+    let section = "Dependencies"
+
+    func check() -> CheckResult {
+        .fail("never satisfied")
+    }
+
+    func fix() -> FixResult {
+        .notFixable("install it yourself")
+    }
+}
+
+struct DoctorFixResyncTests {
+    private func hookPack(_ id: String, bed: LifecycleTestBed) throws -> MockTechPack {
+        try MockTechPack(
+            identifier: id,
+            displayName: id,
+            components: [bed.hookComponent(
+                pack: id, id: "lint", source: bed.makeHookSource(name: "\(id)-lint.sh"), destination: "lint.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+    }
+
+    private func installedHook(_ packID: String, bed: LifecycleTestBed) -> URL {
+        bed.project.appendingPathComponent(".claude/hooks/\(packID)/lint.sh")
+    }
+
+    private func editPackAKey(bed: LifecycleTestBed) throws {
+        let data = try Data(contentsOf: bed.settingsLocalPath)
+        var json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json["env"] = ["PACK_A_KEY": "edited"]
+        try JSONSerialization.data(withJSONObject: json).write(to: bed.settingsLocalPath)
+    }
+
+    /// A settings key a re-sync would reset, plus a hook file whose absence is sync-repairable.
+    private func settingsPack(bed: LifecycleTestBed, extraChecks: [any DoctorCheck] = []) throws -> MockTechPack {
+        let settings = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_A_KEY": "valueA" } }
+        """)
+        return try MockTechPack(
+            identifier: "pack-a",
+            displayName: "Pack A",
+            components: [
+                bed.settingsComponent(pack: "pack-a", id: "settings", source: settings),
+                bed.hookComponent(
+                    pack: "pack-a", id: "lint", source: bed.makeHookSource(name: "pack-a-lint.sh"), destination: "lint.sh"
+                ),
+            ],
+            supplementaryDoctorChecks: extraChecks
+        )
+    }
+
+    @Test("--fix re-syncs a failed check's scope onto every configured pack, not just the filtered one")
+    func fixRestoresMissingFileAndKeepsOtherPacks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = try hookPack("pack-a", bed: bed)
+        let packB = try hookPack("pack-b", bed: bed)
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA, packB], confirmRemovals: false)
+
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        var runner = bed.makeDoctorRunner(registry: registry, packFilter: "pack-a", fixMode: true)
+        try runner.run()
+
+        #expect(FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
+        #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
+        #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+            .contains(bed.projectHookCommand("pack-b/lint.sh")))
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
+    }
+
+    @Test("--fix re-syncs, resetting an edited managed value, when a sync-repairable check fails")
+    func fixResyncResetsEditedValue() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try settingsPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try editPackAKey(bed: bed)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "valueA")
+    }
+
+    @Test("--fix does not re-sync for a failing check a pack author wrote")
+    func fixSkipsResyncForPackAuthoredCheck() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try settingsPack(bed: bed, extraChecks: [UnsatisfiableCheck()])
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        // `fixResyncResetsEditedValue` shows a re-sync resets this, so an edit that survives
+        // proves none ran.
+        try editPackAKey(bed: bed)
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
+    }
+
+    @Test("--pack naming a global-only pack from a project never re-syncs the project")
+    func fixDoesNotResyncProjectForGlobalOnlyPack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let globalPack = try hookPack("pack-g", bed: bed)
+        let projectPack = try settingsPack(bed: bed)
+        let registry = TechPackRegistry(packs: [globalPack, projectPack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [globalPack], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [projectPack], confirmRemovals: false)
+        try editPackAKey(bed: bed)
+        try FileManager.default.removeItem(at: bed.env.hooksDirectory)
+
+        var runner = bed.makeDoctorRunner(registry: registry, packFilter: "pack-g", fixMode: true)
+        try runner.run()
+
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
+    }
+
+    @Test("A scope whose re-apply is blocked is left untouched")
+    func fixLeavesBlockedScopeUntouched() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = try hookPack("pack-a", bed: bed)
+        let packB = try hookPack("pack-b", bed: bed)
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        let strippedRegistry = TechPackRegistry(packs: [packA])
+        var runner = bed.makeDoctorRunner(registry: strippedRegistry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.projectState().configuredPacks.contains("pack-b"))
+        #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+            .contains(bed.projectHookCommand("pack-b/lint.sh")))
+        #expect(!FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
+    }
+
+    @Test("A re-sync after a scope-duplication fix does not reinstall the removed pack")
+    func resyncAfterDuplicationFixKeepsPackRemoved() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let dup = try MockTechPack(
+            identifier: "dup-pack",
+            displayName: "Dup Pack",
+            components: [bed.skillComponent(
+                pack: "dup-pack", id: "skillA", source: bed.makeSkillSource(name: "dup-skill.md"), destination: "dup-skill.md"
+            )]
+        )
+        let packA = try hookPack("pack-a", bed: bed)
+        let registry = TechPackRegistry(packs: [dup, packA])
+        try bed.makeConfigurator(registry: registry).configure(packs: [dup, packA], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [dup], confirmRemovals: false)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a"])
+        #expect(!FileManager.default.fileExists(atPath: bed.project.appendingPathComponent(".claude/skills/dup-skill.md").path))
+        #expect(FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
     }
 }
 

@@ -8,19 +8,19 @@ import Foundation
 // `doctor --fix` handles only:
 // - **Cleanup**: Removing deprecated components (MCP servers, plugins)
 // - **Migration**: One-time data moves (state files)
-// - **Trivial repairs**: Permission fixes (chmod), gitignore additions (idempotent)
+// - **Trivial repairs**: gitignore additions (idempotent), stale index entries
 // - **Scope reconciliation**: Removing a pack from one scope when a provably equivalent copy
 //   exists in another, by calling `Configurator.unconfigurePack` rather than re-implementing
-//   removal. This is the one category that drives the sync engine, so it carries a higher bar:
-//   the check must refuse the fix unless it can prove nothing is lost — see
+//   removal. The check must refuse the fix unless it can prove nothing is lost — see
 //   `ScopeDuplicationCheck`, which gates on component subset, prompt-answer parity, and the
 //   recorded hash of every file it would delete. Do not copy the pattern without the gates.
+// - **Re-sync**: A check derived from a component or from recorded artifacts is repaired by
+//   re-syncing its scope onto the packs already configured there (`DoctorRunner`, through
+//   `ScopeReapplier`). Its own `fix()` only supplies the hint shown when that is not possible.
 //
-// `doctor --fix` does NOT handle:
-// - **Additive operations**: Installing packages, registering servers, copying hooks/skills/commands.
-//   These are `mcs sync`'s responsibility.
-//
-// This separation keeps `doctor --fix` predictable, and destructive only where it can show its work.
+// `doctor --fix` never re-implements an install step: additive work goes through the sync engine.
+// Every fix that changes anything runs behind one confirmation prompt (skipped by `--yes`) that
+// shows what it will do; hint-only checks print their message before it.
 
 /// Reports on a `brew:` component, using the same availability test `installBrewPackage` uses
 /// so doctor and sync cannot disagree about what is installed.
@@ -223,58 +223,15 @@ struct FileContentCheck: DoctorCheck {
     }
 }
 
-struct HookCheck: DoctorCheck {
-    let hookName: String
-    var isOptional: Bool = false
-    var environment: Environment = .init()
-
-    var name: String {
-        hookName
-    }
-
-    var section: String {
-        "Hooks"
-    }
-
-    func check() -> CheckResult {
-        let hookPath = environment.hooksDirectory.appendingPathComponent(hookName)
-        guard FileManager.default.fileExists(atPath: hookPath.path) else {
-            return isOptional ? .skip("not installed (optional)") : .fail("missing")
-        }
-        guard FileManager.default.isExecutableFile(atPath: hookPath.path) else {
-            return .fail("not executable")
-        }
-        return .pass("present and executable")
-    }
-
-    func fix() -> FixResult {
-        let hookPath = environment.hooksDirectory.appendingPathComponent(hookName)
-        let fm = FileManager.default
-
-        // Only fix permissions — additive operations (installing/replacing hooks) are
-        // handled by `mcs sync`.
-        guard fm.fileExists(atPath: hookPath.path) else {
-            return .notFixable("Run 'mcs sync' to install hooks")
-        }
-
-        if !fm.isExecutableFile(atPath: hookPath.path) {
-            do {
-                try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hookPath.path)
-                return .fixed("made executable")
-            } catch {
-                return .failed(error.localizedDescription)
-            }
-        }
-
-        return .notFixable("Run 'mcs sync' to reinstall hooks")
-    }
-}
-
 struct GitignoreCheck: DoctorCheck {
     var environment: Environment = .init()
 
     var name: String {
         "Global gitignore"
+    }
+
+    var fixCommandPreview: String? {
+        "add the missing core entries to the global gitignore"
     }
 
     var section: String {
@@ -315,6 +272,10 @@ struct ProjectIndexCheck: DoctorCheck {
 
     var name: String {
         "Project index"
+    }
+
+    var fixCommandPreview: String? {
+        "prune stale entries from ~/.mcs/projects.yaml"
     }
 
     var section: String {

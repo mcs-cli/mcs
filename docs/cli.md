@@ -8,7 +8,8 @@ The primary command. Configures a project by selecting packs and installing thei
 
 ```bash
 mcs sync [path]                  # Interactive project sync (default command)
-mcs sync --pack <name>           # Non-interactive: apply specific pack(s) (repeatable)
+mcs sync --pack <name>           # Non-interactive: add/update specific pack(s), keeping the rest (repeatable)
+mcs sync --pack <name> --prune   # Make the named pack(s) the exact set — removes the rest after confirmation
 mcs sync --all                   # Apply all registered packs without prompts
 mcs sync --dry-run               # Preview what would change
 mcs sync --customize             # Per-pack component selection
@@ -18,13 +19,17 @@ mcs sync --global                # Install to global scope (~/.claude/)
 | Flag | Description |
 |------|-------------|
 | `[path]` | Project directory (defaults to current directory) |
-| `-p, --pack <name>` | Apply a specific pack non-interactively. Repeatable for multiple packs. |
+| `-p, --pack <name>` | Add or update a specific pack non-interactively. Repeatable for multiple packs. Packs already configured in the scope are kept. |
 | `-a, --all` | Apply all registered packs without interactive selection. |
+| `--prune` | With `--pack`: remove configured packs not named with `--pack`. Prompts before removing unless `--yes` is passed. |
+| `-y, --yes` | Skip the removal-confirmation prompt. Only meaningful with `--prune`. |
 | `--dry-run` | Preview changes without writing any files. |
 | `-c, --customize` | Per-pack component selection (deselect individual components). |
 | `-g, --global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
+
+**`--pack` is additive.** Naming a pack adds or updates it and leaves every other configured pack in place; a footer lists the packs that were kept. A configured pack that is missing from the registry stops the run rather than being removed — re-add it with `mcs pack add`, or pass `--prune` to remove it. With `--prune`, the named packs become the exact set, matching `mcs bootstrap --prune`.
 
 ## `mcs bootstrap`
 
@@ -230,19 +235,21 @@ Diagnose installation health with multi-layer checks.
 
 ```bash
 mcs doctor                       # Diagnose all packs (project + global)
-mcs doctor --fix                 # Diagnose and auto-fix issues
+mcs doctor --fix                 # Diagnose, then repair what it can after one confirmation
 mcs doctor --pack <name>         # Check a specific pack only
 mcs doctor --global              # Check globally-configured packs only
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-f, --fix` | Auto-fix issues where possible (re-add gitignore entries, create missing state files, etc.). |
+| `-f, --fix` | Repair failed checks after one confirmation: run the check's own fix (pack `fixCommand`, gitignore entries, stale index entries, missing state file, duplicate scope), or re-sync the scope a failed install check belongs to. |
 | `-y, --yes` | Skip confirmation prompt before applying fixes (use with `--fix`). |
 | `-p, --pack <name>` | Only check a specific pack. |
 | `-g, --global` | Only check globally-configured packs. |
 
 Doctor resolves packs from: explicit `--pack` flag → project `.mcs-project` state → `CLAUDE.local.md` section markers → global manifest.
+
+**How `--fix` repairs.** When an install check fails (a missing MCP server, brew package, plugin, file, hook entry, settings key or gitignore entry), `--fix` re-syncs that scope onto the packs already configured there — the same re-apply `mcs update` runs, so no pack is ever added or removed. The prompt lists each scope to re-sync; re-syncing resets managed files you edited in that scope. Afterwards the failed checks run again and are reported as fixed or still failing. Checks a pack author wrote, and a missing hook interpreter, are never repaired by a re-sync — doctor prints their hint instead. Drift warnings (edited files or settings) are left alone. Without `--fix`, doctor ends with a line saying how many issues `--fix` could repair.
 
 ## `mcs cleanup`
 
