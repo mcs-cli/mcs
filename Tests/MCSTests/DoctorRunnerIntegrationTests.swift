@@ -504,6 +504,9 @@ struct DoctorSummaryWarningCountTests {
         let withGhost = try ghostRunner.run()
 
         #expect(withGhost.warnings == baseline.warnings + 1)
+        #expect(baseline.isHealthy)
+        #expect(withGhost.issues == 0)
+        #expect(!withGhost.isHealthy)
     }
 
     /// `--pack "ios, swift"` is a natural thing to type. Without trimming, the second id carries a
@@ -565,5 +568,6 @@ struct DoctorSummaryWarningCountTests {
         let withGhost = try ghostRunner.run()
 
         #expect(withGhost.warnings == baseline.warnings + 1)
+        #expect(withGhost.isHealthy)
     }
 }

@@ -39,9 +39,11 @@ struct DoctorCommand: LockedCommand {
             registry: registry,
             environment: env
         )
-        try runner.run()
+        let summary = try runner.run()
 
         // Check for updates (respects 24-hour cache)
         UpdateChecker.checkAndPrint(env: env, shell: shell, output: output)
+
+        guard summary.isHealthy else { throw ExitCode.failure }
     }
 }

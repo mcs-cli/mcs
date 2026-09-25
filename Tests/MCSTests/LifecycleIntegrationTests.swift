@@ -336,7 +336,9 @@ struct SinglePackLifecycleTests {
         try driftedData.write(to: bed.settingsLocalPath)
 
         // === Step 4: Doctor detects drift ===
-        #expect(try bed.runDoctor(registry: registry).warnings > clean.warnings)
+        let drifted = try bed.runDoctor(registry: registry)
+        #expect(drifted.warnings > clean.warnings)
+        #expect(drifted.isHealthy)
 
         // === Step 5: Re-sync fixes drift ===
         try configurator.configure(packs: [pack], confirmRemovals: false)
@@ -3939,8 +3941,10 @@ struct DoctorFixResyncTests {
         try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
 
         var runner = bed.makeDoctorRunner(registry: registry, packFilter: "pack-a", fixMode: true)
-        try runner.run()
+        let summary = try runner.run()
 
+        #expect(summary.issues > 0)
+        #expect(summary.isHealthy)
         #expect(FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
         #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
         #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
@@ -3976,9 +3980,10 @@ struct DoctorFixResyncTests {
         try editPackAKey(bed: bed)
 
         var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
-        try runner.run()
+        let summary = try runner.run()
 
         #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
+        #expect(!summary.isHealthy)
     }
 
     @Test("--pack naming a global-only pack from a project never re-syncs the project")
