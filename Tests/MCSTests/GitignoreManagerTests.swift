@@ -11,7 +11,7 @@ struct GitignoreManagerTests {
         let path = manager.resolveGlobalGitignorePath()
         // `git config --global` still honours GIT_CONFIG_GLOBAL / XDG_CONFIG_HOME from the process
         // environment; refuse to write or delete a gitignore that resolved outside the sandbox.
-        try #require(path.resolvingSymlinksInPath().path.hasPrefix(home.resolvingSymlinksInPath().path))
+        try #require(PathContainment.isContained(url: path, within: home))
         if let gitignore {
             try gitignore.write(to: path, atomically: true, encoding: .utf8)
         } else {
