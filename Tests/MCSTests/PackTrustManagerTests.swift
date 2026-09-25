@@ -256,7 +256,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         components:
           - id: test.cmd
             displayName: Test Command
@@ -285,7 +284,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         components:
           - id: test.mcp
             displayName: Test MCP
@@ -317,7 +315,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         components:
           - id: test.first
             displayName: First
@@ -357,7 +354,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         supplementaryDoctorChecks:
           - type: commandExists
             name: Check Git
@@ -393,7 +389,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         configureProject:
           script: scripts/configure.sh
         """
@@ -416,7 +411,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         prompts:
           - key: PROJECT
             type: script
@@ -441,7 +435,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         """
         let manifest = try loadManifest(yaml: yaml, in: tmpDir)
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false))
@@ -677,7 +670,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         configureProject:
           script: scripts/configure.sh
         """
@@ -707,7 +699,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         configureProject:
           script: scripts/configure.sh
         """
@@ -739,7 +730,6 @@ struct PackTrustManagerTests {
         identifier: test
         displayName: Test Pack
         description: A test pack
-        version: "1.0.0"
         configureProject:
           script: scripts/configure.sh
         """

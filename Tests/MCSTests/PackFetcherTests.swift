@@ -13,135 +13,37 @@ private func makeFetcher() -> PackFetcher {
 }
 
 struct PackFetcherRefValidationTests {
-    // MARK: - Valid refs
-
-    @Test("Accepts valid semver tag")
-    func acceptsSemverTag() throws {
-        try makeFetcher().validateRef("v1.0.0")
+    @Test("Accepts tags, branches and commit prefixes", arguments: [
+        "v1.0.0", "main", "feature/my-feature", "v1.0.0-rc.1", "v1+build", "abc123def",
+    ])
+    func acceptsValidRef(ref: String) throws {
+        try makeFetcher().validateRef(ref)
     }
 
-    @Test("Accepts simple branch name")
-    func acceptsSimpleBranch() throws {
-        try makeFetcher().validateRef("main")
-    }
-
-    @Test("Accepts branch with slash")
-    func acceptsBranchWithSlash() throws {
-        try makeFetcher().validateRef("feature/my-feature")
-    }
-
-    @Test("Accepts dotted pre-release tag")
-    func acceptsDottedTag() throws {
-        try makeFetcher().validateRef("v1.0.0-rc.1")
-    }
-
-    @Test("Accepts ref with plus")
-    func acceptsRefWithPlus() throws {
-        try makeFetcher().validateRef("v1+build")
-    }
-
-    @Test("Accepts commit-like hex prefix")
-    func acceptsCommitPrefix() throws {
-        try makeFetcher().validateRef("abc123def")
-    }
-
-    // MARK: - Rejected refs
-
-    @Test("Rejects double-dash flag injection")
-    func rejectsDoubleDashFlag() throws {
+    /// Refs reach `git` as arguments, so each case is an injection or traversal vector.
+    @Test("Rejects flag injection, traversal and shell metacharacters", arguments: [
+        "--upload-pack=evil", "-b", "v1/../../../etc/passwd", "main branch", "`whoami`", "$HOME", "",
+    ])
+    func rejectsUnsafeRef(ref: String) throws {
         #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("--upload-pack=evil")
-        }
-    }
-
-    @Test("Rejects single-dash flag")
-    func rejectsSingleDashFlag() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("-b")
-        }
-    }
-
-    @Test("Rejects path traversal with ..")
-    func rejectsPathTraversal() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("v1/../../../etc/passwd")
-        }
-    }
-
-    @Test("Rejects spaces")
-    func rejectsSpaces() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("main branch")
-        }
-    }
-
-    @Test("Rejects backticks")
-    func rejectsBackticks() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("`whoami`")
-        }
-    }
-
-    @Test("Rejects dollar sign")
-    func rejectsDollarSign() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("$HOME")
-        }
-    }
-
-    @Test("Rejects empty string")
-    func rejectsEmpty() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateRef("")
+            try makeFetcher().validateRef(ref)
         }
     }
 }
 
 struct PackFetcherIdentifierValidationTests {
-    // MARK: - Valid identifiers
-
-    @Test("Accepts simple hyphenated name")
-    func acceptsHyphenatedName() throws {
-        try makeFetcher().validateIdentifier("my-pack")
+    @Test("Accepts plain pack identifiers", arguments: ["my-pack", "my.pack", "pack123"])
+    func acceptsValidIdentifier(identifier: String) throws {
+        try makeFetcher().validateIdentifier(identifier)
     }
 
-    @Test("Accepts dotted name")
-    func acceptsDottedName() throws {
-        try makeFetcher().validateIdentifier("my.pack")
-    }
-
-    @Test("Accepts alphanumeric name")
-    func acceptsAlphanumericName() throws {
-        try makeFetcher().validateIdentifier("pack123")
-    }
-
-    // MARK: - Rejected identifiers
-
-    @Test("Rejects empty string")
-    func rejectsEmpty() throws {
+    /// Identifiers become directory names under `~/.mcs/packs`, so traversal must be impossible.
+    @Test("Rejects identifiers that escape or break the packs directory", arguments: [
+        "", "../../etc", "foo/bar", "-pack",
+    ])
+    func rejectsUnsafeIdentifier(identifier: String) throws {
         #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateIdentifier("")
-        }
-    }
-
-    @Test("Rejects path traversal")
-    func rejectsPathTraversal() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateIdentifier("../../etc")
-        }
-    }
-
-    @Test("Rejects slash")
-    func rejectsSlash() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateIdentifier("foo/bar")
-        }
-    }
-
-    @Test("Rejects leading dash")
-    func rejectsLeadingDash() throws {
-        #expect(throws: PackFetchError.self) {
-            try makeFetcher().validateIdentifier("-pack")
+            try makeFetcher().validateIdentifier(identifier)
         }
     }
 }

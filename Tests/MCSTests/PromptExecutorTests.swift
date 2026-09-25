@@ -166,7 +166,6 @@ struct PromptExecutorTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project
             type: fileDetect
@@ -191,7 +190,6 @@ struct PromptExecutorTests {
         identifier: test
         displayName: Test
         description: Test
-        version: "1.0.0"
         prompts:
           - key: project
             type: fileDetect
