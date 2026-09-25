@@ -97,7 +97,10 @@ struct ExternalPackAdapter: TechPack {
                 priorValues: context.priorValues
             )
         } catch let PromptExecutor.PromptError.unresolved(key) {
-            throw PromptResolutionError(unresolved: [UnresolvedPrompt(packNames: [displayName], key: key)])
+            throw PromptResolutionError(
+                unresolved: [UnresolvedPrompt(packNames: [displayName], key: key)],
+                isGlobalScope: context.isGlobalScope
+            )
         }
     }
 

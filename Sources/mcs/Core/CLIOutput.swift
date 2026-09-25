@@ -25,8 +25,9 @@ final class WarningCounter: Sendable {
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
     let colorsEnabled: Bool
-    /// True when stdin is a TTY — i.e. the user can answer prompts (raw or fallback).
-    /// Gate interactive-confirmation flows on this, not on `isInteractiveTerminal`.
+    /// True when stdin is a TTY, or when a caller pinned it via `init(interactiveStdin:)`.
+    /// Gate interactive flows on this, not on `isInteractiveTerminal`: off a TTY, prompt
+    /// resolution never reads stdin, even when it is piped.
     let hasInteractiveStdin: Bool
     /// True when both stdin and stdout are TTYs — the raw-terminal UI (cursor
     /// manipulation, ANSI ornamentation) can render. Gate pickers on this.

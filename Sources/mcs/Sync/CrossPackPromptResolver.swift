@@ -133,53 +133,130 @@ enum CrossPackPromptResolver {
         return (reusable, newKeys)
     }
 
-    /// Every value a run without an interactive stdin can answer, and every key it can't,
-    /// per `PromptExecutor.nonInteractiveValue`. Keys already in `context.resolvedValues`
-    /// are skipped; a placeholder no prompt declares resolves only from its prior.
-    ///
-    /// Each key is judged the way sync will answer it: a `groupSharedPrompts` key by all its
-    /// declarations at once, any other key by its first declaring pack alone — that pack's
-    /// executor is the one whose value wins. A key that pack computes by `script` is left to it.
+    /// Where every value resolution starts: the keys a pack set consumes, partitioned against
+    /// the priors. Sync and the non-interactive preflight both build it here, so they cannot
+    /// disagree about which keys exist or which priors survive.
+    struct ValuePlan {
+        let declared: [PromptDefinition]
+        /// `__KEY__` placeholders no prompt declares, less the keys already in `context.resolvedValues`.
+        let undeclaredKeys: Set<String>
+        let reusableValues: [String: String]
+        let newKeys: Set<String>
+    }
+
+    static func planValues(
+        packs: [any TechPack],
+        context: ProjectConfigContext,
+        includeTemplates: Bool,
+        onWarning: ((String) -> Void)? = nil
+    ) -> ValuePlan {
+        let consumed = consumedKeys(
+            packs: packs, context: context, includeTemplates: includeTemplates, onWarning: onWarning
+        )
+        let undeclaredKeys = consumed.undeclared.subtracting(context.resolvedValues.keys)
+        // Nothing constrains an undeclared placeholder's value, so it partitions as `input`.
+        let placeholderPrompts = undeclaredKeys.map {
+            PromptDefinition(
+                key: $0, type: .input,
+                label: nil, defaultValue: nil, options: nil,
+                detectPatterns: nil, scriptCommand: nil
+            )
+        }
+        let (reusable, newKeys) = partitionDeclaredPrompts(
+            consumed.declared + placeholderPrompts,
+            priorValues: context.priorValues,
+            projectPath: context.projectPath
+        )
+        return ValuePlan(
+            declared: consumed.declared, undeclaredKeys: undeclaredKeys,
+            reusableValues: reusable, newKeys: newKeys
+        )
+    }
+
+    /// Every value a run without an interactive stdin will store, and every key it can't answer.
+    /// Replays sync's stages in sync's order, with `PromptExecutor.nonInteractiveValue` standing
+    /// in for each reader: reused priors when `reusesPriors`, then shared prompts, then each
+    /// pack in order for the keys still open, then undeclared placeholders from their prior.
+    /// A key a pack computes by `script` is claimed by that pack and left to its script.
     static func resolveNonInteractively(
         packs: [any TechPack],
         context: ProjectConfigContext,
-        priorValues: [String: String],
+        plan: ValuePlan,
+        reusesPriors: Bool,
         includeTemplates: Bool
     ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
+        let priors = context.priorValues
+        var answered = context.resolvedValues
         var resolved: [String: String] = [:]
-        var unresolved: [String: [String]] = [:]
+        var claimed = Set<String>()
+        var unresolved: [UnresolvedPrompt] = []
 
-        let declarationsByKey = promptInfosByKey(packs: packs, context: context)
-        let shared = groupSharedPrompts(packs: packs, context: context)
-        for (key, infos) in declarationsByKey {
-            let answering = shared[key] ?? infos.filter { $0.packID == infos[0].packID }
-            let declarations = answering.map(\.prompt)
-            guard !declarations.contains(where: { $0.type == .script }) else { continue }
-            if let value = PromptExecutor.nonInteractiveValue(
-                declarations: declarations, prior: priorValues[key], projectPath: context.projectPath
-            ) {
-                resolved[key] = value
-            } else {
-                unresolved[key] = answering.map(\.packName)
+        func answer(_ key: String, _ value: String) {
+            answered[key] = value
+            resolved[key] = value
+        }
+
+        if reusesPriors {
+            for (key, value) in plan.reusableValues where answered[key] == nil {
+                answer(key, value)
             }
         }
 
-        // Per pack, not via `consumedKeys`, because the error has to name who references the key.
+        let sharedContext = ProjectConfigContext(
+            projectPath: context.projectPath, repoName: context.repoName, output: context.output,
+            resolvedValues: answered, priorValues: priors, isGlobalScope: context.isGlobalScope
+        )
+        let shared = groupSharedPrompts(packs: packs, context: sharedContext)
+        for key in shared.keys.sorted() {
+            let infos = shared[key, default: []]
+            claimed.insert(key)
+            if let value = PromptExecutor.nonInteractiveValue(
+                declarations: infos.map(\.prompt), prior: priors[key], projectPath: context.projectPath
+            ) {
+                answer(key, value)
+            } else {
+                unresolved.append(UnresolvedPrompt(packNames: infos.map(\.packName), key: key))
+            }
+        }
+
         for pack in packs {
-            let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
-                packs: [pack], includeTemplates: includeTemplates
-            )
-            for key in referenced where declarationsByKey[key] == nil && context.resolvedValues[key] == nil {
-                if let prior = priorValues[key] {
-                    resolved[key] = prior
+            let open = pack.declaredPrompts(context: context)
+                .filter { answered[$0.key] == nil && !claimed.contains($0.key) }
+            var seen = Set<String>()
+            for key in open.map(\.key) where seen.insert(key).inserted {
+                claimed.insert(key)
+                let declarations = open.filter { $0.key == key }
+                guard !declarations.contains(where: { $0.type == .script }) else { continue }
+                if let value = PromptExecutor.nonInteractiveValue(
+                    declarations: declarations, prior: priors[key], projectPath: context.projectPath
+                ) {
+                    answer(key, value)
                 } else {
-                    unresolved[key, default: []].append(pack.displayName)
+                    unresolved.append(UnresolvedPrompt(packNames: [pack.displayName], key: key))
                 }
             }
         }
 
-        let sorted = unresolved.keys.sorted().map { UnresolvedPrompt(packNames: unresolved[$0, default: []], key: $0) }
-        return (resolved, sorted)
+        let missing = plan.undeclaredKeys.filter { answered[$0] == nil && !claimed.contains($0) }
+        for key in missing {
+            if let prior = priors[key] { answer(key, prior) }
+        }
+        let stillMissing = Set(missing.filter { answered[$0] == nil })
+        if !stillMissing.isEmpty {
+            // Only on failure: naming who references a key costs a scan per pack.
+            var referencing: [String: [String]] = [:]
+            for pack in packs {
+                let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
+                    packs: [pack], includeTemplates: includeTemplates
+                )
+                for key in referenced.intersection(stillMissing) {
+                    referencing[key, default: []].append(pack.displayName)
+                }
+            }
+            unresolved += stillMissing.map { UnresolvedPrompt(packNames: referencing[$0, default: []], key: $0) }
+        }
+
+        return (resolved, unresolved.sorted { $0.key < $1.key })
     }
 
     /// Keys whose value every declaring pack resolves by scanning, per `visibleValueTypes`.
@@ -235,7 +312,8 @@ enum CrossPackPromptResolver {
         _ shared: [String: [PackPromptInfo]],
         output: CLIOutput,
         priorValues: [String: String] = [:],
-        projectPath: URL
+        projectPath: URL,
+        isGlobalScope: Bool
     ) throws -> [String: String] {
         var resolved: [String: String] = [:]
         var unresolved: [UnresolvedPrompt] = []
@@ -310,13 +388,13 @@ enum CrossPackPromptResolver {
         }
 
         if !unresolved.isEmpty {
-            throw PromptResolutionError(unresolved: unresolved)
+            throw PromptResolutionError(unresolved: unresolved, isGlobalScope: isGlobalScope)
         }
         return resolved
     }
 }
 
-/// A prompt key no source can answer, with every pack that consumes it.
+/// A prompt key no source can answer, with the packs whose declarations failed to answer it.
 struct UnresolvedPrompt: Equatable {
     let packNames: [String]
     let key: String
@@ -326,6 +404,8 @@ struct UnresolvedPrompt: Equatable {
 /// values commonly hold secrets, and this message lands in CI logs.
 struct PromptResolutionError: Error, Equatable, LocalizedError {
     let unresolved: [UnresolvedPrompt]
+    /// Bootstrap seeds project scope only, so the remedy differs by scope.
+    let isGlobalScope: Bool
 
     var errorDescription: String? {
         lines.joined(separator: "\n")
@@ -334,9 +414,9 @@ struct PromptResolutionError: Error, Equatable, LocalizedError {
     var lines: [String] {
         ["Cannot resolve \(unresolved.count) prompt value(s) without an interactive terminal:"]
             + unresolved.map { "  - \($0.packNames.joined(separator: ", ")): \($0.key)" }
-            + [
-                "Declare them under 'values:' in \(BootstrapFile.defaultFilename) and run 'mcs bootstrap',"
-                    + " or re-run from a terminal.",
-            ]
+            + [isGlobalScope
+                ? "Re-run 'mcs sync --global' from a terminal to answer them; later unattended runs reuse the answers."
+                : "Declare them under 'values:' in \(BootstrapFile.defaultFilename) and run 'mcs bootstrap',"
+                + " or re-run from a terminal."]
     }
 }

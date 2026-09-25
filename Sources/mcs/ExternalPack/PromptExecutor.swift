@@ -90,9 +90,10 @@ struct PromptExecutor {
 
     // MARK: - File Detect
 
-    /// Scan for files matching one or more patterns and present a selector.
-    /// `priorValue` pre-selects the file chosen last sync — pattern order decides the
-    /// cursor otherwise, which can land on a sibling of the file the user actually picked.
+    /// Scan for files matching one or more patterns and present a selector (interactive only;
+    /// off a TTY `execute` resolves through `nonInteractiveValue` instead).
+    /// `priorValue` pre-selects the file chosen last sync, then the declared default — pattern
+    /// order decides the cursor otherwise, which can land on a sibling of the file the user picked.
     private func executeFileDetect(
         prompt: PromptDefinition,
         projectPath: URL,
@@ -223,19 +224,19 @@ struct PromptExecutor {
     // MARK: - Non-Interactive
 
     /// The value one key resolves to without a reader: the prior, then the first declared
-    /// default, each only when every declaration's constraints admit it. `nil` means the
-    /// key is unanswerable and the run must fail rather than store whatever EOF yields.
+    /// default, each only if the declarations admit it. `nil` means the key is unanswerable
+    /// and the run must fail rather than store whatever EOF yields.
     ///
-    /// Mixed declarations follow `CrossPackPromptResolver.partitionDeclaredPrompts`: any
-    /// `input` declaration accepts a value verbatim, and only keys every pack scans for
-    /// take the `fileDetect` rules. `script` declarations are ignored — they compute
-    /// their value rather than ask for it.
+    /// `declarations` are the ones the answering sync step would use: one pack's, or a shared
+    /// group's — never a `script`. Any `input` declaration admits a value verbatim; a set that
+    /// is all `fileDetect` scans every declaration's patterns and follows the executor's
+    /// zero-, one- and many-match branches; otherwise the merged `select` options constrain it.
     static func nonInteractiveValue(
         declarations: [PromptDefinition],
         prior: String?,
         projectPath: URL
     ) -> String? {
-        let types = Set(declarations.map(\.type)).subtracting([.script])
+        let types = Set(declarations.map(\.type))
         guard !types.isEmpty else { return nil }
         let declaredDefault = declarations.compactMap(\.defaultValue).first
         let candidates = [prior, declaredDefault].compactMap(\.self)

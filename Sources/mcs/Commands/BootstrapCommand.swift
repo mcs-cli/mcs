@@ -74,7 +74,7 @@ struct BootstrapCommand: LockedCommand {
             file: file, desiredIdentifiers: desiredIdentifiers,
             registry: registry, cwd: cwd, env: ctx.env, output: ctx.output
         )
-        let seededValues = seedPromptValues(file: file, output: ctx.output)
+        let seededValues = seedValues(from: file, output: ctx.output)
         try runSync(
             projectRoot: cwd,
             desiredIdentifiers: desiredIdentifiers,
@@ -410,9 +410,9 @@ struct BootstrapCommand: LockedCommand {
     /// `state.resolvedValues` and reuses them silently for keys a resolved pack declares as a
     /// prompt or references as a `__PLACEHOLDER__`; any other key is dropped.
     ///
-    /// They go to sync rather than to disk here: sync merges them only after its removals,
+    /// Returned rather than saved: sync merges them only after its removals,
     /// so pruning a removed pack's values can't take seeds meant for a pack being added.
-    private func seedPromptValues(file: BootstrapFile, output: CLIOutput) -> [String: String] {
+    private func seedValues(from file: BootstrapFile, output: CLIOutput) -> [String: String] {
         // Warn when a later pack overrides an earlier pack's value for the same key so the
         // divergence is visible. Values themselves stay out of the log: bootstrap `values`
         // commonly hold MCP env vars (API keys, tokens), and a CI log is a common secret-exfil path.
@@ -599,8 +599,8 @@ struct BootstrapCommand: LockedCommand {
         if dryRun {
             try configurator.dryRun(packs: filteredPacks, seededValues: seededValues)
         } else {
-            // The seeded values already answer every declared prompt — the
-            // interactive Y/n gate would contradict that. New prompts still execute.
+            // Seeded and stored values must not re-prompt behind the interactive Y/n gate;
+            // prompts nothing answers still execute.
             try configurator.configure(
                 packs: filteredPacks,
                 confirmRemovals: !yes,

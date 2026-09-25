@@ -286,15 +286,28 @@ struct CrossPackPromptResolverTests {
         )
     }
 
+    private func preflight(
+        _ packs: [any TechPack],
+        in directory: URL = FileManager.default.temporaryDirectory,
+        builtIns: [String: String] = [:],
+        priors: [String: String] = [:]
+    ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
+        let context = ProjectConfigContext(
+            projectPath: directory, repoName: "r", output: CLIOutput(colorsEnabled: false),
+            resolvedValues: builtIns, priorValues: priors, isGlobalScope: false
+        )
+        let plan = CrossPackPromptResolver.planValues(packs: packs, context: context, includeTemplates: false)
+        return CrossPackPromptResolver.resolveNonInteractively(
+            packs: packs, context: context, plan: plan, reusesPriors: true, includeTemplates: false
+        )
+    }
+
     @Test("resolveNonInteractively answers from prior or default and lists the rest with every declaring pack")
     func resolveNonInteractivelyListsMissing() {
         let packA = makeMockPack(name: "pack-a", prompts: [input("TOKEN"), input("PREFIX", defaultValue: "feat")])
         let packB = makeMockPack(name: "pack-b", prompts: [input("TOKEN"), input("OWNER")])
 
-        let resolution = CrossPackPromptResolver.resolveNonInteractively(
-            packs: [packA, packB], context: makeContext(),
-            priorValues: ["OWNER": "me"], includeTemplates: false
-        )
+        let resolution = preflight([packA, packB], priors: ["OWNER": "me"])
 
         #expect(resolution.resolved == ["PREFIX": "feat", "OWNER": "me"])
         #expect(resolution.unresolved == [UnresolvedPrompt(packNames: ["pack-a", "pack-b"], key: "TOKEN")])
@@ -307,15 +320,8 @@ struct CrossPackPromptResolverTests {
             options: nil, detectPatterns: nil, scriptCommand: "echo 1"
         )
         let pack = makeMockPack(name: "pack-a", prompts: [input("REPO_NAME"), script])
-        let context = ProjectConfigContext(
-            projectPath: FileManager.default.temporaryDirectory, repoName: "r",
-            output: CLIOutput(colorsEnabled: false), resolvedValues: ["REPO_NAME": "r"],
-            isGlobalScope: false
-        )
 
-        let resolution = CrossPackPromptResolver.resolveNonInteractively(
-            packs: [pack], context: context, priorValues: [:], includeTemplates: false
-        )
+        let resolution = preflight([pack], builtIns: ["REPO_NAME": "r"])
 
         #expect(resolution.resolved.isEmpty)
         #expect(resolution.unresolved.isEmpty)
@@ -340,49 +346,29 @@ struct CrossPackPromptResolverTests {
             PromptMockPack(identifier: "pack-a", displayName: "Xcode", prompts: [detect("*.xcodeproj")]),
             PromptMockPack(identifier: "pack-b", displayName: "Xcode", prompts: [detect("*.xcworkspace")]),
         ]
-        let context = ProjectConfigContext(
-            projectPath: dir, repoName: "r", output: CLIOutput(colorsEnabled: false),
-            resolvedValues: [:], isGlobalScope: false
-        )
-
-        let resolution = CrossPackPromptResolver.resolveNonInteractively(
-            packs: packs, context: context, priorValues: [:], includeTemplates: false
-        )
+        let resolution = preflight(packs, in: dir)
 
         #expect(resolution.resolved == ["PROJECT": "App.xcodeproj"])
         #expect(resolution.unresolved.isEmpty)
     }
 
-    @Test("resolveNonInteractively leaves a key to the script its first declaring pack runs")
-    func resolveNonInteractivelyScriptFirst() {
-        let script = PromptDefinition(
-            key: "VERSION", type: .script, label: nil, defaultValue: nil,
-            options: nil, detectPatterns: nil, scriptCommand: "echo 1"
-        )
-        let packs = [
-            makeMockPack(name: "pack-a", prompts: [script]),
-            makeMockPack(name: "pack-b", prompts: [input("VERSION")]),
-        ]
-
-        let resolution = CrossPackPromptResolver.resolveNonInteractively(
-            packs: packs, context: makeContext(), priorValues: [:], includeTemplates: false
-        )
-
-        #expect(resolution.resolved.isEmpty)
-        #expect(resolution.unresolved.isEmpty)
-    }
-
     @Test("Resolution error names packs and keys, never values")
     func resolutionErrorText() {
-        let error = PromptResolutionError(unresolved: [
+        let unresolved = [
             UnresolvedPrompt(packNames: ["iOS"], key: "API_KEY"),
             UnresolvedPrompt(packNames: ["A", "B"], key: "REGION"),
-        ])
-        #expect(error.lines == [
+        ]
+        let listing = [
             "Cannot resolve 2 prompt value(s) without an interactive terminal:",
             "  - iOS: API_KEY",
             "  - A, B: REGION",
+        ]
+        #expect(PromptResolutionError(unresolved: unresolved, isGlobalScope: false).lines == listing + [
             "Declare them under 'values:' in mcs.yaml and run 'mcs bootstrap', or re-run from a terminal.",
+        ])
+        // Bootstrap can't seed the global scope, so it must not be offered there.
+        #expect(PromptResolutionError(unresolved: unresolved, isGlobalScope: true).lines == listing + [
+            "Re-run 'mcs sync --global' from a terminal to answer them; later unattended runs reuse the answers.",
         ])
     }
 
@@ -397,14 +383,17 @@ struct CrossPackPromptResolverTests {
             ],
         ]
         #expect(try CrossPackPromptResolver.resolveSharedPrompts(
-            withDefault, output: output, projectPath: dir
+            withDefault, output: output, projectPath: dir, isGlobalScope: false
         ) == ["PREFIX": "feat"])
 
         let missing: [String: [CrossPackPromptResolver.PackPromptInfo]] = [
             "TOKEN": [.init(packID: "a", packName: "A", prompt: input("TOKEN")), .init(packID: "b", packName: "B", prompt: input("TOKEN"))],
         ]
-        #expect(throws: PromptResolutionError(unresolved: [UnresolvedPrompt(packNames: ["A", "B"], key: "TOKEN")])) {
-            try CrossPackPromptResolver.resolveSharedPrompts(missing, output: output, projectPath: dir)
+        let expected = PromptResolutionError(
+            unresolved: [UnresolvedPrompt(packNames: ["A", "B"], key: "TOKEN")], isGlobalScope: false
+        )
+        #expect(throws: expected) {
+            try CrossPackPromptResolver.resolveSharedPrompts(missing, output: output, projectPath: dir, isGlobalScope: false)
         }
     }
 }

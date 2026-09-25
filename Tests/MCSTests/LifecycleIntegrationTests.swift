@@ -2312,7 +2312,7 @@ struct PromptValueReuseLifecycleTests {
 
         #expect(throws: PromptResolutionError(unresolved: [
             UnresolvedPrompt(packNames: ["Adapter Pack"], key: "API_KEY"),
-        ])) {
+        ], isGlobalScope: false)) {
             try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
                 .configure(packs: packs, confirmRemovals: false)
         }
@@ -2353,7 +2353,7 @@ struct PromptValueReuseLifecycleTests {
 
         #expect(throws: PromptResolutionError(unresolved: [
             UnresolvedPrompt(packNames: ["Placeholder Pack"], key: "MEMORIES_BRANCH"),
-        ])) {
+        ], isGlobalScope: false)) {
             try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
                 .configure(packs: [pack], confirmRemovals: false)
         }
@@ -2402,45 +2402,104 @@ struct PromptValueReuseLifecycleTests {
         #expect(try bed.projectState().resolvedValues?["VERSION"] == "1.2.3")
     }
 
-    @Test("--customize forces re-ask even when priors are available")
-    func customizeForceReAsk() throws {
+    /// Two packs detect `PROJECT` with different patterns, and only the second's file exists.
+    private func splitDetectPacks(bed: LifecycleTestBed) throws -> [any TechPack] {
+        try touch("App.xcworkspace", in: bed.project)
+        return [
+            bed.adapterPack(
+                identifier: "pack-a", displayName: "Pack A",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj"])]
+            ),
+            bed.adapterPack(
+                identifier: "pack-b", displayName: "Pack B",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcworkspace"])]
+            ),
+        ]
+    }
+
+    private func storePrior(_ values: [String: String], bed: LifecycleTestBed) throws {
+        var state = try bed.projectState()
+        state.setResolvedValues(values)
+        try state.save()
+    }
+
+    @Test("Non-TTY sync keeps a fileDetect prior that any declaring pack's scan still finds")
+    func nonInteractiveSplitFileDetectKeepsPrior() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
+        let packs = try splitDetectPacks(bed: bed)
+        try storePrior(["PROJECT": "App.xcworkspace"], bed: bed)
 
-        // Track whether templateValues saw unresolved keys (re-ask path)
-        // by using defaultAnswer that differs per call.
-        let pack = MockPromptTechPack(
-            identifier: "customize-pack",
-            displayName: "Customize",
-            prompts: [inputPrompt("SETTING")],
-            defaultAnswer: { _ in "mock-re-asked" }
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcworkspace")
+    }
+
+    @Test("Non-TTY sync reuses a prior verbatim when any pack declares the key as input")
+    func nonInteractiveMixedTypesKeepPrior() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packs: [any TechPack] = [
+            bed.adapterPack(
+                identifier: "pack-a", displayName: "Pack A",
+                prompts: [fileDetectPrompt("PROJECT", patterns: ["*.xcodeproj"])]
+            ),
+            bed.adapterPack(identifier: "pack-b", displayName: "Pack B", prompts: [inputPrompt("PROJECT")]),
+        ]
+        try storePrior(["PROJECT": "Legacy.xcodeproj"], bed: bed)
+
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: packs)).configure(packs: packs, confirmRemovals: false)
+
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "Legacy.xcodeproj")
+    }
+
+    @Test("--customize off-TTY bypasses reuse: a prior only helps a pack whose own prompt accepts it")
+    func customizeBypassesReuseOffTTY() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packs = try splitDetectPacks(bed: bed)
+        try storePrior(["PROJECT": "App.xcworkspace"], bed: bed)
+
+        // Reuse would keep the prior (see the split-fileDetect test); without it the first
+        // declaring pack answers alone, and its scan finds nothing.
+        #expect(throws: PromptResolutionError(
+            unresolved: [UnresolvedPrompt(packNames: ["Pack A"], key: "PROJECT")], isGlobalScope: false
+        )) {
+            try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
+                .configure(packs: packs, confirmRemovals: false, customize: true)
+        }
+    }
+
+    @Test(
+        "Non-TTY sync fails before removing anything when a selected pack can't be answered",
+        arguments: [false, true]
+    )
+    func nonInteractiveFailureLeavesStateUntouched(confirmRemovals: Bool) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let cmdSource = try bed.makeCommandSource(name: "keep.md")
+        let kept = MockTechPack(
+            identifier: "kept",
+            displayName: "Kept",
+            components: [bed.commandComponent(pack: "kept", id: "keep", source: cmdSource, destination: "keep.md")]
         )
+        let unanswerable = bed.adapterPack(prompts: [inputPrompt("API_KEY")])
+        let registry = TechPackRegistry(packs: [kept, unanswerable])
+        try bed.makeConfigurator(registry: registry).configure(packs: [kept], confirmRemovals: false)
+        try storePrior(["UNRELATED": "value"], bed: bed)
+        let before = try bed.projectState()
 
-        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
-            .configure(packs: [pack], confirmRemovals: false)
+        #expect(throws: PromptResolutionError.self) {
+            try bed.makeConfigurator(registry: registry)
+                .configure(packs: [unanswerable], confirmRemovals: confirmRemovals)
+        }
 
-        var state = try bed.projectState()
-        state.setResolvedValues(["SETTING": "user-previous"])
-        try state.save()
-
-        // Without --customize: non-interactive reuses → state stays "user-previous"
-        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
-            .configure(packs: [pack], confirmRemovals: false)
-        #expect(try bed.projectState().resolvedValues?["SETTING"] == "user-previous")
-
-        // With --customize: seed bypass → mock's templateValues sees no seeded key
-        // and returns priorValues["SETTING"] (still "user-previous" since MockPromptTechPack
-        // uses context.priorValues as its answer source). This mirrors real behavior:
-        // prompts would run but with priors as defaults. To verify the bypass, seed a
-        // different prior and assert templateValues received it, not a pre-seeded resolve.
-        state = try bed.projectState()
-        state.setResolvedValues(["SETTING": "prior-updated"])
-        try state.save()
-
-        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
-            .configure(packs: [pack], confirmRemovals: false, customize: true)
-        // Under --customize, templateValues runs (nothing seeded), returns priorValues["SETTING"]
-        #expect(try bed.projectState().resolvedValues?["SETTING"] == "prior-updated")
+        let after = try bed.projectState()
+        #expect(after.configuredPacks == before.configuredPacks)
+        #expect(after.resolvedValues == before.resolvedValues)
+        #expect(FileManager.default.fileExists(
+            atPath: bed.project.appendingPathComponent(".claude/commands/keep.md").path
+        ))
     }
 }
 

@@ -206,13 +206,13 @@ struct Configurator {
             let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
             let removals = state.configuredPacks.subtracting(packs.map(\.identifier))
             let unresolved = resolveNonInteractively(
-                packs: packs,
-                priors: priorsAfterRemovals(state: state, removals: removals, seededValues: seededValues),
-                builtInValues: builtInValues
+                packs: packs, state: state, removals: removals, seededValues: seededValues,
+                builtInValues: builtInValues, customize: false, reusePriorValuesSilently: false,
+                reportWarnings: true
             ).unresolved
             if !unresolved.isEmpty {
                 output.warn("A non-interactive sync would fail:")
-                for line in PromptResolutionError(unresolved: unresolved).lines {
+                for line in PromptResolutionError(unresolved: unresolved, isGlobalScope: scope.isGlobalScope).lines {
                     output.plain("  \(line)")
                 }
             }
@@ -263,13 +263,14 @@ struct Configurator {
         let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
         var nonInteractiveValues: [String: String] = [:]
         if !output.hasInteractiveStdin {
+            // Template-read warnings are left to resolveAllValues, which reports them once.
             let resolution = resolveNonInteractively(
-                packs: packs,
-                priors: priorsAfterRemovals(state: state, removals: removals, seededValues: seededValues),
-                builtInValues: builtInValues
+                packs: packs, state: state, removals: removals, seededValues: seededValues,
+                builtInValues: builtInValues, customize: customize,
+                reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
             )
             guard resolution.unresolved.isEmpty else {
-                throw PromptResolutionError(unresolved: resolution.unresolved)
+                throw PromptResolutionError(unresolved: resolution.unresolved, isGlobalScope: scope.isGlobalScope)
             }
             nonInteractiveValues = resolution.resolved
         }
@@ -660,10 +661,17 @@ struct Configurator {
         seededValues: [String: String]
     ) -> [String: String] {
         var priors = state.resolvedValues ?? [:]
-        if !removals.isEmpty, let kept = keysKeptByPrune(
+        guard !removals.isEmpty else { return priors.merging(seededValues) { _, seeded in seeded } }
+        if let kept = keysKeptByPrune(
             survivors: state.configuredPacks.subtracting(removals), priors: priors, reportWarnings: false
         ) {
             priors = priors.filter { kept.contains($0.key) }
+        } else if !priors.isEmpty {
+            // The prune itself will be skipped for the same reason, so these really do carry over.
+            output.warn(
+                "Keeping stored values through this removal because a remaining pack can't be read: "
+                    + priors.keys.sorted().joined(separator: ", ")
+            )
         }
         return priors.merging(seededValues) { _, seeded in seeded }
     }
@@ -805,44 +813,29 @@ struct Configurator {
         let priorValues = state.resolvedValues ?? [:]
         var allValues = builtInValues
 
-        let initialContext = strategy.makeConfigContext(
-            output: output, resolvedValues: allValues, priorValues: priorValues
-        )
         // Packs resolve only their declared prompts, so every other key a placeholder
         // references is known before any prompt runs — and can go through the same reuse gate.
-        let consumed = CrossPackPromptResolver.consumedKeys(
+        let plan = CrossPackPromptResolver.planValues(
             packs: packs,
-            context: initialContext,
+            context: strategy.makeConfigContext(
+                output: output, resolvedValues: allValues, priorValues: priorValues
+            ),
             includeTemplates: scope.includeTemplatesInScan,
             onWarning: { output.warn($0) }
         )
-        let allDeclaredPrompts = consumed.declared
-        let undeclaredKeys = consumed.undeclared.subtracting(allValues.keys)
-        // Nothing constrains an undeclared placeholder's value, so it partitions as `input`.
-        let placeholderPrompts = undeclaredKeys.map {
-            PromptDefinition(
-                key: $0, type: .input,
-                label: nil, defaultValue: nil, options: nil,
-                detectPatterns: nil, scriptCommand: nil
-            )
-        }
-        let (reusableValues, newDeclaredKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
-            allDeclaredPrompts + placeholderPrompts,
-            priorValues: priorValues,
-            projectPath: initialContext.projectPath
-        )
+        let undeclaredKeys = plan.undeclaredKeys
 
         let seedFromPriors = decideSeedStrategy(
-            reusableValues: reusableValues,
-            newDeclaredKeys: newDeclaredKeys,
-            visibleValueKeys: CrossPackPromptResolver.visibleValueKeys(in: allDeclaredPrompts),
+            reusableValues: plan.reusableValues,
+            newDeclaredKeys: plan.newKeys,
+            visibleValueKeys: CrossPackPromptResolver.visibleValueKeys(in: plan.declared),
             customize: customize,
             reusePriorValuesSilently: reusePriorValuesSilently
         )
         if seedFromPriors {
-            allValues.merge(reusableValues) { existing, _ in existing }
+            allValues.merge(plan.reusableValues) { existing, _ in existing }
         }
-        // Off-TTY the preflight already answered every key, so no executor below reaches a reader.
+        // The preflight replayed every stage below, so off-TTY no executor reaches a reader.
         allValues.merge(nonInteractiveValues) { existing, _ in existing }
 
         let sharedContext = strategy.makeConfigContext(
@@ -854,7 +847,7 @@ struct Configurator {
         if !sharedPrompts.isEmpty {
             let sharedValues = try CrossPackPromptResolver.resolveSharedPrompts(
                 sharedPrompts, output: output, priorValues: priorValues,
-                projectPath: sharedContext.projectPath
+                projectPath: sharedContext.projectPath, isGlobalScope: scope.isGlobalScope
             )
             allValues.merge(sharedValues) { existing, _ in existing }
         }
@@ -882,19 +875,48 @@ struct Configurator {
         return allValues
     }
 
+    /// The non-interactive preflight over the values `configure` will resolve against:
+    /// stored values as they stand after `removals`, with `seededValues` on top.
     private func resolveNonInteractively(
         packs: [any TechPack],
-        priors: [String: String],
-        builtInValues: [String: String]
+        state: ProjectState,
+        removals: Set<String>,
+        seededValues: [String: String],
+        builtInValues: [String: String],
+        customize: Bool,
+        reusePriorValuesSilently: Bool,
+        reportWarnings: Bool
     ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
-        CrossPackPromptResolver.resolveNonInteractively(
+        let priors = priorsAfterRemovals(state: state, removals: removals, seededValues: seededValues)
+        let context = strategy.makeConfigContext(output: output, resolvedValues: builtInValues, priorValues: priors)
+        let plan = CrossPackPromptResolver.planValues(
             packs: packs,
-            context: strategy.makeConfigContext(
-                output: output, resolvedValues: builtInValues, priorValues: priors
-            ),
-            priorValues: priors,
-            includeTemplates: scope.includeTemplatesInScan
+            context: context,
+            includeTemplates: scope.includeTemplatesInScan,
+            onWarning: reportWarnings ? { output.warn($0) } : nil
         )
+        let reuse = Self.priorReuse(
+            hasReusable: !plan.reusableValues.isEmpty, hasNewKeys: !plan.newKeys.isEmpty,
+            customize: customize, interactive: false, silently: reusePriorValuesSilently
+        )
+        return CrossPackPromptResolver.resolveNonInteractively(
+            packs: packs, context: context, plan: plan,
+            reusesPriors: reuse != .skip, includeTemplates: scope.includeTemplatesInScan
+        )
+    }
+
+    enum PriorReuse { case skip, reuse, askGate }
+
+    /// The reuse gate's decision without its output, so the preflight replays the same choice.
+    static func priorReuse(
+        hasReusable: Bool,
+        hasNewKeys: Bool,
+        customize: Bool,
+        interactive: Bool,
+        silently: Bool
+    ) -> PriorReuse {
+        guard hasReusable, !customize else { return .skip }
+        return !interactive || silently || hasNewKeys ? .reuse : .askGate
     }
 
     /// Returns `true` when reusable priors should short-circuit the prompt executors.
@@ -914,8 +936,11 @@ struct Configurator {
         customize: Bool,
         reusePriorValuesSilently: Bool
     ) -> Bool {
-        guard !reusableValues.isEmpty else { return false }
-        if customize { return false }
+        let decision = Self.priorReuse(
+            hasReusable: !reusableValues.isEmpty, hasNewKeys: !newDeclaredKeys.isEmpty,
+            customize: customize, interactive: output.hasInteractiveStdin, silently: reusePriorValuesSilently
+        )
+        guard decision != .skip else { return false }
 
         if !output.hasInteractiveStdin {
             output.dimmed("Reusing \(reusableValues.count) previously configured value(s) from last sync.")
