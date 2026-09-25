@@ -1131,6 +1131,25 @@ struct Configurator {
             }
         }
 
+        // `files` records a copied directory whole (global) or by its top-level children (project),
+        // so a file dropped deeper inside it only disappears from the per-file `fileHashes`.
+        // Legacy records hashed every file under a copied directory, user files included, so
+        // their first sync only rebaselines.
+        let staleHashedPaths = previous.fileHashesShippedOnly == true
+            ? Set(previous.fileHashes.keys)
+            .subtracting(currentArtifacts.fileHashes.keys)
+            .filter { path in !staleFiles.contains { PathContainment.isContained(path: path, within: $0) } }
+            : []
+        for path in staleHashedPaths.sorted() {
+            if removeFileArtifactItem(relativePath: path) {
+                output.dimmed("  Removed stale file: \(path)")
+                pruneEmptyParents(of: path, within: currentArtifacts.files)
+            } else {
+                currentArtifacts.fileHashes[path] = previous.fileHashes[path]
+                output.warn("  Could not remove stale file '\(path)' — will retry on next sync")
+            }
+        }
+
         // Gitignore entries, brew packages and plugins are all ref-counted, so one counter serves
         // all three. Building it is free — three stored properties, no I/O until it is queried.
         let refCounter = ResourceRefCounter(
@@ -1192,6 +1211,25 @@ struct Configurator {
                     output.warn("  Could not remove stale plugin '\(PluginRef(name).bareName)' — will retry on next sync")
                 }
             }
+        }
+    }
+
+    private func pruneEmptyParents(of relativePath: String, within trackedFiles: [String]) {
+        // Only directories strictly inside a tracked file entry are pruned, so the installed
+        // directory itself and anything outside the pack's footprint are never removed.
+        let fm = FileManager.default
+        var parent = (relativePath as NSString).deletingLastPathComponent
+        while trackedFiles.contains(where: { parent != $0 && PathContainment.isContained(path: parent, within: $0) }),
+              let url = PathContainment.safePath(relativePath: parent, within: strategy.fileArtifactBase) {
+            guard fm.fileExists(atPath: url.path) else { return }
+            do {
+                guard try fm.contentsOfDirectory(atPath: url.path).isEmpty else { return }
+                try fm.removeItem(at: url)
+            } catch {
+                output.warn("  Could not prune empty directory '\(parent)': \(error.localizedDescription)")
+                return
+            }
+            parent = (parent as NSString).deletingLastPathComponent
         }
     }
 

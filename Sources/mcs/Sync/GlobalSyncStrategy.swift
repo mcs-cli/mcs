@@ -54,6 +54,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         output: CLIOutput
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
+        artifacts.fileHashesShippedOnly = true
         // Carry forward ownership records from previous sync
         artifacts.brewPackages = previousArtifacts?.brewPackages ?? []
         artifacts.plugins = previousArtifacts?.plugins ?? []
@@ -115,7 +116,9 @@ struct GlobalSyncStrategy: SyncStrategy {
                 if result.success {
                     let relativePath = fileRelativePath(destination: destination, fileType: fileType)
                     artifacts.files.append(relativePath)
-                    artifacts.fileHashes.merge(result.hashes) { _, new in new }
+                    artifacts.recordFileHashes(
+                        result.hashes, shippedFiles: result.shippedFiles, previous: previousArtifacts
+                    )
                     if let hookCommand = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                         artifacts.hookCommands.append(hookCommand)
                     }
@@ -352,11 +355,15 @@ struct GlobalSyncStrategy: SyncStrategy {
 
     // MARK: - File Removal
 
+    var fileArtifactBase: URL {
+        environment.claudeDirectory
+    }
+
     func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool {
         let fm = FileManager.default
         guard let fullPath = PathContainment.safePath(
             relativePath: relativePath,
-            within: environment.claudeDirectory
+            within: fileArtifactBase
         ) else {
             output.warn("Path '\(relativePath)' escapes claude directory — clearing from tracking")
             return true

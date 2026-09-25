@@ -24,6 +24,9 @@ struct PackArtifactRecord: Codable, Equatable {
     /// SHA-256 hash of the pack's contributed settings key-value pairs, for drift detection.
     /// Nil for state files written by older MCS versions (backward compat).
     var settingsHash: String?
+    /// Whether `fileHashes` covers only files a pack ships. Nil for records written before
+    /// that held, whose hashes can include files a user added inside a copied directory.
+    var fileHashesShippedOnly: Bool?
 
     /// Whether all artifact lists are empty (cleanup is complete).
     /// Note: `settingsHash` is intentionally excluded — it is derived metadata
@@ -54,6 +57,7 @@ struct PackArtifactRecord: Codable, Equatable {
         gitignoreEntries = try container.decodeIfPresent([String].self, forKey: .gitignoreEntries) ?? []
         fileHashes = try container.decodeIfPresent([String: String].self, forKey: .fileHashes) ?? [:]
         settingsHash = try container.decodeIfPresent(String.self, forKey: .settingsHash)
+        fileHashesShippedOnly = try container.decodeIfPresent(Bool.self, forKey: .fileHashesShippedOnly)
     }
 
     init(
@@ -78,6 +82,19 @@ struct PackArtifactRecord: Codable, Equatable {
         self.gitignoreEntries = gitignoreEntries
         self.fileHashes = fileHashes
         self.settingsHash = settingsHash
+    }
+
+    /// Record a copied component's hashes. A shipped file that could not be hashed this run keeps
+    /// its previous hash, so stale-artifact reconciliation does not mistake it for a dropped file.
+    mutating func recordFileHashes(
+        _ hashes: [String: String],
+        shippedFiles: [String],
+        previous: PackArtifactRecord?
+    ) {
+        fileHashes.merge(hashes) { _, new in new }
+        for path in shippedFiles where hashes[path] == nil {
+            fileHashes[path] = previous?.fileHashes[path]
+        }
     }
 
     /// Record a brew package as MCS-owned, deduplicating automatically.
