@@ -713,7 +713,7 @@ struct GlobalResolveBuiltInValuesTests {
         let env = Environment(home: FileManager.default.temporaryDirectory)
         let strategy = GlobalSyncStrategy(environment: env)
         let shell = ShellRunner(environment: env)
-        let output = CLIOutput(colorsEnabled: false)
+        let output = CLIOutput(colorsEnabled: false, interactiveStdin: false)
 
         let values = strategy.resolveBuiltInValues(shell: shell, output: output)
         #expect(values.isEmpty)
