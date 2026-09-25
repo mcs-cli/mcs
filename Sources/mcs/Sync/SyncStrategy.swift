@@ -92,12 +92,10 @@ protocol SyncStrategy {
 
     var fileArtifactBase: URL { get }
 
-    /// Remove a file artifact during pack unconfiguration.
+    /// Remove a tracked file artifact relative to `fileArtifactBase`.
     ///
-    /// Project scope uses `ComponentExecutor.removeProjectFile`.
-    /// Global scope uses `FileManager.removeItem` with `PathContainment` safety.
-    ///
-    /// - Returns: `true` if the file was removed or already absent.
+    /// - Returns: `true` when the path can be dropped from tracking: removed, already absent,
+    ///   or outside `fileArtifactBase`.
     func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool
 
     /// Print what a pack would install (for dry-run artifact display).
@@ -205,6 +203,28 @@ extension SyncStrategy {
         }
         if !settingsFiles.isEmpty {
             output.dimmed("  Settings:     \(settingsFiles.joined(separator: ", "))")
+        }
+    }
+
+    func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool {
+        let fm = FileManager.default
+        guard let fullPath = PathContainment.safePath(
+            relativePath: relativePath,
+            within: fileArtifactBase
+        ) else {
+            output.warn("  Path '\(relativePath)' escapes \(fileArtifactBase.path) — clearing from tracking")
+            return true
+        }
+
+        guard fm.fileExists(atPath: fullPath.path) else { return true }
+
+        do {
+            try fm.removeItem(at: fullPath)
+            output.dimmed("  Removed: \(relativePath)")
+            return true
+        } catch {
+            output.warn("  Could not remove \(relativePath): \(error.localizedDescription)")
+            return false
         }
     }
 }

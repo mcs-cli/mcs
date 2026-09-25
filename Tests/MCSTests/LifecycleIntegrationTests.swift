@@ -21,10 +21,13 @@ private struct LifecycleTestBed {
         try? FileManager.default.removeItem(at: home)
     }
 
-    func makeConfigurator(registry: TechPackRegistry = TechPackRegistry()) -> Configurator {
+    func makeConfigurator(
+        registry: TechPackRegistry = TechPackRegistry(),
+        warningCounter: WarningCounter? = nil
+    ) -> Configurator {
         Configurator(
             environment: env,
-            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
             shell: ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
@@ -4109,11 +4112,16 @@ struct DroppedDirectoryFileTests {
         case project, global
     }
 
-    private func configure(_ bed: LifecycleTestBed, scope: Scope, pack: MockTechPack) throws {
+    private func configure(
+        _ bed: LifecycleTestBed,
+        scope: Scope,
+        pack: MockTechPack,
+        warningCounter: WarningCounter? = nil
+    ) throws {
         let registry = TechPackRegistry(packs: [pack])
         let configurator = switch scope {
-        case .project: bed.makeConfigurator(registry: registry)
-        case .global: bed.makeGlobalSyncConfigurator(registry: registry)
+        case .project: bed.makeConfigurator(registry: registry, warningCounter: warningCounter)
+        case .global: bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: warningCounter)
         }
         try configurator.configure(packs: [pack], confirmRemovals: false)
     }
@@ -4187,6 +4195,72 @@ struct DroppedDirectoryFileTests {
             trackedKey(bed, scope: scope, "SKILL.md"),
             trackedKey(bed, scope: scope, "new.md"),
         ])
+    }
+
+    @Test("A dropped file the user already deleted is untracked without warnings", arguments: Scope.allCases)
+    private func droppedFileAlreadyAbsent(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        try write("old", to: source.appendingPathComponent("old.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        let fm = FileManager.default
+        try fm.removeItem(at: source.appendingPathComponent("old.md"))
+        try fm.removeItem(at: installedSkill(bed, scope: scope).appendingPathComponent("old.md"))
+        let counter = WarningCounter()
+        try configure(bed, scope: scope, pack: pack, warningCounter: counter)
+
+        let oldKey = trackedKey(bed, scope: scope, "old.md")
+        #expect(try record(bed, scope: scope).fileHashes[oldKey] == nil)
+        #expect(try !record(bed, scope: scope).files.contains(oldKey))
+        #expect(counter.count == 0)
+    }
+
+    @Test(
+        "A dropped file that cannot be deleted warns once, stays tracked, and is removed on the next sync",
+        .enabled(if: getuid() != 0, "root ignores directory permissions"),
+        arguments: Scope.allCases
+    )
+    private func failedRemovalRetries(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        try write("old", to: source.appendingPathComponent("stale/old.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        let fm = FileManager.default
+        let staleDir = installedSkill(bed, scope: scope).appendingPathComponent("stale")
+        let oldFile = staleDir.appendingPathComponent("old.md")
+        try fm.removeItem(at: source.appendingPathComponent("stale"))
+        // A read-only parent makes the delete fail; restore it first or cleanup fails too.
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: staleDir.path)
+        defer { _ = try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staleDir.path) }
+
+        let counter = WarningCounter()
+        try configure(bed, scope: scope, pack: pack, warningCounter: counter)
+
+        #expect(counter.count == 1)
+        #expect(fm.fileExists(atPath: oldFile.path))
+        let failed = try record(bed, scope: scope)
+        switch scope {
+        case .project: #expect(failed.files.contains(trackedKey(bed, scope: scope, "stale")))
+        case .global: #expect(failed.fileHashes[trackedKey(bed, scope: scope, "stale/old.md")] != nil)
+        }
+
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staleDir.path)
+        try configure(bed, scope: scope, pack: pack)
+
+        #expect(!fm.fileExists(atPath: staleDir.path))
+        let retried = try record(bed, scope: scope)
+        #expect(!retried.files.contains(trackedKey(bed, scope: scope, "stale")))
+        #expect(retried.fileHashes[trackedKey(bed, scope: scope, "stale/old.md")] == nil)
     }
 
     @Test("A file the user adds inside an installed skill survives re-sync untracked", arguments: Scope.allCases)

@@ -247,32 +247,10 @@ struct ProjectSyncStrategy: SyncStrategy {
         )
     }
 
-    // MARK: - File Removal
+    // MARK: - File Artifacts
 
     var fileArtifactBase: URL {
         projectPath
-    }
-
-    func removeFileArtifact(relativePath: String, output: CLIOutput) -> Bool {
-        let fm = FileManager.default
-        guard let fullPath = PathContainment.safePath(
-            relativePath: relativePath,
-            within: fileArtifactBase
-        ) else {
-            output.warn("Path '\(relativePath)' escapes project directory — clearing from tracking")
-            return true
-        }
-
-        guard fm.fileExists(atPath: fullPath.path) else { return true }
-
-        do {
-            try fm.removeItem(at: fullPath)
-            output.dimmed("  Removed: \(relativePath)")
-            return true
-        } catch {
-            output.warn("  Could not remove \(relativePath): \(error.localizedDescription)")
-            return false
-        }
     }
 
     // MARK: - Private Helpers
