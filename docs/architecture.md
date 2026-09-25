@@ -161,7 +161,7 @@ Verbose form is also supported — see [Tech Pack Schema](techpack-schema.md).
 5. **Remove newly excluded components' artifacts** (`--customize`)
 6. **Auto-install global deps**: brew packages and plugins for all selected packs, before any other component
 7. **Resolve template values** (single pass):
-   - Built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`), then stored values from earlier syncs that are still valid (a `select` answer must still be an option)
+   - Built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`), then stored values from earlier syncs that are still valid (a `select` answer must still be an option), reused unless `--customize` is set or the user declines the reuse prompt
    - Shared prompts (same key from 2+ packs, `input`/`select` only) once via `CrossPackPromptResolver`
    - Each pack's remaining prompts, skipping keys an earlier pack produced
    - Undeclared `__KEY__` placeholders in copyPackFile sources, settings files, MCP configs and templates are prompted inline, defaulting to the stored value
