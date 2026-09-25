@@ -6,7 +6,7 @@ everything needed to generate valid manifests without access to the MCS source c
 **Canonical sources:**
 - Schema: https://github.com/mcs-cli/mcs/blob/main/docs/techpack-schema.md
 - Guide: https://github.com/mcs-cli/mcs/blob/main/docs/creating-tech-packs.md
-- Claude Code hooks: https://docs.anthropic.com/en/docs/claude-code/hooks
+- Claude Code hooks: https://code.claude.com/docs/en/hooks
 
 ## Table of Contents
 
@@ -252,10 +252,10 @@ Adds patterns to the global gitignore. Infers `type: configuration`.
   description: Global gitignore entries
   isRequired: true
   gitignore:
-    - .claude/memories
-    - .claude/settings.local.json
-    - .claude/.mcs-project
+    - .xcodebuildmcp
 ```
+
+`mcs` already adds `.claude`, `*.local.*` and `.claude/.mcs-project` to the global gitignore and owns those lines, so a pack lists only entries specific to its stack.
 
 ### `shell: "command"` — REQUIRES explicit `type:`
 

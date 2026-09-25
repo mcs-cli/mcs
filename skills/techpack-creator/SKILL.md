@@ -43,7 +43,7 @@ Both approaches produce the same output: a complete pack directory ready for `mc
 - MCS CLI: https://github.com/mcs-cli/mcs
 - Schema reference: https://github.com/mcs-cli/mcs/blob/main/docs/techpack-schema.md
 - Creating tech packs guide: https://github.com/mcs-cli/mcs/blob/main/docs/creating-tech-packs.md
-- Claude Code hooks: https://docs.anthropic.com/en/docs/claude-code/hooks
+- Claude Code hooks: https://code.claude.com/docs/en/hooks
 - MCS CLI reference: https://github.com/mcs-cli/mcs/blob/main/docs/cli.md
 - MCS troubleshooting: https://github.com/mcs-cli/mcs/blob/main/docs/troubleshooting.md
 
@@ -68,7 +68,7 @@ Follow these 5 phases in order. Never skip the Propose phase.
 
 ### Phase 1: Scan
 
-Analyze the target directory. Read files in parallel when possible.
+Analyze the target directory.
 
 **Existing Claude Code config** — this is the PRIMARY source of truth. Scan first:
 - `.claude/hooks/*` — existing hook scripts (read each one to understand its event and purpose)
@@ -274,7 +274,8 @@ Generate a README with:
 
 ### Phase 5: Validate
 
-After generating, perform a self-check:
+After generating, run `mcs pack validate {path}` if `mcs` is installed and fix what it reports. Without
+it, self-check:
 
 1. **Schema**: Does the YAML match the schema in `references/techpack-schema.md`?
 2. **File references**: Every `source` path points to a file that was actually created
@@ -285,10 +286,7 @@ After generating, perform a self-check:
 7. **Shell shorthand**: Any `shell:` component has an explicit `type:` field
 8. **No dots in IDs**: Component IDs and template sectionIdentifiers contain no dots
 
-Report any issues found. Then suggest:
-```bash
-mcs pack validate {path}
-```
+Report any issues found.
 
 ## Audit Mode
 
@@ -374,7 +372,6 @@ templates and settings. Use this for branch prefixes, project paths, etc.
 
 ## MCP Server Selection
 
-Only add MCP servers when the repo clearly needs them. Consult `references/stack-detection.md`
-for the mapping. When in doubt, ask the user rather than guessing.
-
-Do NOT add MCP servers speculatively. The user can always add more later via `mcs sync --customize`.
+Add an MCP server only when the repo shows it needs one (see `references/stack-detection.md`), and
+ask the user when the evidence is ambiguous — every server a pack declares is installed for everyone
+who syncs it, while a missing one is easy to add later via `mcs sync --customize`.
