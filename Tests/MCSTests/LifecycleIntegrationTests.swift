@@ -4125,12 +4125,22 @@ struct DroppedDirectoryFileTests {
         }
     }
 
-    private func fileHashes(_ bed: LifecycleTestBed, scope: Scope) throws -> [String: String] {
-        let state = switch scope {
+    private func state(_ bed: LifecycleTestBed, scope: Scope) throws -> ProjectState {
+        switch scope {
         case .project: try bed.projectState()
         case .global: try bed.globalState()
         }
-        return state.artifacts(for: "my-pack")?.fileHashes ?? [:]
+    }
+
+    private func record(_ bed: LifecycleTestBed, scope: Scope) throws -> PackArtifactRecord {
+        try #require(state(bed, scope: scope).artifacts(for: "my-pack"))
+    }
+
+    private func trackedKey(_: LifecycleTestBed, scope: Scope, _ name: String) -> String {
+        switch scope {
+        case .project: ".claude/skills/my-skill/\(name)"
+        case .global: "skills/my-skill/\(name)"
+        }
     }
 
     private func write(_ content: String, to url: URL) throws {
@@ -4173,8 +4183,10 @@ struct DroppedDirectoryFileTests {
         #expect(fm.fileExists(atPath: installed.appendingPathComponent("SKILL.md").path))
         #expect(fm.fileExists(atPath: installed.appendingPathComponent("new.md").path))
 
-        let trackedNames = try Set(fileHashes(bed, scope: scope).keys.map { ($0 as NSString).lastPathComponent })
-        #expect(trackedNames == ["SKILL.md", "new.md"])
+        #expect(try Set(record(bed, scope: scope).fileHashes.keys) == [
+            trackedKey(bed, scope: scope, "SKILL.md"),
+            trackedKey(bed, scope: scope, "new.md"),
+        ])
     }
 
     @Test("A file the user adds inside an installed skill survives re-sync untracked", arguments: Scope.allCases)
@@ -4192,6 +4204,64 @@ struct DroppedDirectoryFileTests {
         try configure(bed, scope: scope, pack: pack)
 
         #expect(FileManager.default.fileExists(atPath: userFile.path))
-        #expect(try !fileHashes(bed, scope: scope).keys.contains { $0.hasSuffix("notes.md") })
+        #expect(try record(bed, scope: scope).fileHashes[trackedKey(bed, scope: scope, "notes.md")] == nil)
+    }
+
+    @Test("First sync over a legacy record keeps user files it hashed, then cleanup resumes", arguments: Scope.allCases)
+    private func legacyRecordRebaselines(scope: Scope) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("# Skill", to: source.appendingPathComponent("SKILL.md"))
+        try write("keep", to: source.appendingPathComponent("references/keep.md"))
+        try write("old ref", to: source.appendingPathComponent("references/old-ref.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: scope, pack: pack)
+
+        // Older mcs hashed every file under the installed directory, including ones the user added.
+        let installed = installedSkill(bed, scope: scope)
+        let userFile = installed.appendingPathComponent("notes.md")
+        try write("mine", to: userFile)
+        var legacyState = try state(bed, scope: scope)
+        var legacy = try record(bed, scope: scope)
+        legacy.fileHashes[trackedKey(bed, scope: scope, "notes.md")] = try FileHasher.sha256(of: userFile)
+        legacy.fileHashesShippedOnly = nil
+        legacyState.setArtifacts(legacy, for: "my-pack")
+        try legacyState.save()
+
+        try configure(bed, scope: scope, pack: pack)
+
+        let fm = FileManager.default
+        #expect(fm.fileExists(atPath: userFile.path))
+        #expect(try record(bed, scope: scope).fileHashes[trackedKey(bed, scope: scope, "notes.md")] == nil)
+        #expect(try record(bed, scope: scope).fileHashesShippedOnly == true)
+
+        try fm.removeItem(at: source.appendingPathComponent("references/old-ref.md"))
+        try configure(bed, scope: scope, pack: pack)
+
+        #expect(!fm.fileExists(atPath: installed.appendingPathComponent("references/old-ref.md").path))
+        #expect(fm.fileExists(atPath: installed.appendingPathComponent("references/keep.md").path))
+        #expect(fm.fileExists(atPath: userFile.path))
+    }
+
+    @Test("Pruning emptied directories stops at the installed skill directory")
+    func pruneStopsAtInstalledRoot() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let source = bed.home.appendingPathComponent("pack-source/my-skill")
+        try write("a", to: source.appendingPathComponent("docs/a.md"))
+        try write("b", to: source.appendingPathComponent("b.md"))
+        let pack = makePack(bed, source: source)
+        try configure(bed, scope: .global, pack: pack)
+
+        let fm = FileManager.default
+        try fm.removeItem(at: source.appendingPathComponent("docs"))
+        try fm.removeItem(at: source.appendingPathComponent("b.md"))
+        try configure(bed, scope: .global, pack: pack)
+
+        let installed = installedSkill(bed, scope: .global)
+        #expect(try fm.contentsOfDirectory(atPath: installed.path).isEmpty)
     }
 }

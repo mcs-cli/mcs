@@ -1133,9 +1133,13 @@ struct Configurator {
 
         // `files` records a copied directory whole (global) or by its top-level children (project),
         // so a file dropped deeper inside it only disappears from the per-file `fileHashes`.
-        let staleHashedPaths = Set(previous.fileHashes.keys)
+        // Legacy records hashed every file under a copied directory, user files included, so
+        // their first sync only rebaselines.
+        let staleHashedPaths = previous.fileHashesShippedOnly == true
+            ? Set(previous.fileHashes.keys)
             .subtracting(currentArtifacts.fileHashes.keys)
             .filter { path in !staleFiles.contains { PathContainment.isContained(path: path, within: $0) } }
+            : []
         for path in staleHashedPaths.sorted() {
             if removeFileArtifactItem(relativePath: path) {
                 output.dimmed("  Removed stale file: \(path)")

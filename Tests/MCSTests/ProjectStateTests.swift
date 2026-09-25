@@ -36,6 +36,21 @@ struct PackArtifactRecordTests {
         #expect(record.plugins.isEmpty)
         #expect(record.fileHashes.isEmpty)
         #expect(record.settingsHash == nil)
+        #expect(record.fileHashesShippedOnly == nil)
+    }
+
+    @Test("A shipped file that failed to hash keeps its previous hash")
+    func recordFileHashesCarriesForwardUnhashedFile() {
+        let previous = PackArtifactRecord(fileHashes: ["skills/x/a.md": "old-a", "skills/x/b.md": "old-b"])
+        var record = PackArtifactRecord()
+
+        record.recordFileHashes(
+            ["skills/x/a.md": "new-a"],
+            shippedFiles: ["skills/x/a.md", "skills/x/b.md", "skills/x/c.md"],
+            previous: previous
+        )
+
+        #expect(record.fileHashes == ["skills/x/a.md": "new-a", "skills/x/b.md": "old-b"])
     }
 
     @Test("Encodes and decodes new fields correctly")

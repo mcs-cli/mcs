@@ -51,7 +51,7 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     func installArtifacts(
         _ pack: any TechPack,
-        previousArtifacts _: PackArtifactRecord?,
+        previousArtifacts: PackArtifactRecord?,
         excludedIDs: Set<String>,
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
@@ -60,6 +60,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         output: CLIOutput
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
+        artifacts.fileHashesShippedOnly = true
 
         for component in pack.components {
             if excludedIDs.contains(component.id) {
@@ -92,7 +93,9 @@ struct ProjectSyncStrategy: SyncStrategy {
                     resolvedValues: resolvedValues
                 )
                 artifacts.files.append(contentsOf: result.paths)
-                artifacts.fileHashes.merge(result.hashes) { _, new in new }
+                artifacts.recordFileHashes(
+                    result.hashes, shippedFiles: result.shippedFiles, previous: previousArtifacts
+                )
                 if let hookCommand = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
                     artifacts.hookCommands.append(hookCommand)
                 }
@@ -254,7 +257,7 @@ struct ProjectSyncStrategy: SyncStrategy {
         let fm = FileManager.default
         guard let fullPath = PathContainment.safePath(
             relativePath: relativePath,
-            within: projectPath
+            within: fileArtifactBase
         ) else {
             output.warn("Path '\(relativePath)' escapes project directory — clearing from tracking")
             return true

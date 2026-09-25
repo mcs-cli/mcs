@@ -117,18 +117,18 @@ struct ComponentExecutor {
         destination: String,
         fileType: CopyFileType,
         resolvedValues: [String: String] = [:]
-    ) -> (success: Bool, hashes: [String: String]) {
+    ) -> (success: Bool, shippedFiles: [String], hashes: [String: String]) {
         let fm = FileManager.default
         let expectedParent = fileType.baseDirectory(in: environment)
 
         guard let destURL = PathContainment.safePath(relativePath: destination, within: expectedParent) else {
             output.warn("Destination '\(destination)' escapes expected directory")
-            return (false, [:])
+            return (false, [], [:])
         }
 
         guard fm.fileExists(atPath: source.path) else {
             output.warn("Pack source not found: \(source.path)")
-            return (false, [:])
+            return (false, [], [:])
         }
 
         do {
@@ -139,6 +139,7 @@ struct ComponentExecutor {
 
             var isDir: ObjCBool = false
             fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
             if isDir.boolValue {
@@ -155,20 +156,13 @@ struct ComponentExecutor {
                         try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destFile.path)
                     }
                 }
-                // Hash all files recursively (directories can't be hashed directly)
-                let hashResult = try FileHasher.directoryFileHashes(at: destURL)
-                for (nestedRelPath, hash) in hashResult.hashes
-                    where Self.sourceShips(nestedRelPath, source: source) {
-                    let fullPath = destURL.appendingPathComponent(nestedRelPath)
-                    let relPath = PathContainment.relativePath(
-                        of: fullPath.path,
-                        within: environment.claudeDirectory.path
-                    )
-                    installedHashes[relPath] = hash
-                }
-                for (failedPath, error) in hashResult.failures {
-                    output.warn("Could not compute hash for \(failedPath): \(error.localizedDescription)")
-                }
+                try recordShippedFiles(
+                    in: destURL,
+                    source: source,
+                    relativeTo: environment.claudeDirectory,
+                    shippedFiles: &shippedFiles,
+                    hashes: &installedHashes
+                )
             } else {
                 // Source is a single file
                 if fm.fileExists(atPath: destURL.path) {
@@ -184,12 +178,13 @@ struct ComponentExecutor {
                     of: destURL.path,
                     within: environment.claudeDirectory.path
                 )
+                shippedFiles.append(relPath)
                 recordHash(of: destURL, relativePath: relPath, into: &installedHashes)
             }
-            return (true, installedHashes)
+            return (true, shippedFiles, installedHashes)
         } catch {
             output.warn(error.localizedDescription)
-            return (false, [:])
+            return (false, [], [:])
         }
     }
 
@@ -205,18 +200,18 @@ struct ComponentExecutor {
         fileType: CopyFileType,
         projectPath: URL,
         resolvedValues: [String: String] = [:]
-    ) -> (paths: [String], hashes: [String: String]) {
+    ) -> (paths: [String], shippedFiles: [String], hashes: [String: String]) {
         let fm = FileManager.default
         let baseDir = fileType.projectBaseDirectory(projectPath: projectPath)
 
         guard let destURL = PathContainment.safePath(relativePath: destination, within: baseDir) else {
             output.warn("Destination '\(destination)' escapes project directory")
-            return ([], [:])
+            return ([], [], [:])
         }
 
         guard fm.fileExists(atPath: source.path) else {
             output.warn("Pack source not found: \(source.path)")
-            return ([], [:])
+            return ([], [], [:])
         }
 
         do {
@@ -228,6 +223,7 @@ struct ComponentExecutor {
             var isDir: ObjCBool = false
             fm.fileExists(atPath: source.path, isDirectory: &isDir)
             var installedPaths: [String] = []
+            var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
             if isDir.boolValue {
@@ -242,17 +238,13 @@ struct ComponentExecutor {
                     let relPath = projectRelativePath(destFile, projectPath: projectPath)
                     installedPaths.append(relPath)
                 }
-                // Hash all files recursively (directories can't be hashed directly)
-                let hashResult = try FileHasher.directoryFileHashes(at: destURL)
-                for (nestedRelPath, hash) in hashResult.hashes
-                    where Self.sourceShips(nestedRelPath, source: source) {
-                    let fullPath = destURL.appendingPathComponent(nestedRelPath)
-                    let relPath = projectRelativePath(fullPath, projectPath: projectPath)
-                    installedHashes[relPath] = hash
-                }
-                for (failedPath, error) in hashResult.failures {
-                    output.warn("Could not compute hash for \(failedPath): \(error.localizedDescription)")
-                }
+                try recordShippedFiles(
+                    in: destURL,
+                    source: source,
+                    relativeTo: projectPath,
+                    shippedFiles: &shippedFiles,
+                    hashes: &installedHashes
+                )
             } else {
                 if fm.fileExists(atPath: destURL.path) {
                     try fm.removeItem(at: destURL)
@@ -263,12 +255,37 @@ struct ComponentExecutor {
                 }
                 let relPath = projectRelativePath(destURL, projectPath: projectPath)
                 installedPaths.append(relPath)
+                shippedFiles.append(relPath)
                 recordHash(of: destURL, relativePath: relPath, into: &installedHashes)
             }
-            return (installedPaths, installedHashes)
+            return (installedPaths, shippedFiles, installedHashes)
         } catch {
             output.warn(error.localizedDescription)
-            return ([], [:])
+            return ([], [], [:])
+        }
+    }
+
+    private func recordShippedFiles(
+        in destURL: URL,
+        source: URL,
+        relativeTo base: URL,
+        shippedFiles: inout [String],
+        hashes: inout [String: String]
+    ) throws {
+        // Hash all files recursively (directories can't be hashed directly)
+        let hashResult = try FileHasher.directoryFileHashes(at: destURL)
+        for (failedPath, error) in hashResult.failures {
+            output.warn("Could not compute hash for \(failedPath): \(error.localizedDescription)")
+        }
+        let found = hashResult.hashes.map { ($0.relativePath, Optional($0.hash)) }
+            + hashResult.failures.map { ($0.relativePath, String?.none) }
+        for (nestedRelPath, hash) in found where Self.sourceShips(nestedRelPath, source: source) {
+            let relPath = PathContainment.relativePath(
+                of: destURL.appendingPathComponent(nestedRelPath).path,
+                within: base.path
+            )
+            shippedFiles.append(relPath)
+            hashes[relPath] = hash
         }
     }
 
