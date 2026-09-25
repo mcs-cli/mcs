@@ -21,7 +21,7 @@ struct TechPackRegistryTests {
 
     @Test("Packs appear in availablePacks")
     func packsAppear() {
-        let fakePack = FakeTechPack(identifier: "android")
+        let fakePack = MockTechPack(identifier: "android", displayName: "Fake Pack")
         let registry = TechPackRegistry(packs: [fakePack])
         let ids = registry.availablePacks.map(\.identifier)
         #expect(ids.contains("android"))
@@ -29,7 +29,7 @@ struct TechPackRegistryTests {
 
     @Test("Find pack by identifier")
     func findByIdentifier() {
-        let fakePack = FakeTechPack(identifier: "android")
+        let fakePack = MockTechPack(identifier: "android", displayName: "Fake Pack")
         let registry = TechPackRegistry(packs: [fakePack])
         let found = registry.pack(for: "android")
         #expect(found != nil)
@@ -43,7 +43,7 @@ struct TechPackRegistryTests {
         // pack-b is in `registry.yaml` but produced no adapter — trust verification, an invalid
         // manifest, or a missing checkout, all of which `loadAll` warned about and skipped.
         let registry = TechPackRegistry(
-            packs: [FakeTechPack(identifier: "pack-a")],
+            packs: [MockTechPack(identifier: "pack-a", displayName: "pack-a")],
             registeredPackIDs: ["pack-a", "pack-b"]
         )
 
@@ -55,7 +55,7 @@ struct TechPackRegistryTests {
         // `ghost-pack` is in project state but not installed at all, so converging it away is the
         // intended repair — and `mcs pack remove` could not clean it up if it were retained.
         let registry = TechPackRegistry(
-            packs: [FakeTechPack(identifier: "pack-a")],
+            packs: [MockTechPack(identifier: "pack-a", displayName: "pack-a")],
             registeredPackIDs: ["pack-a"]
         )
 
@@ -65,7 +65,7 @@ struct TechPackRegistryTests {
     @Test("Everything loading cleanly reports nothing")
     func unloadableEmptyWhenAllLoaded() {
         let registry = TechPackRegistry(
-            packs: [FakeTechPack(identifier: "pack-a")],
+            packs: [MockTechPack(identifier: "pack-a", displayName: "pack-a")],
             registeredPackIDs: ["pack-a"]
         )
 
@@ -74,17 +74,3 @@ struct TechPackRegistryTests {
 }
 
 // MARK: - Test Helper
-
-private struct FakeTechPack: TechPack {
-    let identifier: String
-    let displayName: String = "Fake Pack"
-    let description: String = "A fake pack for testing"
-    let components: [ComponentDefinition] = []
-    let templates: [TemplateContribution] = []
-
-    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
-        []
-    }
-
-    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
-}

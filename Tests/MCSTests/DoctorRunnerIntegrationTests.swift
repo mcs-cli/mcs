@@ -26,25 +26,27 @@ private func makeRunner(
 // MARK: - DoctorRunner Integration Tests
 
 struct DoctorRunnerIntegrationTests {
-    /// A hook component whose file is never installed, so its derived check always fails.
-    private func missingHookPack(_ identifier: String) -> MockTechPack {
+    /// Hook components whose files are never installed, so each derived check fails whenever it is checked.
+    private func missingHookPack(_ identifier: String, hooks: [String] = ["lint"]) -> MockTechPack {
         MockTechPack(
             identifier: identifier,
             displayName: identifier,
-            components: [ComponentDefinition(
-                id: "\(identifier).lint-hook",
-                displayName: "Lint Hook",
-                description: "A lint hook",
-                type: .hookFile,
-                packIdentifier: identifier,
-                dependencies: [],
-                isRequired: false,
-                installAction: .copyPackFile(
-                    source: URL(fileURLWithPath: "/tmp/dummy"),
-                    destination: "lint.sh",
-                    fileType: .hook
+            components: hooks.map { hook in
+                ComponentDefinition(
+                    id: "\(identifier).\(hook)-hook",
+                    displayName: "\(hook) hook",
+                    description: "A hook",
+                    type: .hookFile,
+                    packIdentifier: identifier,
+                    dependencies: [],
+                    isRequired: false,
+                    installAction: .copyPackFile(
+                        source: URL(fileURLWithPath: "/tmp/dummy"),
+                        destination: "\(hook).sh",
+                        fileType: .hook
+                    )
                 )
-            )]
+            }
         )
     }
 
@@ -53,7 +55,10 @@ struct DoctorRunnerIntegrationTests {
         let (home, project) = try makeSandboxProject(label: "runner-filter")
         defer { try? FileManager.default.removeItem(at: home) }
 
-        let registry = TechPackRegistry(packs: [missingHookPack("pack-a"), missingHookPack("pack-b")])
+        let registry = TechPackRegistry(packs: [
+            missingHookPack("pack-a", hooks: ["lint", "format"]),
+            missingHookPack("pack-b"),
+        ])
 
         var state = try ProjectState(projectRoot: project)
         state.recordPack("pack-a")
@@ -69,9 +74,9 @@ struct DoctorRunnerIntegrationTests {
         )
         let onlyA = try filtered.run()
 
-        // Each pack contributes one failing check: pack-a's still runs, pack-b's is filtered out.
-        #expect(onlyA.issues > 0)
-        #expect(onlyA.issues < all.issues)
+        // pack-a fails twice and pack-b once, so only the correct filter removes exactly one issue:
+        // an inverted filter removes two, an empty one three.
+        #expect(onlyA.issues == all.issues - 1)
     }
 
     @Test("runner with excluded components skips those checks")

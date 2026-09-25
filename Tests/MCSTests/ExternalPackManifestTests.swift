@@ -157,6 +157,25 @@ struct ExternalPackManifestTests {
         #expect(manifest.supplementaryDoctorChecks == nil)
     }
 
+    /// `version` and `peerDependencies` were retired in #179; packs published before then still carry them.
+    @Test("Retired top-level keys still load and validate")
+    func retiredKeysAreIgnored() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: legacy-pack
+        displayName: Legacy Pack
+        description: Published before version and peerDependencies were retired
+        version: "1.0.0"
+        peerDependencies:
+          - pack: ios
+            minVersion: "1.0.0"
+        """
+
+        let manifest = try loadManifest(yaml)
+        try manifest.validate()
+        #expect(manifest.identifier == "legacy-pack")
+    }
+
     // MARK: - Author field
 
     @Test("Parse manifest with author field")
@@ -421,13 +440,7 @@ struct ExternalPackManifestTests {
               destination: lint.sh
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         try manifest.validate()
     }
 
@@ -457,13 +470,7 @@ struct ExternalPackManifestTests {
               destination: config.yaml
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         #expect(throws: ManifestError.duplicateDestination(
             destination: "config.yaml",
             fileType: "generic",
@@ -856,13 +863,7 @@ struct ExternalPackManifestTests {
               source: config/settings.json
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .settingsFile(source) = manifest.components?[0].installAction else {
             Issue.record("Expected settingsFile install action")
             return
@@ -889,13 +890,7 @@ struct ExternalPackManifestTests {
               fileType: hook
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
@@ -924,13 +919,7 @@ struct ExternalPackManifestTests {
               fileType: agent
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         guard case let .copyPackFile(config) = manifest.components?[0].installAction else {
             Issue.record("Expected copyPackFile install action")
             return
@@ -979,13 +968,7 @@ struct ExternalPackManifestTests {
             fixCommand: "touch /tmp/ready"
         """
 
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let file = tmpDir.appendingPathComponent("techpack.yaml")
-        try yaml.write(to: file, atomically: true, encoding: .utf8)
-
-        let manifest = try ExternalPackManifest.load(from: file)
+        let manifest = try loadManifest(yaml)
         let checks = try #require(manifest.supplementaryDoctorChecks)
 
         #expect(checks.count == 6)
