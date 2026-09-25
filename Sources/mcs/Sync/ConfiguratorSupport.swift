@@ -5,6 +5,64 @@ import Foundation
 ///
 /// Eliminates duplication of common methods that both configurators need.
 enum ConfiguratorSupport {
+    /// The pack list a non-interactive entry point hands to `Configurator.configure`, and the
+    /// configured packs it kept without being asked to.
+    struct DesiredPackSet {
+        let packs: [any TechPack]
+        let keptExtras: [String]
+    }
+
+    /// Desired set for an entry point that names some packs (`mcs sync --pack`, `mcs bootstrap`).
+    ///
+    /// Additive by default: every pack already configured in the scope is unioned in, so naming
+    /// one pack never unconfigures the rest. `prune` makes `requested` the exact set.
+    ///
+    /// An extra the registry cannot produce aborts the additive run. Dropping it from the list
+    /// would make `configure` treat it as a deselection and unconfigure it without asking.
+    static func additivePackSet(
+        requested: [any TechPack],
+        previouslyConfigured: Set<String>,
+        prune: Bool,
+        pruneCommand: String,
+        registry: TechPackRegistry,
+        output: CLIOutput
+    ) throws -> DesiredPackSet {
+        guard !prune else { return DesiredPackSet(packs: requested, keptExtras: []) }
+
+        let extras = previouslyConfigured.subtracting(requested.map(\.identifier)).sorted()
+        var resolvedExtras: [any TechPack] = []
+        var unresolved: [String] = []
+        for id in extras {
+            if let pack = registry.pack(for: id) {
+                resolvedExtras.append(pack)
+            } else {
+                unresolved.append(id)
+            }
+        }
+
+        if !unresolved.isEmpty {
+            for id in unresolved {
+                output.error("Pack '\(id)' is configured here but missing from the registry.")
+            }
+            output.plain("  Re-add it with 'mcs pack add', or run '\(pruneCommand)' to remove it.")
+            throw ExitCode.failure
+        }
+
+        return DesiredPackSet(packs: requested + resolvedExtras, keptExtras: extras)
+    }
+
+    /// Non-blocking footer after an additive run that kept configured packs it was not given, so
+    /// the divergence stays visible without a prompt.
+    static func reportKeptExtras(_ extras: [String], notIn source: String, remedy: String, output: CLIOutput) {
+        guard !extras.isEmpty else { return }
+        output.plain("")
+        output.info("\(extras.count) configured pack(s) kept that are not \(source):")
+        for id in extras {
+            output.plain("  - \(id)")
+        }
+        output.plain("  \(remedy)")
+    }
+
     /// Drop globally-blocked packs from a non-interactive pack set, reporting what was
     /// skipped. Skipping is safe precisely because a blocked pack is not configured
     /// here, so removing it from the desired set cannot unconfigure anything.

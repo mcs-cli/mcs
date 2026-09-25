@@ -520,40 +520,35 @@ struct BootstrapCommand: LockedCommand {
 
         let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
 
-        let declaredIDs = Set(desiredIdentifiers)
         let previouslyConfigured = projectState.configuredPacks
-        let extras = previouslyConfigured.subtracting(declaredIDs)
 
-        // Additive default: union declared with the packs already configured here so
-        // nothing gets unconfigured. `--prune` collapses back to authoritative.
         // `desiredIdentifiers` is already unique — `BootstrapFile.validate()` rejects
         // duplicate sources and `installPacks` emits one identifier per source.
-        let effectiveIDs = prune
-            ? desiredIdentifiers
-            : desiredIdentifiers + extras.sorted()
-
-        let resolvedPacks: [any TechPack] = effectiveIDs.compactMap { registry.pack(for: $0) }
-        let resolvedIDs = Set(resolvedPacks.map(\.identifier))
-        let unresolved = Set(effectiveIDs).subtracting(resolvedIDs)
-
-        // Declared IDs that fail to load are hard errors either way. An extra that no
-        // longer resolves is only safe to skip under --prune; otherwise
-        // Configurator.configure would treat it as a deselection and silently
-        // unconfigure it.
-        var mustAbort = false
-        for id in unresolved.sorted() {
-            if declaredIDs.contains(id) {
-                output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
-                mustAbort = true
-            } else if prune {
-                output.warn("Pack '\(id)' has no registry entry — will be unconfigured (--prune).")
+        var declaredPacks: [any TechPack] = []
+        var declaredUnresolved: [String] = []
+        for id in desiredIdentifiers {
+            if let pack = registry.pack(for: id) {
+                declaredPacks.append(pack)
             } else {
-                output.error("Pack '\(id)' is configured in this project but missing from the registry.")
-                output.plain("  Re-add it with 'mcs pack add', or run 'mcs bootstrap --prune' to remove it.")
-                mustAbort = true
+                declaredUnresolved.append(id)
             }
         }
-        if mustAbort { throw ExitCode.failure }
+        if !declaredUnresolved.isEmpty {
+            for id in declaredUnresolved {
+                output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
+            }
+            throw ExitCode.failure
+        }
+
+        let desired = try ConfiguratorSupport.additivePackSet(
+            requested: declaredPacks,
+            previouslyConfigured: previouslyConfigured,
+            prune: prune,
+            pruneCommand: "mcs bootstrap --prune",
+            registry: registry,
+            output: output
+        )
+        let resolvedPacks = desired.packs
 
         guard !resolvedPacks.isEmpty else {
             if dryRun {
@@ -612,21 +607,12 @@ struct BootstrapCommand: LockedCommand {
             output.info("Run 'mcs doctor' to verify configuration")
         }
 
-        if !prune, !extras.isEmpty {
-            printAdditiveDivergenceNote(extras: extras, output: output)
-        }
-    }
-
-    /// Post-sync footer emitted after an additive bootstrap when the project holds
-    /// packs that aren't in `mcs.yaml`. Non-blocking — an informational report so
-    /// users see the divergence without a wall-style prompt.
-    private func printAdditiveDivergenceNote(extras: Set<String>, output: CLIOutput) {
-        output.plain("")
-        output.info("\(extras.count) pack(s) are configured in this project but not in \(BootstrapFile.defaultFilename):")
-        for id in extras.sorted() {
-            output.plain("  - \(id)")
-        }
-        output.plain("  Add them to \(BootstrapFile.defaultFilename), or run 'mcs bootstrap --prune' to remove them.")
+        ConfiguratorSupport.reportKeptExtras(
+            desired.keptExtras,
+            notIn: "in \(BootstrapFile.defaultFilename)",
+            remedy: "Add them to \(BootstrapFile.defaultFilename), or run 'mcs bootstrap --prune' to remove them.",
+            output: output
+        )
     }
 }
 

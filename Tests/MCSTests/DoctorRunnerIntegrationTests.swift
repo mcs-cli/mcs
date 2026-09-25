@@ -50,6 +50,27 @@ struct DoctorRunnerIntegrationTests {
         )
     }
 
+    @Test("--fix rebuilds a missing .mcs-project from CLAUDE.local.md section markers")
+    func fixRebuildsMissingProjectState() throws {
+        let (home, project) = try makeSandboxProject(label: "runner-state-fix")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let version = MCSVersion.current
+        try """
+        <!-- mcs:begin ios v\(version) -->
+        iOS content
+        <!-- mcs:end ios -->
+        """.write(to: project.appendingPathComponent("CLAUDE.local.md"), atomically: true, encoding: .utf8)
+        #expect(try !ProjectState(projectRoot: project).exists)
+
+        var runner = makeRunner(home: home, projectRoot: project, fixMode: true)
+        try runner.run()
+
+        let state = try ProjectState(projectRoot: project)
+        #expect(state.exists)
+        #expect(state.configuredPacks.contains("ios"))
+    }
+
     @Test("runner with pack filter only checks filtered packs")
     func packFilterRestrictsChecks() throws {
         let (home, project) = try makeSandboxProject(label: "runner-filter")

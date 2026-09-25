@@ -28,7 +28,7 @@ enum ProjectDoctorChecks {
 // MARK: - Project state file check
 
 /// Validates project state presence: passes if `.mcs-project` exists,
-/// warns on corruption or legacy state (CLAUDE.local.md without `.mcs-project`),
+/// fails on corruption or legacy state (CLAUDE.local.md without `.mcs-project`),
 /// skips when neither file is present. Fix infers packs from section markers.
 struct ProjectStateFileCheck: DoctorCheck {
     let projectRoot: URL
@@ -41,6 +41,10 @@ struct ProjectStateFileCheck: DoctorCheck {
         "Project"
     }
 
+    var fixCommandPreview: String? {
+        "rebuild .mcs-project from the CLAUDE.local.md section markers"
+    }
+
     func check() -> CheckResult {
         do {
             let state = try ProjectState(projectRoot: projectRoot)
@@ -48,13 +52,13 @@ struct ProjectStateFileCheck: DoctorCheck {
                 return .pass(".mcs-project present")
             }
         } catch {
-            return .warn("corrupt .mcs-project: \(error.localizedDescription) — run 'mcs doctor --fix'")
+            return .fail("corrupt .mcs-project: \(error.localizedDescription) — run 'mcs doctor --fix'")
         }
 
         // No .mcs-project — legacy state needing migration?
         let claudeLocal = projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD)
         if FileManager.default.fileExists(atPath: claudeLocal.path) {
-            return .warn("CLAUDE.local.md exists but .mcs-project missing — run 'mcs doctor --fix'")
+            return .fail("CLAUDE.local.md exists but .mcs-project missing — run 'mcs doctor --fix'")
         }
 
         return .skip("no project state — run 'mcs sync'")

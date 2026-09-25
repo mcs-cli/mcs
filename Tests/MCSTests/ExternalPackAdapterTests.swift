@@ -671,7 +671,7 @@ struct ExternalPackAdapterTests {
         }
     }
 
-    @Test("Component doctorChecks factory receives correct projectRoot via allDoctorChecks")
+    @Test("Component doctorChecks factory receives correct projectRoot")
     func componentDoctorChecksForwarding() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -715,9 +715,7 @@ struct ExternalPackAdapterTests {
         let adapter = ExternalPackAdapter(manifest: manifest, packPath: tmpDir)
         let component = adapter.components[0]
 
-        // allDoctorChecks with projectRoot should forward to supplementary factory
-        let checks = component.allDoctorChecks(projectRoot: tmpDir)
-        // shellCommand produces no derived check, only supplementary
+        let checks = component.supplementaryChecks(tmpDir, Environment())
         #expect(checks.count == 1)
         if case .pass = checks[0].check() {
             // expected: file exists at projectRoot/marker.txt

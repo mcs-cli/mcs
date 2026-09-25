@@ -172,7 +172,7 @@ Verbose form is also supported — see [Tech Pack Schema](techpack-schema.md).
 12. **Ensure gitignore entries**: add `.claude/` entries to global gitignore
 13. **Save state**: write `.mcs-project` with artifact records for each pack and update `~/.mcs/projects.yaml`
 
-The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack web`.
+The `--pack` flag bypasses multi-select for CI use: `mcs sync --pack ios --pack web`. It is additive: `ConfiguratorSupport.additivePackSet` (shared with `mcs bootstrap`) unions the named packs with the scope's configured set, because `configure` removes anything missing from its list. `--prune` makes the named packs the exact set and routes removals through the `confirmRemovals` prompt (`--yes` skips it).
 
 ### Global Sync (`mcs sync --global`)
 
@@ -270,12 +270,12 @@ Packs provide:
 
 ### fix() Responsibility Boundary
 
-`doctor --fix` only handles:
-- **Cleanup**: removing deprecated components
-- **Trivial repairs**: permission fixes, gitignore additions, symlink creation
-- **Project state**: creating missing `.mcs-project` by inferring from section markers
+`doctor --fix` routes each failed check one of three ways, all behind one confirmation prompt:
+- **Own fix**: the check has a `fixCommandPreview` — pack `fixCommand`/`fixScript`, gitignore additions, stale project-index entries, a missing `.mcs-project` inferred from section markers, and scope-duplication removal
+- **Scope re-sync**: derived checks and artifact-record checks (except `HookInterpreterCheck`) verify what sync installs, so `DoctorRunner` re-syncs their scope through `ScopeReapplier` with the scope's full configured set, then re-runs them
+- **Hint only**: pack-authored and standalone checks without a fix print their `fix()` message
 
-`doctor --fix` does NOT handle additive operations (installing packages, registering servers, copying files). These are handled by `mcs sync`.
+`doctor --fix` never re-implements an install step — additive work always goes through the sync engine.
 
 ### Check Scope Resolution
 

@@ -25,8 +25,23 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .shortAndLong, help: "Install to global scope (MCP servers with user scope, files to ~/.claude/)")
     var global = false
 
+    @Flag(name: .long, help: "Remove configured packs not named with --pack")
+    var prune = false
+
+    @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
+    var yes = false
+
     var skipLock: Bool {
         dryRun
+    }
+
+    func validate() throws {
+        if prune, pack.isEmpty || all {
+            throw ValidationError("--prune requires --pack and cannot be combined with --all.")
+        }
+        if yes, !prune {
+            throw ValidationError("--yes is only meaningful with --prune.")
+        }
     }
 
     func perform() throws {
@@ -84,21 +99,21 @@ struct SyncCommand: LockedCommand {
         let globalState = try Self.loadGlobalState(env: env, output: output)
         let persistedExclusions = globalState.allExcludedComponents
 
-        if Self.scopeIsBlockedByUnloadablePack(
+        if !prune, Self.scopeIsBlockedByUnloadablePack(
             configured: globalState.configuredPacks, registry: registry, output: output
         ) {
             return
         }
 
         if all || !pack.isEmpty {
-            let packs = try resolvePacks(from: registry, output: output)
-            try runSync(
+            try syncRequestedPacks(
                 configurator: configurator,
-                packs: packs,
-                scopeLabel: "Global",
-                targetLabel: "Target",
-                targetPath: env.claudeDirectory.path,
+                registry: registry,
+                previouslyConfigured: globalState.configuredPacks,
+                globallyInstalled: nil,
                 excludedComponents: persistedExclusions,
+                scopeLabel: "Global",
+                targetPath: env.claudeDirectory.path,
                 output: output
             )
         } else {
@@ -148,26 +163,21 @@ struct SyncCommand: LockedCommand {
 
         let globallyInstalledPacks = try Self.loadGlobalState(env: env, output: output).configuredPacks
 
-        if Self.scopeIsBlockedByUnloadablePack(
+        if !prune, Self.scopeIsBlockedByUnloadablePack(
             configured: previouslyConfigured, registry: registry, output: output
         ) {
             return
         }
 
         if all || !pack.isEmpty {
-            let packs = try ConfiguratorSupport.filterGloballyBlocked(
-                resolvePacks(from: registry, output: output),
-                globallyInstalled: globallyInstalledPacks,
-                previouslyConfigured: previouslyConfigured,
-                output: output
-            )
-            try runSync(
+            try syncRequestedPacks(
                 configurator: configurator,
-                packs: packs,
-                scopeLabel: "Project",
-                targetLabel: "Project",
-                targetPath: projectPath.path,
+                registry: registry,
+                previouslyConfigured: previouslyConfigured,
+                globallyInstalled: globallyInstalledPacks,
                 excludedComponents: persistedExclusions,
+                scopeLabel: "Project",
+                targetPath: projectPath.path,
                 output: output
             )
         } else {
@@ -292,26 +302,66 @@ struct SyncCommand: LockedCommand {
         return resolvedPacks
     }
 
-    private func runSync(
+    /// Non-interactive sync for `--all` / `--pack`.
+    ///
+    /// `--pack` is additive: packs already configured in the scope stay in the desired set, since
+    /// `configure` unconfigures anything missing from it without asking on this path. `--prune`
+    /// makes the named packs the exact set and confirms removals unless `--yes`. `--all` is
+    /// already the whole registry, so it resolves as an exact set without confirmation.
+    ///
+    /// `globallyInstalled` is `nil` for the global scope, which has no global packs to block.
+    /// Internal so integration tests can drive it: `perform()` builds its own `Environment()`.
+    func syncRequestedPacks(
         configurator: Configurator,
-        packs: [any TechPack],
-        scopeLabel: String,
-        targetLabel: String,
-        targetPath: String,
+        registry: TechPackRegistry,
+        previouslyConfigured: Set<String>,
+        globallyInstalled: Set<String>?,
         excludedComponents: [String: Set<String>],
+        scopeLabel: String,
+        targetPath: String,
         output: CLIOutput
     ) throws {
+        let desired = try ConfiguratorSupport.additivePackSet(
+            requested: resolvePacks(from: registry, output: output),
+            previouslyConfigured: previouslyConfigured,
+            prune: prune || all,
+            pruneCommand: global ? "mcs sync --global --pack <pack> --prune" : "mcs sync --pack <pack> --prune",
+            registry: registry,
+            output: output
+        )
+
+        let packs = try globallyInstalled.map {
+            try ConfiguratorSupport.filterGloballyBlocked(
+                desired.packs,
+                globallyInstalled: $0,
+                previouslyConfigured: previouslyConfigured,
+                output: output,
+                allowEmpty: prune
+            )
+        } ?? desired.packs
+
         output.header("Sync \(scopeLabel)")
         output.plain("")
-        output.info(label: targetLabel, targetPath)
+        output.info(label: scopeLabel, targetPath)
         output.info(label: "Packs", packs.map(\.displayName).joined(separator: ", "))
 
         if dryRun {
             try configurator.dryRun(packs: packs)
         } else {
-            try configurator.configure(packs: packs, confirmRemovals: false, excludedComponents: excludedComponents)
+            try configurator.configure(
+                packs: packs,
+                confirmRemovals: prune && !yes,
+                excludedComponents: excludedComponents
+            )
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }
+
+        ConfiguratorSupport.reportKeptExtras(
+            desired.keptExtras,
+            notIn: "named with --pack",
+            remedy: "Run with --prune to remove them.",
+            output: output
+        )
     }
 }

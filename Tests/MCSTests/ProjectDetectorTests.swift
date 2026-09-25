@@ -271,8 +271,8 @@ struct ProjectDoctorCheckTests {
         }
     }
 
-    @Test("ProjectStateFileCheck warns when CLAUDE.local.md exists but .mcs-project missing")
-    func stateCheckWarnsMissingProjectFile() throws {
+    @Test("ProjectStateFileCheck fails when CLAUDE.local.md exists but .mcs-project missing")
+    func stateCheckFailsMissingProjectFile() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -282,10 +282,10 @@ struct ProjectDoctorCheckTests {
         )
 
         let check = ProjectStateFileCheck(projectRoot: tmpDir)
-        if case .warn = check.check() {
+        if case .fail = check.check() {
             // expected
         } else {
-            #expect(Bool(false), "Expected .warn result")
+            #expect(Bool(false), "Expected .fail result")
         }
     }
 

@@ -283,23 +283,9 @@ struct DerivedDoctorCheckTests {
         #expect(pluginCheck?.projectRoot == nil)
     }
 
-    // MARK: - allDoctorChecks combines derived + supplementary
+    // MARK: - Supplementary checks alongside derived ones
 
-    @Test("allDoctorChecks returns derived + supplementary")
-    func allDoctorChecksCombines() {
-        let supplementary = BrewPackageCheck(name: "test", section: "Dependencies", package: "test")
-        let component = makeComponent(
-            displayName: "TestPkg",
-            type: .brewPackage,
-            installAction: .brewInstall(package: "testpkg"),
-            supplementaryChecks: [supplementary]
-        )
-        let checks = component.allDoctorChecks()
-        // 1 derived (BrewPackageCheck from brewInstall) + 1 supplementary
-        #expect(checks.count == 2)
-    }
-
-    @Test("shellCommand with supplementaryChecks returns only supplementary")
+    @Test("shellCommand derives no check, leaving only supplementary checks")
     func shellCommandWithSupplementary() {
         let supplementary = BrewPackageCheck(name: "brew", section: "Dependencies", package: "brew")
         let component = makeComponent(
@@ -307,47 +293,10 @@ struct DerivedDoctorCheckTests {
             installAction: .shellCommand(command: "curl ..."),
             supplementaryChecks: [supplementary]
         )
-        let checks = component.allDoctorChecks()
+        #expect(component.deriveDoctorCheck() == nil)
+        let checks = component.supplementaryChecks(nil, Environment())
         #expect(checks.count == 1)
         #expect(checks.first?.name == "brew")
-    }
-
-    @Test("allDoctorChecks forwards projectRoot and environment to supplementary factory")
-    func allDoctorChecksForwardsParams() {
-        let sentinel = URL(fileURLWithPath: "/tmp/sentinel-\(UUID().uuidString)")
-        let capture = ParamCapture()
-
-        let factory: SupplementaryCheckFactory = { projectRoot, environment in
-            capture.record(root: projectRoot, env: environment)
-            return []
-        }
-        let component = ComponentDefinition(
-            id: "test",
-            displayName: "Test",
-            description: "test",
-            type: .skill,
-            packIdentifier: nil,
-            dependencies: [],
-            isRequired: false,
-            installAction: .shellCommand(command: "echo"),
-            supplementaryChecks: factory
-        )
-
-        _ = component.allDoctorChecks(projectRoot: sentinel)
-
-        #expect(capture.receivedRoot == sentinel)
-        #expect(capture.receivedEnv != nil)
-    }
-}
-
-/// Thread-safe capture for verifying closure parameter forwarding in tests.
-private final class ParamCapture: @unchecked Sendable {
-    var receivedRoot: URL?
-    var receivedEnv: Environment?
-
-    func record(root: URL?, env: Environment) {
-        receivedRoot = root
-        receivedEnv = env
     }
 }
 
