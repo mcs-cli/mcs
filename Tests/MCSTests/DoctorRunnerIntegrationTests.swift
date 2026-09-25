@@ -112,13 +112,17 @@ struct DoctorRunnerIntegrationTests {
         try state.save()
 
         var included = makeRunner(home: home, projectRoot: project, registry: registry)
-        #expect(try included.run().issues > 0)
+        let includedSummary = try included.run()
+        #expect(includedSummary.issues > 0)
+        #expect(!includedSummary.isHealthy)
 
         state.setExcludedComponents(["test-pack.lint-hook"], for: "test-pack")
         try state.save()
 
         var excluded = makeRunner(home: home, projectRoot: project, registry: registry)
-        #expect(try excluded.run().issues == 0)
+        let excludedSummary = try excluded.run()
+        #expect(excludedSummary.issues == 0)
+        #expect(excludedSummary.isHealthy)
     }
 
     @Test("PluginCheck passes when plugin is enabled in project settings.local.json")
@@ -478,8 +482,8 @@ struct DoctorSummaryWarningCountTests {
         #expect(withCollision.warnings == baseline.warnings + 1)
     }
 
-    @Test("Unregistered --pack filter warning is counted in the summary")
-    func unregisteredPackWarningCounted() throws {
+    @Test("Unregistered --pack id warns and makes the run unhealthy")
+    func unregisteredPackFilterWarnsAndIsUnhealthy() throws {
         let (home, project) = try makeSandboxProject(label: "warncount-unregistered")
         defer { try? FileManager.default.removeItem(at: home) }
 

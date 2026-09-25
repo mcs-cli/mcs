@@ -226,7 +226,9 @@ struct DoctorRunner {
             for id in scope.packIDs.sorted() where !availableIDs.contains(id) {
                 output.warn("Pack \"\(id)\" is not registered or failed to load \u{2014} no checks will be run for it")
                 // A pack the caller named explicitly would otherwise read as healthy; inferred ones only warn.
-                hasUnloadedFilteredPack = hasUnloadedFilteredPack || packFilter != nil
+                if packFilter != nil {
+                    hasUnloadedFilteredPack = true
+                }
             }
         }
 
@@ -316,7 +318,7 @@ struct DoctorRunner {
         }
 
         // Summary (before fixes, so the user sees the full picture first).
-        // Capture once: fix-phase warnings (below) must not alter the reported total.
+        // Fix-phase warnings (below) must not alter the reported total; only `remainingIssues` updates after fixes.
         var summary = DoctorSummary(
             passed: passCount,
             warnings: warningCounter.count,

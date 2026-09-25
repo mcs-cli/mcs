@@ -4016,8 +4016,9 @@ struct DoctorFixResyncTests {
 
         let strippedRegistry = TechPackRegistry(packs: [packA])
         var runner = bed.makeDoctorRunner(registry: strippedRegistry, fixMode: true)
-        try runner.run()
+        let summary = try runner.run()
 
+        #expect(!summary.isHealthy)
         #expect(try bed.projectState().configuredPacks.contains("pack-b"))
         #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
             .contains(bed.projectHookCommand("pack-b/lint.sh")))
