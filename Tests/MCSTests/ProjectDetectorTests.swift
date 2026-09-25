@@ -289,6 +289,30 @@ struct ProjectDoctorCheckTests {
         }
     }
 
+    @Test("ProjectStateFileCheck warns on a corrupt .mcs-project and its fix leaves the file alone")
+    func stateCheckLeavesCorruptFileAlone() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try "# Project config".write(
+            to: tmpDir.appendingPathComponent("CLAUDE.local.md"),
+            atomically: true, encoding: .utf8
+        )
+        let claudeDir = tmpDir.appendingPathComponent(".claude")
+        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+        let stateFile = claudeDir.appendingPathComponent(".mcs-project")
+        try "{ not json".write(to: stateFile, atomically: true, encoding: .utf8)
+
+        let check = ProjectStateFileCheck(projectRoot: tmpDir)
+        if case .warn = check.check() {} else {
+            Issue.record("Expected .warn for a corrupt .mcs-project")
+        }
+        if case .notFixable = check.fix() {} else {
+            Issue.record("Expected .notFixable for a corrupt .mcs-project")
+        }
+        #expect(try String(contentsOf: stateFile, encoding: .utf8) == "{ not json")
+    }
+
     @Test("ProjectStateFileCheck passes when .mcs-project exists without CLAUDE.local.md")
     func stateCheckPassesWithoutClaudeLocal() throws {
         let tmpDir = try makeTmpDir()

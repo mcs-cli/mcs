@@ -3981,6 +3981,24 @@ struct DoctorFixResyncTests {
         #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
     }
 
+    @Test("--pack naming a global-only pack from a project never re-syncs the project")
+    func fixDoesNotResyncProjectForGlobalOnlyPack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let globalPack = try hookPack("pack-g", bed: bed)
+        let projectPack = try settingsPack(bed: bed)
+        let registry = TechPackRegistry(packs: [globalPack, projectPack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [globalPack], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [projectPack], confirmRemovals: false)
+        try editPackAKey(bed: bed)
+        try FileManager.default.removeItem(at: bed.env.hooksDirectory)
+
+        var runner = bed.makeDoctorRunner(registry: registry, packFilter: "pack-g", fixMode: true)
+        try runner.run()
+
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
+    }
+
     @Test("A scope whose re-apply is blocked is left untouched")
     func fixLeavesBlockedScopeUntouched() throws {
         let bed = try LifecycleTestBed()
