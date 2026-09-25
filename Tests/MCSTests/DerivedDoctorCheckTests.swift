@@ -282,22 +282,6 @@ struct DerivedDoctorCheckTests {
         let pluginCheck = component.deriveDoctorCheck() as? PluginCheck
         #expect(pluginCheck?.projectRoot == nil)
     }
-
-    // MARK: - Supplementary checks alongside derived ones
-
-    @Test("shellCommand derives no check, leaving only supplementary checks")
-    func shellCommandWithSupplementary() {
-        let supplementary = BrewPackageCheck(name: "brew", section: "Dependencies", package: "brew")
-        let component = makeComponent(
-            type: .brewPackage,
-            installAction: .shellCommand(command: "curl ..."),
-            supplementaryChecks: [supplementary]
-        )
-        #expect(component.deriveDoctorCheck() == nil)
-        let checks = component.supplementaryChecks(nil, Environment())
-        #expect(checks.count == 1)
-        #expect(checks.first?.name == "brew")
-    }
 }
 
 // MARK: - FileHasher directory hashing

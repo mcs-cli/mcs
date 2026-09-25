@@ -522,8 +522,8 @@ struct BootstrapCommand: LockedCommand {
 
         let previouslyConfigured = projectState.configuredPacks
 
-        // `desiredIdentifiers` is already unique — `BootstrapFile.validate()` rejects
-        // duplicate sources and `installPacks` emits one identifier per source.
+        // `declaredPacks` needs no dedup: `BootstrapFile.validate()` rejects duplicate sources and
+        // `installPacks` emits one identifier per source.
         var declaredPacks: [any TechPack] = []
         var declaredUnresolved: [String] = []
         for id in desiredIdentifiers {

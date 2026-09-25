@@ -41,7 +41,7 @@ struct UpdateScopeResolver {
 
         var runs: [ScopeRun] = []
 
-        if filter != .projectOnly, let run = try run(projectRoot: nil) {
+        if filter != .projectOnly, let run = try scopeRun(projectRoot: nil) {
             runs.append(run)
         }
 
@@ -59,7 +59,7 @@ struct UpdateScopeResolver {
                 }
             }
         case .all, .projectOnly:
-            if let projectRoot, let run = try run(projectRoot: projectRoot) {
+            if let projectRoot, let run = try scopeRun(projectRoot: projectRoot) {
                 runs.append(run)
             }
         case .globalOnly:
@@ -71,7 +71,7 @@ struct UpdateScopeResolver {
 
     /// The run for one scope — the global scope when `projectRoot` is nil — or nil when it has
     /// no configured packs.
-    func run(projectRoot: URL?) throws -> ScopeRun? {
+    func scopeRun(projectRoot: URL?) throws -> ScopeRun? {
         guard let projectRoot else {
             return try buildRun(
                 strategy: GlobalSyncStrategy(environment: environment),

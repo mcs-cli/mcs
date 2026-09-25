@@ -27,13 +27,6 @@ struct SyncCommandTests {
         #expect(cmd.pack == ["ios", "android"])
     }
 
-    @Test("Parses --prune and --yes alongside --pack")
-    func parsesPruneWithPack() throws {
-        let cmd = try SyncCommand.parse(["--pack", "ios", "--prune", "--yes"])
-        #expect(cmd.prune == true)
-        #expect(cmd.yes == true)
-    }
-
     @Test("Rejects --prune without --pack, with --all, and --yes without --prune")
     func rejectsPruneMisuse() {
         #expect(throws: (any Error).self) { try SyncCommand.parse(["--prune"]) }

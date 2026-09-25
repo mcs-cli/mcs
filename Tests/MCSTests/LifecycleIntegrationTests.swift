@@ -3855,6 +3855,19 @@ struct SyncPackAdditiveTests {
         #expect(try bed.projectState().configuredPacks.contains("pack-b"))
         #expect(try preToolUseCommands(bed).contains(bed.projectHookCommand("pack-b/guard.sh")))
     }
+
+    @Test("--prune refuses a --pack name it cannot resolve instead of pruning around it")
+    func pruneRefusesUnknownName() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let seeded = try seedTwoPackProject(bed: bed)
+
+        #expect(throws: (any Error).self) {
+            try sync(["--pack", "pack-a", "--pack", "pack-bb", "--prune", "--yes"], bed: bed, registry: seeded.registry)
+        }
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
+    }
 }
 
 // MARK: - Doctor --fix: scope re-sync
@@ -3874,55 +3887,143 @@ private struct UnsatisfiableCheck: DoctorCheck {
 }
 
 struct DoctorFixResyncTests {
-    @Test("--fix re-syncs the scope of a failed component check and restores the file")
-    func fixRestoresMissingFile() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-        let hookSource = try bed.makeHookSource(name: "lint.sh")
-        let pack = MockTechPack(
+    private func hookPack(_ id: String, bed: LifecycleTestBed) throws -> MockTechPack {
+        try MockTechPack(
+            identifier: id,
+            displayName: id,
+            components: [bed.hookComponent(
+                pack: id, id: "lint", source: bed.makeHookSource(name: "\(id)-lint.sh"), destination: "lint.sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )]
+        )
+    }
+
+    private func installedHook(_ packID: String, bed: LifecycleTestBed) -> URL {
+        bed.project.appendingPathComponent(".claude/hooks/\(packID)/lint.sh")
+    }
+
+    private func editPackAKey(bed: LifecycleTestBed) throws {
+        let data = try Data(contentsOf: bed.settingsLocalPath)
+        var json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        json["env"] = ["PACK_A_KEY": "edited"]
+        try JSONSerialization.data(withJSONObject: json).write(to: bed.settingsLocalPath)
+    }
+
+    /// A settings key a re-sync would reset, plus a hook file whose absence is sync-repairable.
+    private func settingsPack(bed: LifecycleTestBed, extraChecks: [any DoctorCheck] = []) throws -> MockTechPack {
+        let settings = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_A_KEY": "valueA" } }
+        """)
+        return try MockTechPack(
             identifier: "pack-a",
             displayName: "Pack A",
-            components: [bed.hookComponent(pack: "pack-a", id: "lint", source: hookSource, destination: "lint.sh")]
+            components: [
+                bed.settingsComponent(pack: "pack-a", id: "settings", source: settings),
+                bed.hookComponent(
+                    pack: "pack-a", id: "lint", source: bed.makeHookSource(name: "pack-a-lint.sh"), destination: "lint.sh"
+                ),
+            ],
+            supplementaryDoctorChecks: extraChecks
         )
+    }
+
+    @Test("--fix re-syncs a failed check's scope onto every configured pack, not just the filtered one")
+    func fixRestoresMissingFileAndKeepsOtherPacks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = try hookPack("pack-a", bed: bed)
+        let packB = try hookPack("pack-b", bed: bed)
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA, packB], confirmRemovals: false)
+
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        var runner = bed.makeDoctorRunner(registry: registry, packFilter: "pack-a", fixMode: true)
+        try runner.run()
+
+        #expect(FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
+        #expect(try bed.projectState().configuredPacks == ["pack-a", "pack-b"])
+        #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+            .contains(bed.projectHookCommand("pack-b/lint.sh")))
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
+    }
+
+    @Test("--fix re-syncs, resetting an edited managed value, when a sync-repairable check fails")
+    func fixResyncResetsEditedValue() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try settingsPack(bed: bed)
         let registry = TechPackRegistry(packs: [pack])
         try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
-
-        let installed = bed.project.appendingPathComponent(".claude/hooks/pack-a/lint.sh")
-        try FileManager.default.removeItem(at: installed)
+        try editPackAKey(bed: bed)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
 
         var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
         try runner.run()
 
-        #expect(FileManager.default.fileExists(atPath: installed.path))
-        #expect(try bed.projectState().configuredPacks == ["pack-a"])
+        #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "valueA")
     }
 
     @Test("--fix does not re-sync for a failing check a pack author wrote")
     func fixSkipsResyncForPackAuthoredCheck() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
-        let settings = try bed.makeSettingsSource(content: """
-        { "env": { "PACK_A_KEY": "valueA" } }
-        """)
-        let pack = MockTechPack(
-            identifier: "pack-a",
-            displayName: "Pack A",
-            components: [bed.settingsComponent(pack: "pack-a", id: "settings", source: settings)],
-            supplementaryDoctorChecks: [UnsatisfiableCheck()]
-        )
+        let pack = try settingsPack(bed: bed, extraChecks: [UnsatisfiableCheck()])
         let registry = TechPackRegistry(packs: [pack])
         try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
-
-        // A re-sync would put the managed value back, so an edit that survives proves none ran.
-        let data = try Data(contentsOf: bed.settingsLocalPath)
-        var json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-        json["env"] = ["PACK_A_KEY": "edited"]
-        try JSONSerialization.data(withJSONObject: json).write(to: bed.settingsLocalPath)
+        // `fixResyncResetsEditedValue` shows a re-sync resets this, so an edit that survives
+        // proves none ran.
+        try editPackAKey(bed: bed)
 
         var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
         try runner.run()
 
         #expect(try bed.settingsEnv()["PACK_A_KEY"] as? String == "edited")
+    }
+
+    @Test("A scope whose re-apply is blocked is left untouched")
+    func fixLeavesBlockedScopeUntouched() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = try hookPack("pack-a", bed: bed)
+        let packB = try hookPack("pack-b", bed: bed)
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        let strippedRegistry = TechPackRegistry(packs: [packA])
+        var runner = bed.makeDoctorRunner(registry: strippedRegistry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.projectState().configuredPacks.contains("pack-b"))
+        #expect(try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+            .contains(bed.projectHookCommand("pack-b/lint.sh")))
+        #expect(!FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
+    }
+
+    @Test("A re-sync after a scope-duplication fix does not reinstall the removed pack")
+    func resyncAfterDuplicationFixKeepsPackRemoved() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let dup = try MockTechPack(
+            identifier: "dup-pack",
+            displayName: "Dup Pack",
+            components: [bed.skillComponent(
+                pack: "dup-pack", id: "skillA", source: bed.makeSkillSource(name: "dup-skill.md"), destination: "dup-skill.md"
+            )]
+        )
+        let packA = try hookPack("pack-a", bed: bed)
+        let registry = TechPackRegistry(packs: [dup, packA])
+        try bed.makeConfigurator(registry: registry).configure(packs: [dup, packA], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [dup], confirmRemovals: false)
+        try FileManager.default.removeItem(at: installedHook("pack-a", bed: bed))
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        try runner.run()
+
+        #expect(try bed.projectState().configuredPacks == ["pack-a"])
+        #expect(!FileManager.default.fileExists(atPath: bed.project.appendingPathComponent(".claude/skills/dup-skill.md").path))
+        #expect(FileManager.default.fileExists(atPath: installedHook("pack-a", bed: bed).path))
     }
 }
 

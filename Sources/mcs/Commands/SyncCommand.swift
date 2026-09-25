@@ -288,8 +288,14 @@ struct SyncCommand: LockedCommand {
         let resolvedPacks: [any TechPack] = pack.compactMap { registry.pack(for: $0) }
         let resolvedIDs = Set(resolvedPacks.map(\.identifier))
 
-        for id in pack where !resolvedIDs.contains(id) {
+        let unknown = pack.filter { !resolvedIDs.contains($0) }
+        for id in unknown {
             output.warn("Unknown tech pack: \(id)")
+        }
+        // Under --prune a mistyped name would drop the pack it meant from the exact set.
+        if prune, !unknown.isEmpty {
+            output.error("--prune needs every --pack name to resolve. Nothing was changed.")
+            throw ExitCode.failure
         }
 
         guard !resolvedPacks.isEmpty else {
@@ -330,15 +336,19 @@ struct SyncCommand: LockedCommand {
             output: output
         )
 
-        let packs = try globallyInstalled.map {
-            try ConfiguratorSupport.filterGloballyBlocked(
+        var packs = desired.packs
+        if let globallyInstalled {
+            packs = try ConfiguratorSupport.filterGloballyBlocked(
                 desired.packs,
-                globallyInstalled: $0,
+                globallyInstalled: globallyInstalled,
                 previouslyConfigured: previouslyConfigured,
                 output: output,
                 allowEmpty: prune
             )
-        } ?? desired.packs
+        }
+        if prune, packs.isEmpty {
+            output.warn("Every named pack is installed globally, so --prune leaves this scope with no packs.")
+        }
 
         output.header("Sync \(scopeLabel)")
         output.plain("")

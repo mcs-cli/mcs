@@ -117,7 +117,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PackHeuristics.swift` — heuristic validation checks for `mcs pack validate` (empty pack, root source copy, missing files, unreferenced files, MCP dependency gaps, python module paths, third-party brew taps, `scope` declared on doctor check types that ignore it)
 
 ### Doctor (`Sources/mcs/Doctor/`)
-- `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution. Tags each check with the scope a re-sync would repair it in, by origin: component-derived and artifact-record checks (except `HookInterpreterCheck`) can be repaired by sync; pack-authored and standalone checks cannot. `--fix` runs checks' own fixes and re-syncs each affected scope through `ScopeReapplier` (full configured set, never a subset), then re-checks
+- `DoctorRunner.swift` — 5-layer check orchestration with project-aware pack resolution. Tags each check with the scope a re-sync would repair it in, by origin: component-derived and artifact-record checks (except `HookInterpreterCheck`) can be repaired by sync; pack-authored and standalone checks cannot. `--fix` runs checks' own fixes and re-syncs each affected scope through `ScopeReapplier` (the scope's configured set re-read after own fixes, never a subset), then re-runs the re-synced checks
 - `CoreDoctorChecks.swift` — check structs (BrewPackageCheck, MCPServerCheck, PluginCheck, GitignoreCheck, CommandFileCheck, FileExistsCheck, FileContentCheck, HookSettingsCheck, SettingsKeysCheck, SettingsDriftCheck, PackGitignoreCheck, ProjectIndexCheck)
 - `DerivedDoctorChecks.swift` — `deriveDoctorCheck()` extension on ComponentDefinition
 - `ProjectDoctorChecks.swift` — project-scoped checks (CLAUDE.local.md freshness, state file)

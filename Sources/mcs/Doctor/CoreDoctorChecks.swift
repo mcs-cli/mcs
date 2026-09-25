@@ -19,7 +19,8 @@ import Foundation
 //   `ScopeReapplier`). Its own `fix()` only supplies the hint shown when that is not possible.
 //
 // `doctor --fix` never re-implements an install step: additive work goes through the sync engine.
-// Every fix runs behind one confirmation prompt that shows what it will do.
+// Every fix that changes anything runs behind one confirmation prompt (skipped by `--yes`) that
+// shows what it will do; hint-only checks print their message before it.
 
 /// Reports on a `brew:` component, using the same availability test `installBrewPackage` uses
 /// so doctor and sync cannot disagree about what is installed.

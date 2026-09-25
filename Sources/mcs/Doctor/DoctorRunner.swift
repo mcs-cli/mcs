@@ -57,6 +57,10 @@ struct DoctorRunner {
             if case let .project(root) = self { return root }
             return nil
         }
+
+        var label: String {
+            projectRoot.map { "project \($0.lastPathComponent)" } ?? "the global scope"
+        }
     }
 
     /// `syncTarget` is nil when a re-sync cannot make the check pass: checks a pack author wrote,
@@ -71,9 +75,13 @@ struct DoctorRunner {
         let excludedComponentIDs: Set<String>
         let label: String
         let artifactsByPack: [String: PackArtifactRecord]
+        /// False when the scope's packs are not all configured where it points, so a re-sync there
+        /// would converge the wrong packs (`--pack` names a global-only pack from inside a project).
+        var canResync = true
 
-        var syncTarget: SyncTarget {
-            effectiveProjectRoot.map(SyncTarget.project) ?? .global
+        var syncTarget: SyncTarget? {
+            guard canResync else { return nil }
+            return effectiveProjectRoot.map(SyncTarget.project) ?? .global
         }
 
         /// Hook directory the commands in `artifactsByPack` were recorded with.
@@ -321,7 +329,10 @@ struct DoctorRunner {
                 output.success("Applied \(fixedCount) fix\(fixedCount == 1 ? "" : "es").")
             }
         } else {
-            let repairable = pendingFixes.count { $0.check.fixCommandPreview != nil || $0.syncTarget != nil }
+            let ownFixCount = pendingFixes.count { $0.check.fixCommandPreview != nil }
+            let resyncCount = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
+                .planned.reduce(0) { $0 + $1.checks.count }
+            let repairable = ownFixCount + resyncCount
             if repairable > 0 {
                 output.plain("")
                 output.info("Run 'mcs doctor --fix' to repair \(repairable) issue\(repairable == 1 ? "" : "s").")
@@ -352,9 +363,11 @@ struct DoctorRunner {
             // Load artifacts and excluded components from the appropriate state
             var artifacts: [String: PackArtifactRecord] = [:]
             var excludedIDs: Set<String> = []
+            var configuredHere: Set<String> = []
             if let root = effectiveRoot {
                 do {
                     let state = try ProjectState(projectRoot: root)
+                    configuredHere = state.configuredPacks
                     if state.exists {
                         excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                         for id in packIDs {
@@ -368,6 +381,7 @@ struct DoctorRunner {
                 }
             } else {
                 // Global scope — use pre-loaded artifacts and exclusions
+                configuredHere = globallyConfiguredPackIDs
                 excludedIDs = globalExcludedComponentIDs
                 for id in packIDs {
                     if let record = globalArtifactsByPack[id] {
@@ -380,7 +394,8 @@ struct DoctorRunner {
                 effectiveProjectRoot: effectiveRoot,
                 excludedComponentIDs: excludedIDs,
                 label: "--pack flag",
-                artifactsByPack: artifacts
+                artifactsByPack: artifacts,
+                canResync: packIDs.isSubset(of: configuredHere)
             )]
         }
 
@@ -675,6 +690,7 @@ struct DoctorRunner {
     /// A scope re-sync planned for `--fix`: the scope's full configured set and the failed checks
     /// it should repair.
     private struct PlannedResync {
+        let target: SyncTarget
         let run: UpdateScopeResolver.ScopeRun
         let checks: [any DoctorCheck]
     }
@@ -685,6 +701,8 @@ struct DoctorRunner {
         let ownFixes = pendingFixes.map(\.check).filter { $0.fixCommandPreview != nil }
         let (resyncs, hintOnly) = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
 
+        // Runs before the prompt: a check with no preview has no fix of its own, so its `fix()`
+        // only returns the `.notFixable` hint. A check that mutates must declare a preview.
         for check in hintOnly {
             report(check.name, check.fix())
         }
@@ -701,8 +719,10 @@ struct DoctorRunner {
             let packIDs = resync.run.configuredPackIDs.sorted()
             let fixes = resync.checks.map(\.name).joined(separator: ", ")
             output.plain("    • Re-sync \(resync.run.label): packs \(packIDs.joined(separator: ", ")) — fixes: \(fixes)")
-            let preview = "mcs sync\(resync.run.isGlobal ? " --global" : "") --pack \(packIDs[0]) --dry-run"
-            output.dimmed("      Resets managed files you edited in this scope. Preview: \(preview)")
+            if let firstPack = packIDs.first {
+                let preview = "mcs sync\(resync.run.isGlobal ? " --global" : "") --pack \(firstPack) --dry-run"
+                output.dimmed("      Resets managed files you edited in this scope. Preview: \(preview)")
+            }
         }
 
         output.plain("")
@@ -756,13 +776,13 @@ struct DoctorRunner {
         for target in targets {
             let checks = checksByTarget[target] ?? []
             do {
-                if let run = try resolver.run(projectRoot: target.projectRoot) {
-                    planned.append(PlannedResync(run: run, checks: checks))
+                if let run = try resolver.scopeRun(projectRoot: target.projectRoot) {
+                    planned.append(PlannedResync(target: target, run: run, checks: checks))
                 } else {
                     hintOnly += checks
                 }
             } catch {
-                output.warn("Could not read sync state: \(error.localizedDescription)")
+                output.warn("Could not read sync state for \(target.label): \(error.localizedDescription)")
                 hintOnly += checks
             }
         }
@@ -771,11 +791,36 @@ struct DoctorRunner {
 
     /// Re-syncs one scope, then re-runs its failed checks so a check the re-sync could not repair
     /// reports as still failing rather than fixed.
+    ///
+    /// The run is resolved again here rather than reused from the prompt: an own fix applied just
+    /// before (`ScopeDuplicationCheck` unconfiguring a pack) may have changed the configured set,
+    /// and re-syncing the stale set would reinstall what that fix removed.
     private mutating func applyResync(_ resync: PlannedResync) {
-        let skipped: Bool
+        let run: UpdateScopeResolver.ScopeRun
         do {
-            skipped = try ScopeReapplier.reapplyScope(
-                resync.run,
+            guard let current = try UpdateScopeResolver(environment: environment, output: output)
+                .scopeRun(projectRoot: resync.target.projectRoot)
+            else {
+                for check in resync.checks {
+                    docFixFailed(check.name, "\(resync.target.label) no longer has configured packs to re-sync")
+                }
+                return
+            }
+            run = current
+            if current.configuredPackIDs != resync.run.configuredPackIDs {
+                let packs = current.configuredPackIDs.sorted().joined(separator: ", ")
+                output.dimmed("  \(current.label) changed since the prompt; re-syncing packs \(packs)")
+            }
+        } catch {
+            for check in resync.checks {
+                docFixFailed(check.name, "could not read sync state: \(error.localizedDescription)")
+            }
+            return
+        }
+
+        do {
+            let blocked = try ScopeReapplier.reapplyScope(
+                run,
                 skippedPackIDs: [],
                 registry: registry,
                 dryRun: false,
@@ -784,24 +829,31 @@ struct DoctorRunner {
                 output: output,
                 claudeCLI: claudeCLI
             )
+            if blocked {
+                for check in resync.checks {
+                    docFixFailed(check.name, "scope was not re-synced")
+                }
+                return
+            }
         } catch let error as PromptResolutionError {
             error.lines.forEach { output.error($0) }
-            skipped = true
         } catch {
-            output.error("Re-sync of \(resync.run.label) failed: \(error.localizedDescription)")
-            skipped = true
+            output.error("Re-sync of \(run.label) failed: \(error.localizedDescription)")
         }
 
+        // A throw can leave the scope partly written, so the checks report what is on disk now.
         output.plain("")
         for check in resync.checks {
-            guard !skipped else {
-                docFixFailed(check.name, "scope was not re-synced")
-                continue
-            }
             switch check.check() {
-            case let .pass(msg), let .skip(msg):
+            case let .pass(msg):
                 docFixed(check.name, msg)
-            case let .fail(msg), let .warn(msg):
+            case let .skip(msg):
+                docSkip(check.name, msg)
+            // The check still holds the expectation recorded before the re-sync, so a pack whose
+            // source changed since then warns about drift even though the repair worked.
+            case let .warn(msg):
+                docFixed(check.name, "restored; differs from the last recorded state (\(msg))")
+            case let .fail(msg):
                 docFixFailed(check.name, "still failing after re-sync: \(msg)")
             }
         }

@@ -273,7 +273,7 @@ Packs provide:
 `doctor --fix` routes each failed check one of three ways, all behind one confirmation prompt:
 - **Own fix**: the check has a `fixCommandPreview` — pack `fixCommand`/`fixScript`, gitignore additions, stale project-index entries, a missing `.mcs-project` inferred from section markers, and scope-duplication removal
 - **Scope re-sync**: derived checks and artifact-record checks (except `HookInterpreterCheck`) verify what sync installs, so `DoctorRunner` re-syncs their scope through `ScopeReapplier` with the scope's full configured set, then re-runs them
-- **Hint only**: pack-authored and standalone checks without a fix print their `fix()` message
+- **Hint only**: checks with no fix that sync cannot repair — pack-authored and standalone checks, `HookInterpreterCheck`, and checks whose scope has no recorded packs to re-sync from — print their `fix()` message
 
 `doctor --fix` never re-implements an install step — additive work always goes through the sync engine.
 
