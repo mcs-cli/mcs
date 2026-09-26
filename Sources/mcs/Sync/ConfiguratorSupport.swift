@@ -332,63 +332,6 @@ enum ConfiguratorSupport {
         return additions
     }
 
-    /// Present per-pack component multi-select and return excluded component IDs.
-    ///
-    /// - Parameter componentsProvider: Extracts the relevant components from a pack.
-    ///   Defaults to all components. Callers can supply a custom filter if needed.
-    static func selectComponentExclusions(
-        packs: [any TechPack],
-        previousState: ProjectState,
-        output: CLIOutput,
-        componentsProvider: (any TechPack) -> [ComponentDefinition] = { $0.components }
-    ) -> [String: Set<String>] {
-        var exclusions: [String: Set<String>] = [:]
-
-        for pack in packs {
-            let components = componentsProvider(pack)
-            guard components.count > 1 else { continue }
-
-            output.plain("")
-            output.info("Components for \(pack.displayName):")
-
-            let previousExcluded = previousState.excludedComponents(for: pack.identifier)
-
-            let items = components.enumerated().map { index, component in
-                SelectableItem(
-                    number: index + 1,
-                    name: component.displayName,
-                    description: component.description,
-                    isSelected: !previousExcluded.contains(component.id)
-                )
-            }
-
-            let requiredItems = components
-                .filter(\.isRequired)
-                .map { RequiredItem(name: $0.displayName) }
-
-            var groups = [SelectableGroup(
-                title: pack.displayName,
-                items: items,
-                requiredItems: requiredItems
-            )]
-
-            let selectedNumbers = output.multiSelect(groups: &groups)
-
-            var excluded = Set<String>()
-            for (index, component) in components.enumerated() {
-                if !selectedNumbers.contains(index + 1), !component.isRequired {
-                    excluded.insert(component.id)
-                }
-            }
-
-            if !excluded.isEmpty {
-                exclusions[pack.identifier] = excluded
-            }
-        }
-
-        return exclusions
-    }
-
     // MARK: - Template Contribution Gathering
 
     /// Collect template contributions from preloaded templates, warning about packs
@@ -425,7 +368,6 @@ enum ConfiguratorSupport {
     /// - Returns: Whether any content was added and the per-pack contributed settings keys.
     static func mergePackComponentsIntoSettings(
         packs: [any TechPack],
-        excludedComponents: [String: Set<String>],
         settings: inout Settings,
         hookPathPrefix: String,
         resolvedValues: [String: String],
@@ -434,15 +376,12 @@ enum ConfiguratorSupport {
         var hasContent = false
         var contributedKeys: [String: [String]] = [:]
 
-        let included: [(pack: any TechPack, component: ComponentDefinition)] = packs.flatMap { pack in
-            let excluded = excludedComponents[pack.identifier] ?? []
-            return pack.components
-                .filter { !excluded.contains($0.id) }
-                .map { (pack, $0) }
+        let packComponents: [(pack: any TechPack, component: ComponentDefinition)] = packs.flatMap { pack in
+            pack.components.map { (pack, $0) }
         }
 
         // Pass 1: entries derived from component definitions.
-        for (pack, component) in included {
+        for (pack, component) in packComponents {
             if let reg = component.hookRegistration,
                let command = component.hookCommand(pathPrefix: hookPathPrefix) {
                 if settings.addHookEntry(
@@ -476,7 +415,7 @@ enum ConfiguratorSupport {
         }
 
         // Pass 2: pack-supplied settings files, merged on top of the derived entries.
-        for (pack, component) in included {
+        for (pack, component) in packComponents {
             guard case let .settingsMerge(source) = component.installAction, let source else { continue }
             do {
                 let packSettings = try Settings.load(from: source, substituting: resolvedValues)

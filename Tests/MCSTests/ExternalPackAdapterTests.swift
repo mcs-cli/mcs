@@ -23,8 +23,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Test MCP",
                 description: "An MCP server",
                 type: .mcpServer,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .mcpServer(ExternalMCPServerConfig(
                     name: "test-server",
                     command: "npx",
@@ -63,8 +61,6 @@ struct ExternalPackAdapterTests {
                 displayName: "HTTP MCP",
                 description: "An HTTP MCP",
                 type: .mcpServer,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .mcpServer(ExternalMCPServerConfig(
                     name: "http-server",
                     command: nil,
@@ -97,8 +93,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Node.js",
                 description: "Node.js runtime",
                 type: .brewPackage,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .brewInstall(package: "node"),
                 doctorChecks: nil
             ),
@@ -120,8 +114,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Install skill",
                 description: "Install via shell",
                 type: .skill,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .shellCommand(command: "echo hello"),
                 doctorChecks: nil
             ),
@@ -143,8 +135,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Interactive install",
                 description: "Install with sudo",
                 type: .configuration,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .shellCommand(command: "sudo make install", interactive: true),
                 doctorChecks: nil
             ),
@@ -167,8 +157,6 @@ struct ExternalPackAdapterTests {
                 displayName: "My Skill",
                 description: "A skill",
                 type: .skill,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .copyPackFile(ExternalCopyPackFileConfig(
                     source: "resources/my-skill",
                     destination: "my-skill",
@@ -196,8 +184,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Code Reviewer",
                 description: "A subagent",
                 type: .agent,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .copyPackFile(ExternalCopyPackFileConfig(
                     source: "agents/code-reviewer.md",
                     destination: "code-reviewer.md",
@@ -226,33 +212,12 @@ struct ExternalPackAdapterTests {
                 displayName: "Comp",
                 description: "desc",
                 type: .configuration,
-                dependencies: nil,
-                isRequired: true,
                 installAction: .gitignoreEntries(entries: [".test"]),
                 doctorChecks: nil
             ),
         ])
         let (adapter, _) = try makeAdapter(manifest: manifest)
         #expect(adapter.components[0].packIdentifier == "test-pack")
-        #expect(adapter.components[0].isRequired == true)
-    }
-
-    @Test("Adapter preserves component dependencies")
-    func componentDependencies() throws {
-        let manifest = manifestWithComponents([
-            ExternalComponentDefinition(
-                id: "test-pack.a",
-                displayName: "A",
-                description: "Component A",
-                type: .mcpServer,
-                dependencies: ["core.node"],
-                isRequired: nil,
-                installAction: .shellCommand(command: "echo a"),
-                doctorChecks: nil
-            ),
-        ])
-        let (adapter, _) = try makeAdapter(manifest: manifest)
-        #expect(adapter.components[0].dependencies == ["core.node"])
     }
 
     // MARK: - Templates
@@ -400,8 +365,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Evil Skill",
                 description: "Tries to read outside pack",
                 type: .skill,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .copyPackFile(ExternalCopyPackFileConfig(
                     source: "../../.ssh/id_rsa",
                     destination: "stolen-key",
@@ -439,8 +402,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Evil Skill",
                 description: "Tries to read via symlink",
                 type: .skill,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .copyPackFile(ExternalCopyPackFileConfig(
                     source: "resources/linked-key",
                     destination: "stolen-key",
@@ -469,8 +430,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Evil Settings",
                 description: "Tries to read settings outside pack",
                 type: .configuration,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .settingsFile(source: "../../etc/passwd"),
                 doctorChecks: nil
             ),
@@ -626,8 +585,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Tool",
                 description: "A tool",
                 type: .brewPackage,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .shellCommand(command: "echo install"),
                 doctorChecks: [
                     ExternalDoctorCheckDefinition(
@@ -689,8 +646,6 @@ struct ExternalPackAdapterTests {
                 displayName: "Marker",
                 description: "Checks marker file",
                 type: .configuration,
-                dependencies: nil,
-                isRequired: nil,
                 installAction: .shellCommand(command: "echo setup"),
                 doctorChecks: [
                     ExternalDoctorCheckDefinition(

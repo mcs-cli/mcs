@@ -12,8 +12,9 @@ import Foundation
 // - **Scope reconciliation**: Removing a pack from one scope when a provably equivalent copy
 //   exists in another, by calling `Configurator.unconfigurePack` rather than re-implementing
 //   removal. The check must refuse the fix unless it can prove nothing is lost — see
-//   `ScopeDuplicationCheck`, which gates on component subset, prompt-answer parity, and the
-//   recorded hash of every file it would delete. Do not copy the pattern without the gates.
+//   `ScopeDuplicationCheck`, which gates on the global scope having installed every component,
+//   prompt-answer parity, and the recorded hash of every file it would delete. Do not copy the
+//   pattern without the gates.
 // - **Re-sync**: A check derived from a component or from recorded artifacts is repaired by
 //   re-syncing its scope onto the packs already configured there (`DoctorRunner`, through
 //   `ScopeReapplier`). Its own `fix()` only supplies the hint shown when that is not possible.
@@ -28,16 +29,12 @@ struct BrewPackageCheck: DoctorCheck {
     let name: String
     let section: String
     let package: String
-    var isOptional: Bool = false
     var environment: Environment = .init()
 
     func check() -> CheckResult {
         let shell = ShellRunner(environment: environment)
         if Homebrew(shell: shell, environment: environment).provides(package) {
             return .pass("installed")
-        }
-        if isOptional {
-            return .warn("not found (optional)")
         }
         return .fail("not found")
     }

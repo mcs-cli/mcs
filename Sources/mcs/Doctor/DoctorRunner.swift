@@ -71,14 +71,13 @@ struct DoctorRunner {
 
     /// `syncTarget` is nil when a re-sync cannot make the check pass: checks a pack author wrote,
     /// standalone checks, and anything sync does not install.
-    private typealias CollectedCheck = (check: any DoctorCheck, isExcluded: Bool, syncTarget: SyncTarget?)
+    private typealias CollectedCheck = (check: any DoctorCheck, syncTarget: SyncTarget?)
 
     /// A resolved scope for check collection. Each scope carries the pack IDs,
-    /// effective project root, excluded components, and a display label.
+    /// effective project root, and a display label.
     private struct CheckScope {
         let packIDs: Set<String>
         let effectiveProjectRoot: URL?
-        let excludedComponentIDs: Set<String>
         let label: String
         let artifactsByPack: [String: PackArtifactRecord]
         /// False when the scope's packs are not all configured where it points, so a re-sync there
@@ -151,13 +150,11 @@ struct DoctorRunner {
         // trigger doctor checks.
         let globallyConfiguredPackIDs: Set<String>
         let globalArtifactsByPack: [String: PackArtifactRecord]
-        let globalExcludedComponentIDs: Set<String>
         do {
             let globalState = try ProjectState(stateFile: env.globalStateFile)
             if globalState.exists {
                 // Global state file exists — use its configured packs (may be empty)
                 globallyConfiguredPackIDs = globalState.configuredPacks
-                globalExcludedComponentIDs = Set(globalState.allExcludedComponents.values.flatMap(\.self))
                 var artifacts: [String: PackArtifactRecord] = [:]
                 for packID in globalState.configuredPacks {
                     if let record = globalState.artifacts(for: packID) {
@@ -168,7 +165,6 @@ struct DoctorRunner {
             } else {
                 // No global state file yet — fall back to registry for backward compat
                 globalArtifactsByPack = [:]
-                globalExcludedComponentIDs = []
                 let packRegistry = PackRegistryFile(path: env.packsRegistry)
                 do {
                     globallyConfiguredPackIDs = try Set((packRegistry.load()).packs.map(\.identifier))
@@ -180,7 +176,6 @@ struct DoctorRunner {
         } catch {
             // Corrupt state file — fall back to registry
             globalArtifactsByPack = [:]
-            globalExcludedComponentIDs = []
             output.warn("Could not read global state: \(error.localizedDescription) — falling back to pack registry")
             let packRegistry = PackRegistryFile(path: env.packsRegistry)
             do {
@@ -198,8 +193,7 @@ struct DoctorRunner {
         let scopes = resolveCheckScopes(
             projectRoot: projectRoot,
             globallyConfiguredPackIDs: globallyConfiguredPackIDs,
-            globalArtifactsByPack: globalArtifactsByPack,
-            globalExcludedComponentIDs: globalExcludedComponentIDs
+            globalArtifactsByPack: globalArtifactsByPack
         )
 
         // Display resolved packs per scope
@@ -245,15 +239,14 @@ struct DoctorRunner {
             // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
                 for component in pack.components {
-                    let excluded = scope.excludedComponentIDs.contains(component.id)
                     if let derived = component.deriveDoctorCheck(projectRoot: scope.effectiveProjectRoot, environment: env) {
-                        allChecks.append((check: derived, isExcluded: excluded, syncTarget: scope.syncTarget))
+                        allChecks.append((check: derived, syncTarget: scope.syncTarget))
                     }
                     allChecks += component.supplementaryChecks(scope.effectiveProjectRoot, env)
-                        .map { (check: $0, isExcluded: excluded, syncTarget: nil) }
+                        .map { (check: $0, syncTarget: nil) }
                 }
                 allChecks += pack.supplementaryDoctorChecks(projectRoot: scope.effectiveProjectRoot)
-                    .map { (check: $0, isExcluded: false, syncTarget: nil) }
+                    .map { (check: $0, syncTarget: nil) }
 
                 if let artifacts = scope.artifactsByPack[pack.identifier] {
                     allChecks += artifactChecks(for: artifacts, pack: pack, scope: scope, env: env)
@@ -296,7 +289,7 @@ struct DoctorRunner {
             syncHint: "mcs sync --global"
         ))
 
-        allChecks += nonComponentChecks.map { (check: $0, isExcluded: false, syncTarget: nil) }
+        allChecks += nonComponentChecks.map { (check: $0, syncTarget: nil) }
 
         // Group by section
         let grouped = Dictionary(grouping: allChecks, by: \.check.section)
@@ -372,22 +365,19 @@ struct DoctorRunner {
     private func resolveCheckScopes(
         projectRoot: URL?,
         globallyConfiguredPackIDs: Set<String>,
-        globalArtifactsByPack: [String: PackArtifactRecord],
-        globalExcludedComponentIDs: Set<String>
+        globalArtifactsByPack: [String: PackArtifactRecord]
     ) -> [CheckScope] {
         // --pack flag: single scope, use globalOnly to determine effective root
         if let packIDs = packFilterIDs {
             let effectiveRoot = globalOnly ? nil : projectRoot
-            // Load artifacts and excluded components from the appropriate state
+            // Load artifacts from the appropriate state
             var artifacts: [String: PackArtifactRecord] = [:]
-            var excludedIDs: Set<String> = []
             var configuredHere: Set<String> = []
             if let root = effectiveRoot {
                 do {
                     let state = try ProjectState(projectRoot: root)
                     configuredHere = state.configuredPacks
                     if state.exists {
-                        excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                         for id in packIDs {
                             if let record = state.artifacts(for: id) {
                                 artifacts[id] = record
@@ -398,9 +388,8 @@ struct DoctorRunner {
                     output.warn("Could not read project state: \(error.localizedDescription)")
                 }
             } else {
-                // Global scope — use pre-loaded artifacts and exclusions
+                // Global scope — use pre-loaded artifacts
                 configuredHere = globallyConfiguredPackIDs
-                excludedIDs = globalExcludedComponentIDs
                 for id in packIDs {
                     if let record = globalArtifactsByPack[id] {
                         artifacts[id] = record
@@ -410,7 +399,6 @@ struct DoctorRunner {
             return [CheckScope(
                 packIDs: packIDs,
                 effectiveProjectRoot: effectiveRoot,
-                excludedComponentIDs: excludedIDs,
                 label: "--pack flag",
                 artifactsByPack: artifacts,
                 canResync: packIDs.isSubset(of: configuredHere)
@@ -421,8 +409,7 @@ struct DoctorRunner {
         if globalOnly {
             return [globalScope(
                 globallyConfiguredPackIDs,
-                artifactsByPack: globalArtifactsByPack,
-                excludedComponentIDs: globalExcludedComponentIDs
+                artifactsByPack: globalArtifactsByPack
             )]
         }
 
@@ -442,8 +429,7 @@ struct DoctorRunner {
             if !globalOnlyIDs.isEmpty {
                 scopes.append(globalScope(
                     globalOnlyIDs,
-                    artifactsByPack: globalArtifactsByPack,
-                    excludedComponentIDs: globalExcludedComponentIDs
+                    artifactsByPack: globalArtifactsByPack
                 ))
             }
 
@@ -451,8 +437,7 @@ struct DoctorRunner {
             if scopes.isEmpty {
                 scopes.append(globalScope(
                     globallyConfiguredPackIDs,
-                    artifactsByPack: globalArtifactsByPack,
-                    excludedComponentIDs: globalExcludedComponentIDs
+                    artifactsByPack: globalArtifactsByPack
                 ))
             }
 
@@ -462,8 +447,7 @@ struct DoctorRunner {
         // Not in a project — global packs only
         return [globalScope(
             globallyConfiguredPackIDs,
-            artifactsByPack: globalArtifactsByPack,
-            excludedComponentIDs: globalExcludedComponentIDs
+            artifactsByPack: globalArtifactsByPack
         )]
     }
 
@@ -474,7 +458,6 @@ struct DoctorRunner {
         do {
             let state = try ProjectState(projectRoot: root)
             if state.exists, !state.configuredPacks.isEmpty {
-                let excludedIDs = Set(state.allExcludedComponents.values.flatMap(\.self))
                 var artifactsByPack: [String: PackArtifactRecord] = [:]
                 for packID in state.configuredPacks {
                     if let artifacts = state.artifacts(for: packID) {
@@ -484,7 +467,6 @@ struct DoctorRunner {
                 return CheckScope(
                     packIDs: state.configuredPacks,
                     effectiveProjectRoot: root,
-                    excludedComponentIDs: excludedIDs,
                     label: "project: \(projectName)",
                     artifactsByPack: artifactsByPack
                 )
@@ -511,7 +493,6 @@ struct DoctorRunner {
         return CheckScope(
             packIDs: inferred,
             effectiveProjectRoot: root,
-            excludedComponentIDs: [],
             label: "project: \(projectName) (inferred)",
             artifactsByPack: [:]
         )
@@ -520,13 +501,11 @@ struct DoctorRunner {
     /// Creates a global-scope `CheckScope` with the given pack IDs.
     private func globalScope(
         _ packIDs: Set<String>,
-        artifactsByPack: [String: PackArtifactRecord],
-        excludedComponentIDs: Set<String> = []
+        artifactsByPack: [String: PackArtifactRecord]
     ) -> CheckScope {
         CheckScope(
             packIDs: packIDs,
             effectiveProjectRoot: nil,
-            excludedComponentIDs: excludedComponentIDs,
             label: "global",
             artifactsByPack: artifactsByPack
         )
@@ -554,7 +533,6 @@ struct DoctorRunner {
                     path: fileURL,
                     expectedHash: expectedHash
                 ),
-                isExcluded: false,
                 syncTarget: scope.syncTarget
             ))
         }
@@ -573,7 +551,6 @@ struct DoctorRunner {
                         settingsPath: settingsPath,
                         packName: pack.displayName
                     ),
-                    isExcluded: false,
                     syncTarget: scope.syncTarget
                 ))
                 let interpreterBinaries = HookInterpreter.distinctCheckableBinaries(
@@ -587,7 +564,6 @@ struct DoctorRunner {
                             packName: pack.displayName,
                             environment: env
                         ),
-                        isExcluded: false,
                         // Sync does not install hook interpreters.
                         syncTarget: nil
                     ))
@@ -600,7 +576,6 @@ struct DoctorRunner {
                         settingsPath: settingsPath,
                         packName: pack.displayName
                     ),
-                    isExcluded: false,
                     syncTarget: scope.syncTarget
                 ))
                 if let expectedHash = artifacts.settingsHash {
@@ -611,7 +586,6 @@ struct DoctorRunner {
                             settingsPath: settingsPath,
                             packName: pack.displayName
                         ),
-                        isExcluded: false,
                         syncTarget: scope.syncTarget
                     ))
                 }
@@ -625,7 +599,6 @@ struct DoctorRunner {
                     packName: pack.displayName,
                     environment: env
                 ),
-                isExcluded: false,
                 syncTarget: scope.syncTarget
             ))
         }
@@ -683,13 +656,6 @@ struct DoctorRunner {
         for entry in checks {
             let result = entry.check.check()
             let name = entry.check.name
-
-            // Show excluded component failures/warnings as skipped
-            // (user explicitly deselected via --customize)
-            if entry.isExcluded, result.isFailOrWarn {
-                docSkip(name, "excluded via --customize")
-                continue
-            }
 
             switch result {
             case let .pass(msg):

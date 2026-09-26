@@ -30,6 +30,7 @@ enum PackHeuristics {
         findings += checkAmbiguousHookExtensions(components: components)
         findings += checkUninstalledHookRuntimes(components: components)
         findings += checkHookDoctorCheckInterpreters(manifest: manifest, components: components)
+        findings += checkDeprecatedKeys(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
         // (not for the IO-failure warnings that share the same severity).
@@ -49,6 +50,25 @@ enum PackHeuristics {
     static let unreferencedMarker = "is not referenced"
 
     // MARK: - Individual Checks
+
+    /// Warns about keys that are still accepted but no longer do anything, so an author does not
+    /// believe a component is optional or ordered by a dependency graph.
+    private static func checkDeprecatedKeys(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let declared = components.map { ("Component '\($0.id)'", $0.deprecatedKeys) }
+            + (manifest.templates ?? []).map { ("Template '\($0.sectionIdentifier)'", $0.deprecatedKeys) }
+        return declared.flatMap { owner, keys in
+            keys.map { key in
+                Finding(
+                    severity: .warning,
+                    message: "\(owner) declares `\(key)`, which is deprecated and ignored — packs install"
+                        + " every component, in declaration order"
+                )
+            }
+        }
+    }
 
     private static func checkEmptyPack(manifest: ExternalPackManifest) -> [Finding] {
         if (manifest.components ?? []).isEmpty,

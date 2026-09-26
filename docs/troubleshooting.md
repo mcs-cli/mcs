@@ -221,11 +221,11 @@ reports it as a warning. Install the runtime somewhere always on PATH (`brew ins
 the pack author for a `.sh` wrapper that sources the version manager before invoking the real
 interpreter.
 
-### Components showing "excluded via --customize"
+### Components you excluded are installed after upgrading
 
-**Symptom**: `mcs doctor` shows dimmed `○ <component>: excluded via --customize` entries.
+**Symptom**: `mcs sync` or `mcs update` prints "Previously excluded components of <pack> will now be installed", or `mcs doctor` fails checks for components you had deselected.
 
-This is informational, not a failure. These components were explicitly deselected during `mcs sync --customize` and are intentionally skipped. If the component is installed globally, it will show as passing instead.
+`mcs sync --customize` has been removed: a pack now always installs every component it declares. The first sync after upgrading installs the components an earlier `--customize` left out and forgets the old exclusion. Until that sync runs, `mcs doctor` reports those components as missing — `mcs doctor --fix` runs the same re-sync. If you need a pack without some of its components, fork it or write your own pack.
 
 ### Unpaired section markers
 

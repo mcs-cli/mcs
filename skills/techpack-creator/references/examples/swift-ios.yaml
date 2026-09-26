@@ -31,7 +31,6 @@ components:
   - id: xcodebuildmcp
     displayName: XcodeBuildMCP
     description: Xcode build and test integration
-    dependencies: [node]
     mcp:
       name: XcodeBuildMCP
       command: npx
@@ -41,13 +40,11 @@ components:
   - id: skill-xcodebuildmcp
     description: XcodeBuildMCP skill for Xcode workflows
     type: skill
-    dependencies: [xcodebuildmcp]
     shell: "npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y"
 
   # ── Hooks ─────────────────────────────────────────────────
   - id: hook-simulator-status
     description: Report booted iOS simulator on session start
-    dependencies: [jq]
     hookEvent: SessionStart
     hook:
       source: hooks/simulator_status.sh
@@ -56,7 +53,6 @@ components:
   # ── Configuration ─────────────────────────────────────────
   - id: gitignore
     description: Xcode-specific gitignore entries
-    isRequired: true
     gitignore:
       - .xcodebuildmcp
 
@@ -68,8 +64,6 @@ templates:
     contentFile: templates/xcodebuildmcp.md
     placeholders:
       - __PROJECT__
-    dependencies:
-      - xcodebuildmcp
 
 configureProject:
   script: scripts/configure-xcode.sh

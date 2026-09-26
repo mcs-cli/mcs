@@ -16,8 +16,6 @@ struct ComponentHookCommandTests {
             description: "test",
             type: type,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: false,
             hookRegistration: hookRegistration,
             installAction: installAction
         )

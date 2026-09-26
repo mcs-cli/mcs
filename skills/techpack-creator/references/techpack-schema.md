@@ -55,8 +55,6 @@ Each component represents something MCS can install, verify, and uninstall.
 | `id` | String | Yes | Short name, NO dots. Auto-prefixed with `<pack-identifier>.` by MCS |
 | `description` | String | Yes | One-line description |
 | `displayName` | String | No | Display name (defaults to `id`) |
-| `dependencies` | [String] | No | Component IDs. Short IDs auto-prefixed for intra-pack. Use `other-pack.id` for cross-pack |
-| `isRequired` | Boolean | No | If `true`, cannot be deselected in `--customize` mode |
 | `hookEvent` | String | No | Claude Code lifecycle event for hook registration |
 | `hookMatcher` | String | No | Regex to filter when hook fires (e.g., tool name). Requires `hookEvent` |
 | `hookTimeout` | Integer | No | Seconds before cancel. Requires `hookEvent` |
@@ -102,7 +100,6 @@ Infers `type: mcpServer`. Transport is auto-detected: `url` present = HTTP, othe
 # Stdio transport
 - id: my-server
   description: Code analysis
-  dependencies: [node]
   mcp:
     command: npx
     args: ["-y", "my-server@latest"]
@@ -236,7 +233,6 @@ Merges a JSON settings file. Infers `type: configuration`.
 ```yaml
 - id: settings
   description: Claude Code configuration
-  isRequired: true
   settingsFile: config/settings.json
 ```
 
@@ -250,7 +246,6 @@ Adds patterns to the global gitignore. Infers `type: configuration`.
 ```yaml
 - id: gitignore
   description: Global gitignore entries
-  isRequired: true
   gitignore:
     - .xcodebuildmcp
 ```
@@ -309,7 +304,6 @@ templates:
     placeholders:
       - __PROJECT__
       - __FRAMEWORK__
-    dependencies: [my-server]
 ```
 
 | Field | Type | Required | Description |
@@ -317,7 +311,6 @@ templates:
 | `sectionIdentifier` | String | Yes | Short name, NO dots. Auto-prefixed with `<pack>.` |
 | `contentFile` | String | Yes | Path to markdown file in the pack repo |
 | `placeholders` | [String] | No | `__PLACEHOLDER__` tokens used in the template |
-| `dependencies` | [String] | No | Component IDs — section only injected when these are installed |
 
 ### Built-in Placeholders (always available)
 
@@ -453,7 +446,6 @@ The script receives environment variables:
 - `identifier` must match `^[a-z0-9][a-z0-9-]*$`
 - Component `id`: NO dots (auto-prefixed), must be unique within the pack
 - Template `sectionIdentifier`: NO dots (auto-prefixed)
-- Intra-pack dependency references must resolve to existing component IDs
 - Prompt `key` values must be unique
 - Doctor check required fields must be present and non-empty
 - `hookTimeout` must be a positive integer
@@ -491,6 +483,7 @@ The script receives environment variables:
 | Unreferenced root-level files | Non-infrastructure root files not referenced |
 | MCP dependency gap | MCP uses python/node command but no matching brew component |
 | Missing python module | `python -m <module>` but no `<module>/` directory |
+| Deprecated key | A component or template declares `dependencies` or `isRequired` (ignored) |
 
 Infrastructure files never flagged: `techpack.yaml`, `README.md`, `README`, `LICENSE`, `LICENSE.md`,
 `CHANGELOG.md`, `CONTRIBUTING.md`, `.gitignore`, `.editorconfig`, `package.json`, `package-lock.json`,

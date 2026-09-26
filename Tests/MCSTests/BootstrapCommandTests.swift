@@ -19,8 +19,6 @@ struct BootstrapUnmatchedSeedKeysTests {
                 description: "Test",
                 type: .mcpServer,
                 packIdentifier: "seed-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test", command: "npx", args: [], env: ["TOKEN": "__API_TOKEN__"]
                 ))

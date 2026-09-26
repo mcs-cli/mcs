@@ -52,7 +52,6 @@ struct ProjectSyncStrategy: SyncStrategy {
     func installArtifacts(
         _ pack: any TechPack,
         previousArtifacts: PackArtifactRecord?,
-        excludedIDs: Set<String>,
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
         executor: inout ComponentExecutor,
@@ -63,11 +62,6 @@ struct ProjectSyncStrategy: SyncStrategy {
         artifacts.fileHashesShippedOnly = true
 
         for component in pack.components {
-            if excludedIDs.contains(component.id) {
-                output.dimmed("  \(component.displayName) excluded, skipping")
-                continue
-            }
-
             if ComponentExecutor.isAlreadyInstalled(component) {
                 output.dimmed("  \(component.displayName) already installed, skipping")
                 continue
@@ -142,7 +136,6 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     func composeSettings(
         packs: [any TechPack],
-        excludedComponents: [String: Set<String>],
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput
@@ -155,7 +148,6 @@ struct ProjectSyncStrategy: SyncStrategy {
 
         let (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
-            excludedComponents: excludedComponents,
             settings: &settings,
             hookPathPrefix: scope.hookPathPrefix,
             resolvedValues: resolvedValues,

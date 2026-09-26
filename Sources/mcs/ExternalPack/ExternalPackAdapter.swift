@@ -50,8 +50,7 @@ struct ExternalPackAdapter: TechPack {
                 return TemplateContribution(
                     sectionIdentifier: ext.sectionIdentifier,
                     templateContent: content,
-                    placeholders: ext.placeholders ?? [],
-                    dependencies: ext.dependencies ?? []
+                    placeholders: ext.placeholders ?? []
                 )
             }
         }
@@ -173,8 +172,6 @@ struct ExternalPackAdapter: TechPack {
             description: ext.description,
             type: ext.type.componentType,
             packIdentifier: manifest.identifier,
-            dependencies: ext.dependencies ?? [],
-            isRequired: ext.isRequired ?? false,
             hookRegistration: ext.hookRegistration,
             installAction: action,
             supplementaryChecks: supplementary

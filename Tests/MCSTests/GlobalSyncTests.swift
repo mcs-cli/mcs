@@ -22,8 +22,6 @@ struct GlobalMCPScopeTests {
                 description: "Test MCP server",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test-mcp", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -53,8 +51,6 @@ struct GlobalMCPScopeTests {
                 description: "Pack declares local scope",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "mcp-local", command: "/usr/bin/true", args: [], env: [:],
                     scope: "local"
@@ -83,8 +79,6 @@ struct GlobalMCPScopeTests {
                 description: "MCP server",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "my-mcp", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -119,8 +113,6 @@ struct GlobalMCPScopeTests {
                     description: "Kept",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-keep", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -131,8 +123,6 @@ struct GlobalMCPScopeTests {
                     description: "Dropped",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-drop", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -154,8 +144,6 @@ struct GlobalMCPScopeTests {
                     description: "Kept",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-keep", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -203,8 +191,6 @@ struct GlobalSettingsCompositionTests {
                 description: "Session start hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -250,8 +236,6 @@ struct GlobalSettingsCompositionTests {
                 description: "Session start hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -291,8 +275,6 @@ struct GlobalSettingsCompositionTests {
                 description: "Hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: settingsPath, // dummy, won't be reached
@@ -350,8 +332,6 @@ struct GlobalSettingsCompositionTests {
                 description: "Session start hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -409,8 +389,6 @@ struct GlobalSettingsCompositionTests {
                 description: "Session start hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(source: hookSource, destination: "start.sh", fileType: .hook)
             )]
@@ -555,8 +533,6 @@ struct GlobalFileInstallationTests {
                 description: "A skill",
                 type: .skill,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .copyPackFile(source: source, destination: "my-skill.md", fileType: .skill)
             )]
         )
@@ -587,8 +563,6 @@ struct GlobalFileInstallationTests {
                 description: "A hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .copyPackFile(source: source, destination: "start.sh", fileType: .hook)
             )]
         )
@@ -619,8 +593,6 @@ struct GlobalFileInstallationTests {
                 description: "A skill",
                 type: .skill,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .copyPackFile(source: source, destination: "my-skill.md", fileType: .skill)
             )]
         )
@@ -656,8 +628,6 @@ struct GlobalFileInstallationTests {
                     description: "First",
                     type: .skill,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .copyPackFile(source: sourceA, destination: "skill-a.md", fileType: .skill)
                 ),
                 ComponentDefinition(
@@ -666,8 +636,6 @@ struct GlobalFileInstallationTests {
                     description: "Second",
                     type: .skill,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .copyPackFile(source: sourceB, destination: "skill-b.md", fileType: .skill)
                 ),
             ]
@@ -690,8 +658,6 @@ struct GlobalFileInstallationTests {
                     description: "First",
                     type: .skill,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .copyPackFile(source: sourceA, destination: "skill-a.md", fileType: .skill)
                 ),
             ]
@@ -760,8 +726,6 @@ struct GlobalUnconfigurePackTests {
                 description: "MCP server",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "my-mcp", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -799,8 +763,6 @@ struct GlobalUnconfigurePackTests {
                 description: "A skill",
                 type: .skill,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .copyPackFile(source: source, destination: "my-skill.md", fileType: .skill)
             )]
         )
@@ -869,8 +831,6 @@ struct GlobalUnconfigurePackTests {
                 description: "A hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -912,8 +872,6 @@ struct GlobalUnconfigurePackTests {
                 description: "MCP A",
                 type: .mcpServer,
                 packIdentifier: "pack-a",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "mcp-a", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -929,8 +887,6 @@ struct GlobalUnconfigurePackTests {
                 description: "MCP B",
                 type: .mcpServer,
                 packIdentifier: "pack-b",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "mcp-b", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -1005,8 +961,6 @@ struct GlobalDryRunTests {
                 description: "MCP",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "my-mcp", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -1047,8 +1001,6 @@ struct GlobalDryRunTests {
                 description: "MCP A",
                 type: .mcpServer,
                 packIdentifier: "pack-a",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "mcp-a", command: "/usr/bin/true", args: [], env: [:]
                 ))
@@ -1071,124 +1023,6 @@ struct GlobalDryRunTests {
         let stateAfter = try ProjectState(stateFile: env.globalStateFile)
         #expect(stateAfter.configuredPacks.contains("pack-a"))
         #expect(!stateAfter.configuredPacks.contains("pack-b"))
-    }
-}
-
-// MARK: - Global Excluded Components Tests
-
-struct GlobalExcludedComponentsTests {
-    @Test("Excluded MCP server is removed with user scope")
-    func excludedMCPRemovedWithUserScope() throws {
-        let tmpDir = try makeGlobalTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let mockCLI = MockClaudeCLI()
-        let configurator = makeGlobalSyncConfigurator(home: tmpDir, mockCLI: mockCLI)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.mcp-a",
-                    displayName: "MCP A",
-                    description: "Kept",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "mcp-a", command: "/usr/bin/true", args: [], env: [:]
-                    ))
-                ),
-                ComponentDefinition(
-                    id: "test-pack.mcp-b",
-                    displayName: "MCP B",
-                    description: "To exclude",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "mcp-b", command: "/usr/bin/true", args: [], env: [:]
-                    ))
-                ),
-            ]
-        )
-
-        // First sync: both installed
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-        mockCLI.mcpRemoveCalls = []
-
-        // Second sync: exclude mcp-b
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.mcp-b"]]
-        )
-
-        #expect(mockCLI.mcpRemoveCalls.contains(
-            MockClaudeCLI.MCPRemoveCall(name: "mcp-b", scope: Constants.MCPScope.user)
-        ))
-    }
-
-    @Test("Excluded file is removed from global directory")
-    func excludedFileRemovedFromGlobalDir() throws {
-        let tmpDir = try makeGlobalTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let sourceDir = tmpDir.appendingPathComponent("pack/skills")
-        try FileManager.default.createDirectory(at: sourceDir, withIntermediateDirectories: true)
-        let sourceA = sourceDir.appendingPathComponent("skill-a.md")
-        try "skill a".write(to: sourceA, atomically: true, encoding: .utf8)
-        let sourceB = sourceDir.appendingPathComponent("skill-b.md")
-        try "skill b".write(to: sourceB, atomically: true, encoding: .utf8)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.skill-a",
-                    displayName: "Skill A",
-                    description: "First",
-                    type: .skill,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(source: sourceA, destination: "skill-a.md", fileType: .skill)
-                ),
-                ComponentDefinition(
-                    id: "test-pack.skill-b",
-                    displayName: "Skill B",
-                    description: "Second",
-                    type: .skill,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(source: sourceB, destination: "skill-b.md", fileType: .skill)
-                ),
-            ]
-        )
-
-        let configurator = makeGlobalSyncConfigurator(home: tmpDir)
-
-        // First sync: both installed
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-
-        let destB = tmpDir.appendingPathComponent(".claude/skills/skill-b.md")
-        #expect(FileManager.default.fileExists(atPath: destB.path))
-
-        // Second sync: exclude skill-b
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.skill-b"]]
-        )
-
-        #expect(!FileManager.default.fileExists(atPath: destB.path))
-        let destA = tmpDir.appendingPathComponent(".claude/skills/skill-a.md")
-        #expect(FileManager.default.fileExists(atPath: destA.path))
     }
 }
 
@@ -1252,7 +1086,7 @@ struct GlobalHookInjectionTests {
 
         let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
-        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+        try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let settings = try Settings.load(from: env.claudeSettings)
         let groups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
@@ -1278,7 +1112,7 @@ struct GlobalHookInjectionTests {
         // Sync should strip and re-inject (idempotent)
         let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
-        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+        try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let settings = try Settings.load(from: env.claudeSettings)
         let groups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []
@@ -1305,7 +1139,7 @@ struct GlobalHookInjectionTests {
 
         let configurator = makeGlobalSyncConfigurator(home: tmpDir)
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test", components: [])
-        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+        try configurator.configure(packs: [pack], confirmRemovals: false)
 
         let settings = try Settings.load(from: env.claudeSettings)
         let groups = settings.hooks?[Constants.HookEvent.sessionStart.rawValue] ?? []

@@ -103,7 +103,6 @@ enum ScopeReapplier {
             try configurator.configure(
                 packs: packs,
                 confirmRemovals: false,
-                excludedComponents: run.excludedComponents,
                 reusePriorValuesSilently: true
             )
         }

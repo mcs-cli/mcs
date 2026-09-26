@@ -19,7 +19,6 @@ extension ComponentDefinition {
                 name: displayName,
                 section: type.doctorSection,
                 package: package,
-                isOptional: !isRequired,
                 environment: environment
             )
 

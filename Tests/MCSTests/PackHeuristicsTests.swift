@@ -616,8 +616,7 @@ struct PackHeuristicsTests {
             templates: [ExternalTemplateDefinition(
                 sectionIdentifier: "test-pack.main",
                 placeholders: nil,
-                contentFile: "templates/main.md",
-                dependencies: nil
+                contentFile: "templates/main.md"
             )],
             prompts: nil,
             configureProject: nil,
@@ -832,8 +831,7 @@ struct PackHeuristicsTests {
             templates: [ExternalTemplateDefinition(
                 sectionIdentifier: "test-pack.main",
                 placeholders: nil,
-                contentFile: "content.md",
-                dependencies: nil
+                contentFile: "content.md"
             )],
             prompts: nil,
             configureProject: nil,
@@ -1384,5 +1382,46 @@ struct PackHeuristicsTests {
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
         #expect(!findings.contains { $0.message.contains("declares `matcher`") })
+    }
+
+    // MARK: - Deprecated Keys
+
+    @Test("Warns once per deprecated key a component or template still declares, and the pack still loads")
+    func warnsOnDeprecatedKeys() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: jq
+            description: JSON processor
+            brew: jq
+          - id: tool
+            description: Needs jq
+            isRequired: true
+            dependencies: [jq, other-pack.node]
+            brew: tool
+        templates:
+          - sectionIdentifier: main
+            contentFile: templates/main.md
+            dependencies: [tool]
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let manifest = try ExternalPackManifest.load(from: file).normalized()
+        try manifest.validate()
+
+        let deprecations = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+            .filter { $0.message.contains("deprecated and ignored") }
+            .map(\.message)
+        #expect(deprecations.count == 3)
+        #expect(deprecations.allSatisfy { !$0.contains("'test-pack.jq'") })
+        #expect(deprecations.contains { $0.contains("'test-pack.tool'") && $0.contains("`isRequired`") })
+        #expect(deprecations.contains { $0.contains("'test-pack.tool'") && $0.contains("`dependencies`") })
+        #expect(deprecations.contains { $0.contains("'test-pack.main'") && $0.contains("`dependencies`") })
     }
 }

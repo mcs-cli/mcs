@@ -38,8 +38,6 @@ struct DoctorRunnerIntegrationTests {
                     description: "A hook",
                     type: .hookFile,
                     packIdentifier: identifier,
-                    dependencies: [],
-                    isRequired: false,
                     installAction: .copyPackFile(
                         source: URL(fileURLWithPath: "/tmp/dummy"),
                         destination: "\(hook).sh",
@@ -100,31 +98,6 @@ struct DoctorRunnerIntegrationTests {
         #expect(onlyA.issues == all.issues - 1)
     }
 
-    @Test("runner with excluded components skips those checks")
-    func excludedComponentsSkipped() throws {
-        let (home, project) = try makeSandboxProject(label: "runner-excluded")
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let registry = TechPackRegistry(packs: [missingHookPack("test-pack")])
-
-        var state = try ProjectState(projectRoot: project)
-        state.recordPack("test-pack")
-        try state.save()
-
-        var included = makeRunner(home: home, projectRoot: project, registry: registry)
-        let includedSummary = try included.run()
-        #expect(includedSummary.issues > 0)
-        #expect(!includedSummary.isHealthy)
-
-        state.setExcludedComponents(["test-pack.lint-hook"], for: "test-pack")
-        try state.save()
-
-        var excluded = makeRunner(home: home, projectRoot: project, registry: registry)
-        let excludedSummary = try excluded.run()
-        #expect(excludedSummary.issues == 0)
-        #expect(excludedSummary.isHealthy)
-    }
-
     @Test("PluginCheck passes when plugin is enabled in project settings.local.json")
     func pluginCheckPassesWithProjectSettings() throws {
         let (home, project) = try makeSandboxProject(label: "runner-plugin-project")
@@ -136,8 +109,6 @@ struct DoctorRunnerIntegrationTests {
             description: "Test plugin",
             type: .plugin,
             packIdentifier: "test-pack",
-            dependencies: [],
-            isRequired: true,
             installAction: .plugin(name: "my-plugin")
         )
         let pack = MockTechPack(
@@ -276,8 +247,6 @@ struct DoctorRunnerIntegrationTests {
             description: "Lint hook from pack A",
             type: .hookFile,
             packIdentifier: "pack-a",
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(
                 source: URL(fileURLWithPath: "/tmp/dummy-a"),
                 destination: "lint.sh",
@@ -290,8 +259,6 @@ struct DoctorRunnerIntegrationTests {
             description: "Lint hook from pack B",
             type: .hookFile,
             packIdentifier: "pack-b",
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(
                 source: URL(fileURLWithPath: "/tmp/dummy-b"),
                 destination: "lint.sh",
@@ -368,8 +335,6 @@ struct DoctorRunnerIntegrationTests {
             description: "Test MCP server",
             type: .mcpServer,
             packIdentifier: "test-pack",
-            dependencies: [],
-            isRequired: true,
             installAction: .mcpServer(MCPServerConfig(
                 name: "my-mcp", command: "npx", args: ["-y", "my-mcp"], env: [:]
             ))
@@ -450,8 +415,6 @@ struct DoctorSummaryWarningCountTests {
             description: "Skill",
             type: .skill,
             packIdentifier: "test-pack",
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(source: skillSource, destination: "my-skill", fileType: .skill)
         )
         let pack = MockTechPack(

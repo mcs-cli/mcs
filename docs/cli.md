@@ -12,7 +12,6 @@ mcs sync --pack <name>           # Non-interactive: add/update specific pack(s),
 mcs sync --pack <name> --prune   # Make the named pack(s) the exact set — removes the rest after confirmation
 mcs sync --all                   # Apply all registered packs without prompts
 mcs sync --dry-run               # Preview what would change
-mcs sync --customize             # Per-pack component selection
 mcs sync --global                # Install to global scope (~/.claude/)
 ```
 
@@ -24,10 +23,11 @@ mcs sync --global                # Install to global scope (~/.claude/)
 | `--prune` | With `--pack`: remove configured packs not named with `--pack`. Prompts before removing unless `--yes` is passed. |
 | `-y, --yes` | Skip the removal-confirmation prompt. Only meaningful with `--prune`. |
 | `--dry-run` | Preview changes without writing any files. |
-| `-c, --customize` | Per-pack component selection (deselect individual components). |
 | `-g, --global` | Sync global-scope components (brew packages, plugins, MCP servers to `~/.claude/`). |
 
 `mcs sync` is also the default command — running `mcs` alone is equivalent to `mcs sync`.
+
+A selected pack always installs every component it declares. Components that an older release's `--customize` excluded are installed on the next sync, which names them before installing them.
 
 **`--pack` is additive.** Naming a pack adds or updates it and leaves every other configured pack in place; a footer lists the packs that were kept. A configured pack that is missing from the registry stops the run rather than being removed — re-add it with `mcs pack add`, or pass `--prune` to remove it. With `--prune`, the named packs become the exact set, matching `mcs bootstrap --prune`.
 
@@ -120,7 +120,7 @@ mcs update --dry-run             # Preview without making changes
 
 **Trust prompts:** when a pack's scripts have changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run.
 
-**Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default) or `mcs sync --customize` (always re-asks every prompt, no gate).
+**Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default).
 
 **Exit status:** a hard failure (failed fetch, unreadable checkout, invalid fetched manifest) exits non-zero when running non-interactively (CI), or when *every* attempted pack failed — so a transient outage in CI is a detectable failure, not a silent zero exit. In an interactive terminal a partial failure exits zero (the per-pack warnings are visible); the packs that updated cleanly are still re-applied first. A declined trust prompt is **not** a failure and always exits zero (it re-prompts next run).
 
@@ -251,7 +251,7 @@ Doctor resolves packs from: explicit `--pack` flag → project `.mcs-project` st
 
 **How `--fix` repairs.** When an install check fails (a missing MCP server, brew package, plugin, file, hook entry, settings key or gitignore entry), `--fix` re-syncs that scope onto the packs already configured there — the same re-apply `mcs update` runs, so no pack is ever added or removed. The prompt lists each scope to re-sync; re-syncing resets managed files you edited in that scope. Afterwards the failed checks run again and are reported as fixed or still failing. Checks a pack author wrote, and a missing hook interpreter, are never repaired by a re-sync — doctor prints their hint instead. Drift warnings (edited files or settings) are left alone. Without `--fix`, doctor ends with a line saying how many issues `--fix` could repair.
 
-**Exit status:** doctor exits 1 when a check is still failing — with `--fix`, a failure counts unless its fix was reported as applied, so a declined prompt or a hint-only failure still exits 1 — or when a pack named in `--pack` is not registered or failed to load. Warnings, checks skipped during diagnosis, and components excluded via `--customize` never change the exit status.
+**Exit status:** doctor exits 1 when a check is still failing — with `--fix`, a failure counts unless its fix was reported as applied, so a declined prompt or a hint-only failure still exits 1 — or when a pack named in `--pack` is not registered or failed to load. Warnings and checks skipped during diagnosis never change the exit status. A brew package a pack declares is expected to be installed, so a missing one is a failure.
 
 ## `mcs cleanup`
 

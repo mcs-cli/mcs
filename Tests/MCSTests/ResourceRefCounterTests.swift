@@ -33,8 +33,6 @@ private func brewComponent(id: String, pack: String, package: String) -> Compone
         description: "Brew: \(package)",
         type: .brewPackage,
         packIdentifier: pack,
-        dependencies: [],
-        isRequired: true,
         installAction: .brewInstall(package: package)
     )
 }
@@ -47,8 +45,6 @@ private func pluginComponent(id: String, pack: String, pluginName: String) -> Co
         description: "Plugin: \(pluginName)",
         type: .plugin,
         packIdentifier: pack,
-        dependencies: [],
-        isRequired: true,
         installAction: .plugin(name: pluginName)
     )
 }
@@ -61,8 +57,6 @@ private func gitignoreComponent(id: String, pack: String, entries: [String]) -> 
         description: "Gitignore: \(entries.joined(separator: ", "))",
         type: .configuration,
         packIdentifier: pack,
-        dependencies: [],
-        isRequired: true,
         installAction: .gitignoreEntries(entries: entries)
     )
 }

@@ -8,7 +8,6 @@ struct DerivedDoctorCheckTests {
         id: String = "test",
         displayName: String = "Test",
         type: ComponentType = .skill,
-        isRequired: Bool = false,
         installAction: ComponentInstallAction,
         supplementaryChecks: [any DoctorCheck] = []
     ) -> ComponentDefinition {
@@ -18,8 +17,6 @@ struct DerivedDoctorCheckTests {
             description: "test",
             type: type,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: isRequired,
             installAction: installAction,
             supplementaryChecks: { _, _ in supplementaryChecks }
         )
@@ -101,7 +98,6 @@ struct DerivedDoctorCheckTests {
     func settingsMergeReturnsNil() {
         let component = makeComponent(
             type: .configuration,
-            isRequired: true,
             installAction: .settingsMerge(source: nil)
         )
         #expect(component.deriveDoctorCheck() == nil)
@@ -111,7 +107,6 @@ struct DerivedDoctorCheckTests {
     func gitignoreReturnsNil() {
         let component = makeComponent(
             type: .configuration,
-            isRequired: true,
             installAction: .gitignoreEntries(entries: [".test"])
         )
         #expect(component.deriveDoctorCheck() == nil)

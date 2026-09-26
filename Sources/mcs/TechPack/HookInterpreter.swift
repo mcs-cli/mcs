@@ -173,9 +173,9 @@ enum HookInterpreter {
     /// Distinct interpreter binaries worth verifying across a set of registered hook commands.
     ///
     /// Driven by recorded commands rather than component definitions so the result reflects what
-    /// sync actually installed — excluded components contribute nothing, and a hook a pack has
-    /// declared but not yet synced does not demand its runtime early. Deduplicated so ten node
-    /// hooks produce one check; order follows the commands so doctor output is stable.
+    /// sync actually installed — a hook a pack has declared but not yet synced does not demand its
+    /// runtime early. Deduplicated so ten node hooks produce one check; order follows the commands
+    /// so doctor output is stable.
     static func distinctCheckableBinaries(inRegisteredCommands commands: [String], directory: String) -> [String] {
         var seen: Set<String> = []
         var binaries: [String] = []

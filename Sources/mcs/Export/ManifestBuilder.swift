@@ -242,7 +242,6 @@ struct ManifestBuilder {
                 displayName: "settings",
                 description: "Additional settings (env vars, permissions, etc.)",
                 type: .configuration,
-                isRequired: true,
                 installAction: .settingsFile(source: "config/settings.json")
             ))
             settingsToWrite = data
@@ -255,7 +254,6 @@ struct ManifestBuilder {
                 displayName: "gitignore",
                 description: "Global gitignore entries",
                 type: .configuration,
-                isRequired: true,
                 installAction: .gitignoreEntries(entries: config.gitignoreEntries)
             ))
         }
@@ -418,8 +416,7 @@ struct ManifestBuilder {
         yaml.blank()
         yaml.sectionDivider("TODO — Review before sharing")
         yaml.comment("- [ ] Review component descriptions and add displayName where helpful")
-        yaml.comment("- [ ] Add `dependencies:` between components if needed (e.g. MCP server depends on brew package)")
-        yaml.comment("- [ ] Add `isRequired: true` to components that should always be installed")
+        yaml.comment("- [ ] Order components so each comes after what it needs — install order is declaration order")
         yaml.comment("- [ ] Add brew dependencies for MCP server runtimes (node, uv, python3)")
         yaml.comment("- [ ] Add `supplementaryDoctorChecks:` for pack-level health checks (see above)")
         yaml.comment("- [ ] Add `configureProject:` script if project-level setup is needed")
@@ -449,11 +446,6 @@ struct ManifestBuilder {
 
         yaml.line("  - id: \(comp.id)")
         yaml.line("    description: \(yamlQuote(comp.description))")
-
-        // isRequired
-        if comp.isRequired == true {
-            yaml.line("    isRequired: true")
-        }
 
         // hookRegistration fields
         if let reg = comp.hookRegistration {

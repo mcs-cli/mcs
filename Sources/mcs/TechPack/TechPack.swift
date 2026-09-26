@@ -35,32 +35,6 @@ struct TemplateContribution {
     let sectionIdentifier: String // e.g., "ios"
     let templateContent: String // The template content with placeholders
     let placeholders: [String] // Required placeholder names (e.g., ["__PROJECT__"])
-    let dependencies: [String]
-
-    init(
-        sectionIdentifier: String,
-        templateContent: String,
-        placeholders: [String],
-        dependencies: [String] = []
-    ) {
-        self.sectionIdentifier = sectionIdentifier
-        self.templateContent = templateContent
-        self.placeholders = placeholders
-        self.dependencies = dependencies
-    }
-}
-
-extension Collection<TemplateContribution> {
-    /// The templates a scope actually composes, given the components it excluded.
-    ///
-    /// A template whose `dependencies` name an excluded component is dropped, so excluding a
-    /// component also removes any section that only makes sense alongside it. Sync applies this
-    /// when preloading templates and doctor applies it when deciding whether a section exists in
-    /// both scopes; if the two ever disagreed, doctor would report a duplicated CLAUDE.md section
-    /// that sync never composed.
-    func excludingDependencies(on excluded: Set<String>) -> [TemplateContribution] {
-        filter { !$0.dependencies.contains(where: excluded.contains) }
-    }
 }
 
 /// Protocol that all tech packs must conform to.
@@ -131,13 +105,6 @@ enum CheckResult {
     case fail(String)
     case warn(String)
     case skip(String)
-
-    var isFailOrWarn: Bool {
-        switch self {
-        case .fail, .warn: true
-        case .pass, .skip: false
-        }
-    }
 }
 
 enum FixResult {

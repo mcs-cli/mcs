@@ -209,8 +209,7 @@ struct PackDiffTests {
         let template = ExternalTemplateDefinition(
             sectionIdentifier: "test-pack.main",
             placeholders: nil,
-            contentFile: "templates/main.md",
-            dependencies: nil
+            contentFile: "templates/main.md"
         )
         let diff = PackDiff.between(
             old: snapshot(manifest(templates: [template]), fileHashes: ["templates/main.md": "aaa"]),

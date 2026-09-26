@@ -166,6 +166,23 @@ struct ProjectStateTests {
         #expect(loaded.mcsVersion == MCSVersion.current)
     }
 
+    @Test("A fresh state file carries the retired exclusions key, empty, for older releases")
+    func freshStateWritesEmptyLegacyExclusions() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let stateFile = tmpDir.appendingPathComponent("state.json")
+        var state = try ProjectState(stateFile: stateFile)
+        state.recordPack("ios")
+        try state.save()
+
+        let json = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
+        )
+        let exclusions = try #require(json["excludedComponents"] as? [String: Any])
+        #expect(exclusions.isEmpty)
+    }
+
     @Test("Additive across saves")
     func additiveAcrossSaves() throws {
         let tmpDir = try makeTmpDir()

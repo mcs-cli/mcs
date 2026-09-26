@@ -596,8 +596,6 @@ struct ScannerExtensionTests {
                 description: "Test",
                 type: .configuration,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: url)
             )]
         )
@@ -618,8 +616,6 @@ struct ScannerExtensionTests {
                 description: "Test",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test",
                     command: "npx",
@@ -645,8 +641,6 @@ struct ScannerExtensionTests {
                 description: "Test",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test",
                     command: "__MY_CMD__",
@@ -672,8 +666,6 @@ struct ScannerExtensionTests {
                 description: "Test",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test",
                     command: "npx",
@@ -704,8 +696,6 @@ struct ScannerExtensionTests {
                 description: "Test",
                 type: .mcpServer,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "test",
                     command: "npx",

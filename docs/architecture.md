@@ -158,16 +158,16 @@ Verbose form is also supported — see [Tech Pack Schema](techpack-schema.md).
 2. **Compute diff**: `removals = previous - selected`, `additions = selected - previous`
 3. **Non-interactive preflight** (stdin not a TTY only): resolve every prompt from seeded/stored values and declared defaults, and throw `PromptResolutionError` before anything is removed or installed if any key stays unresolved
 4. **Confirm and unconfigure removed packs**: show the removal summary and ask (unless `confirmRemovals` is off), then remove each pack's MCP servers, files, brew packages, plugins and gitignore entries using its stored `PackArtifactRecord`
-5. **Remove newly excluded components' artifacts** (`--customize`)
+5. **Announce legacy exclusions**: name any components a removed `--customize` once excluded (they are installed below), then drop the stored exclusions
 6. **Auto-install global deps**: brew packages and plugins for all selected packs, before any other component
 7. **Resolve template values** (single pass):
-   - Built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`), then stored values from earlier syncs that are still valid (a `select` answer must still be an option), reused unless `--customize` is set or the user declines the reuse prompt
+   - Built-in values (`__REPO_NAME__`, `__PROJECT_DIR_NAME__`), then stored values from earlier syncs that are still valid (a `select` answer must still be an option), reused unless the user declines the reuse prompt
    - Shared prompts (same key from 2+ packs, `input`/`select` only) once via `CrossPackPromptResolver`
    - Each pack's remaining prompts, skipping keys an earlier pack produced
    - Undeclared `__KEY__` placeholders in copyPackFile sources, settings files, MCP configs and templates are prompted inline, defaulting to the stored value
 8. **Install per-project artifacts**: per pack in selection order, install components in declaration order (skills/hooks/commands to `<project>/.claude/`, MCP servers with `local` scope, placeholders substituted), then remove artifacts the pack no longer declares
 9. **Compose `settings.local.json`**: build from all selected packs' hook entries and settings files (with placeholder substitution)
-10. **Compose `CLAUDE.local.md`**: gather template sections from all selected packs, dropping templates whose `dependencies:` name an excluded component
+10. **Compose `CLAUDE.local.md`**: gather template sections from all selected packs
 11. **Run pack configure hooks**: pack-specific setup (e.g., generate config files)
 12. **Ensure gitignore entries**: add `.claude/` entries to global gitignore
 13. **Save state**: write `.mcs-project` with artifact records for each pack and update `~/.mcs/projects.yaml`
@@ -194,7 +194,7 @@ It runs the same `Configurator.configure` pipeline with these differences:
 2. **Reconcile the registry**: for each `source`, check `PackRegistryFile`. Not registered → `PackAdder.add` (shared with `mcs pack add`). Same source + same ref → silent no-op. Same source + different ref → `PackUpdater.updateGitPack`. Different source → `PackAdder.add` with `duplicatePolicy: .autoAccept` and a warning.
 3. **Seed prompt priors**: merge each pack's `values` into `ProjectState.resolvedValues`. The sync engine's existing prior-reuse path (`Configurator.resolveAllValues`) picks them up silently, both for declared prompt keys and for `__KEY__` placeholders no prompt declares. A seeded key matching neither produces a warning before sync.
 4. **Compose the effective pack set**: default is *additive* — `effectiveIDs = declared ∪ previouslyConfigured`, so packs configured outside `mcs.yaml` are preserved. `--prune` collapses to *authoritative* — `effectiveIDs = declared`, and packs configured but absent from the file get unconfigured by `Configurator.configure`.
-5. **Sync**: filter globally-blocked packs via `ConfiguratorSupport.filterGloballyBlocked`, then call `Configurator.configure(packs: effective, confirmRemovals: !yes, excludedComponents: ...)` with `ProjectSyncStrategy`. Under `--prune`, the removal-confirmation gate inside `Configurator.configure` is bootstrap's `--yes` switch.
+5. **Sync**: filter globally-blocked packs via `ConfiguratorSupport.filterGloballyBlocked`, then call `Configurator.configure(packs: effective, confirmRemovals: !yes, ...)` with `ProjectSyncStrategy`. Under `--prune`, the removal-confirmation gate inside `Configurator.configure` is bootstrap's `--yes` switch.
 6. **Divergence footer**: after an additive sync, if any packs were preserved (present in project but not in the file), print an informational list pointing at `--prune` as the remedy. Non-blocking — keeps the divergence visible without a wall-style prompt.
 
 The shared `PackAdder` helper (in `Sources/mcs/Bootstrap/`) is what keeps `mcs pack add` and `mcs bootstrap` on one code path — a `DuplicatePolicy` enum swaps the interactive `askYesNo` for auto-accept when bootstrap needs it. The additive-default + explicit-`--prune` shape matches the convention Homebrew Bundle, Kubernetes (`kubectl apply --prune`), and npm (`install` vs `prune`) settled on for declarative-file + external-state workflows.
@@ -206,8 +206,6 @@ Each installable unit is a `ComponentDefinition` with:
 - **id**: unique identifier (e.g., `ios.xcodebuildmcp`)
 - **type**: `mcpServer`, `plugin`, `skill`, `hookFile`, `command`, `agent`, `brewPackage`, `configuration`
 - **packIdentifier**: pack ID for the owning pack
-- **dependencies**: IDs of components this depends on
-- **isRequired**: if true, always installed with its pack
 - **installAction**: how to install (see below)
 - **supplementaryChecks**: doctor checks that can't be auto-derived
 
@@ -279,11 +277,10 @@ Packs provide:
 
 ### Check Scope Resolution
 
-Individual checks resolve component presence through three tiers:
+Individual checks resolve component presence through two tiers:
 
 1. **Project path**: when packs are resolved from project scope, checks look in `<project>/.claude/` first (e.g., `<project>/.claude/skills/my-skill.md`)
 2. **Global fallback**: if not found at project scope, checks fall back to `~/.claude/` (covers globally-installed components)
-3. **Exclusion suppression**: components excluded via `--customize` show as dimmed `○ excluded via --customize` instead of failing
 
 MCP server checks follow the same pattern: project-scoped entries (`projects[path].mcpServers` in `~/.claude.json`) are checked before global entries (`mcpServers`).
 
@@ -365,7 +362,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 |-----------|-------------|
 | **Backups** | Timestamped backup before modifying files with user content (e.g., `CLAUDE.local.md`). Tool-managed files are not backed up since they can be regenerated. Clean up with `mcs cleanup`. |
 | **Dry Run** | `mcs sync --dry-run` previews all changes without writing any files, so you can inspect exactly what will happen before committing. |
-| **Selective Install** | `mcs sync --customize` lets you deselect individual components. `--all` applies everything without prompts. Both are safe — the engine tracks what was selected. |
+| **Whole Packs** | A pack always installs every component it declares, in declaration order, so one pack means the same thing on every machine. Need a different set? Fork the pack or write your own. |
 | **Idempotent** | Every `mcs sync` run converges to the same desired state. Safe to run any number of times — re-copies files, re-composes settings, re-registers MCP servers. |
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |

@@ -599,7 +599,6 @@ struct BootstrapCommand: LockedCommand {
             try configurator.configure(
                 packs: filteredPacks,
                 confirmRemovals: !yes,
-                excludedComponents: projectState.allExcludedComponents,
                 reusePriorValuesSilently: true,
                 seededValues: seededValues
             )

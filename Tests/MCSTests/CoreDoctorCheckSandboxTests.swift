@@ -688,8 +688,6 @@ struct DerivedDoctorCheckSandboxTests {
             description: "A test skill",
             type: .skill,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(source: dummySource, destination: "skill.md", fileType: .skill)
         )
 
@@ -718,8 +716,6 @@ struct DerivedDoctorCheckSandboxTests {
             description: "A test hook",
             type: .hookFile,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(source: dummySource, destination: "hook.sh", fileType: .hook)
         )
 
@@ -750,8 +746,6 @@ struct DerivedDoctorCheckSandboxTests {
             description: "A test MCP server",
             type: .mcpServer,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: true,
             installAction: .mcpServer(MCPServerConfig(name: "test-mcp", command: "npx", args: ["-y", "test"], env: [:]))
         )
 
@@ -782,8 +776,6 @@ struct DerivedDoctorCheckSandboxTests {
             description: "A test plugin",
             type: .plugin,
             packIdentifier: nil,
-            dependencies: [],
-            isRequired: true,
             installAction: .plugin(name: "my-plugin")
         )
 
@@ -800,6 +792,28 @@ struct DerivedDoctorCheckSandboxTests {
             }
         } else {
             Issue.record("Expected PluginCheck, got \(type(of: checks.first!))")
+        }
+    }
+
+    @Test("brewInstall derived check fails when the package is missing")
+    func missingBrewPackageFails() throws {
+        let home = try makeGlobalTmpDir(label: "derived-brew")
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        let component = ComponentDefinition(
+            id: "test.brew",
+            displayName: "Missing Tool",
+            description: "A brew package",
+            type: .brewPackage,
+            packIdentifier: nil,
+            installAction: .brewInstall(package: "mcs-test-no-such-package-\(UUID().uuidString.lowercased())")
+        )
+
+        let check = try #require(component.deriveDoctorCheck(environment: Environment(home: home)))
+        let result = check.check()
+        guard case .fail = result else {
+            Issue.record("Expected .fail for a missing brew package, got \(result)")
+            return
         }
     }
 }

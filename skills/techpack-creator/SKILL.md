@@ -23,7 +23,7 @@ servers, hooks, skills, commands, agents, templates, and settings — defined in
 
 1. **`mcs export` first (recommended when MCS is installed)**: Run `mcs export ./pack-output` to
    capture the live Claude Code configuration as a starting point. Then review and improve the
-   generated `techpack.yaml` — add dependencies between components, add prompts for env vars, add
+   generated `techpack.yaml` — add brew components for runtimes, add prompts for env vars, add
    doctor checks, and wire up templates. This is the fastest path when the user already has a
    working Claude Code session.
 
@@ -59,8 +59,8 @@ First, determine which approach to use:
   mcs export ./pack-output          # project-scoped config
   mcs export ./pack-output --global # global-scoped config
   ```
-  Then review the generated `techpack.yaml` and improve it (add dependencies, prompts, doctor
-  checks, templates). Skip to Phase 3 (Propose) with the export output as your starting point.
+  Then review the generated `techpack.yaml` and improve it (add runtime brew components, prompts,
+  doctor checks, templates). Skip to Phase 3 (Propose) with the export output as your starting point.
 
 - If no live config is available → follow the full 5-phase workflow below.
 
@@ -176,13 +176,12 @@ Generate the pack directory:
 5. **YAML field ordering**:
    - Root: schemaVersion → identifier → displayName → description → author → prompts → components → templates → supplementaryDoctorChecks → configureProject → ignore
    - Components grouped: brew first → MCP servers → hooks → skills → commands → agents → settings → gitignore
-   - Each component: id → displayName → description → dependencies → isRequired → hookEvent/hookMatcher/hookTimeout/hookAsync/hookStatusMessage/hookInterpreter → shorthand key
-6. **Dependencies**: Always declare them. `npx` MCP servers depend on `node`. `uvx`/`python` servers depend on `python`. Hooks using `jq` depend on `jq`.
-7. **isRequired: true** for settings and gitignore components
-8. **MCP scope**: default to `local` (per-user, per-project isolation)
-9. **Prompts before components** in the YAML for readability
-10. **Placeholders**: `__UPPER_SNAKE__` format. Every `__KEY__` used in templates/settings MUST have a matching prompt
-11. **Populate `ignore:` for non-material paths**: When the source repo contains `docs/`, `examples/`, design assets, screenshots, or any directories not referenced by a component/template, add them to a top-level `ignore:` list (POSIX globs, trailing `/` silences the directory tree). This silences `mcs pack validate` unreferenced-file warnings AND stops downstream "pack update available" notifications from firing on doc/CI commits. Never put `techpack.yaml` or referenced paths in `ignore:` — `mcs pack validate` rejects those. Example: `ignore: [docs/, examples/, diagrams/*.png]`.
+   - Each component: id → displayName → description → hookEvent/hookMatcher/hookTimeout/hookAsync/hookStatusMessage/hookInterpreter → shorthand key
+6. **Runtimes as components**: `npx` MCP servers need a `brew: node` component, `uvx`/`python` servers need `python`, hooks using `jq` need `jq`. Install order is declaration order, so list what a component needs before it. Never write `dependencies:` or `isRequired:` — both are deprecated and ignored; a pack always installs every component
+7. **MCP scope**: default to `local` (per-user, per-project isolation)
+8. **Prompts before components** in the YAML for readability
+9. **Placeholders**: `__UPPER_SNAKE__` format. Every `__KEY__` used in templates/settings MUST have a matching prompt
+10. **Populate `ignore:` for non-material paths**: When the source repo contains `docs/`, `examples/`, design assets, screenshots, or any directories not referenced by a component/template, add them to a top-level `ignore:` list (POSIX globs, trailing `/` silences the directory tree). This silences `mcs pack validate` unreferenced-file warnings AND stops downstream "pack update available" notifications from firing on doc/CI commits. Never put `techpack.yaml` or referenced paths in `ignore:` — `mcs pack validate` rejects those. Example: `ignore: [docs/, examples/, diagrams/*.png]`.
 
 #### Hook Script Template
 
@@ -279,7 +278,7 @@ it, self-check:
 
 1. **Schema**: Does the YAML match the schema in `references/techpack-schema.md`?
 2. **File references**: Every `source` path points to a file that was actually created
-3. **Dependencies**: Every ID in `dependencies` exists as a component
+3. **Runtimes**: Every runtime an MCP server or hook invokes has a brew component declared before it
 4. **Placeholders**: Every `__KEY__` in templates/settings has a corresponding prompt
 5. **ID uniqueness**: No duplicate component IDs or prompt keys
 6. **Hook metadata**: `hookMatcher`/`hookTimeout`/`hookAsync`/`hookStatusMessage`/`hookInterpreter` require `hookEvent`
@@ -298,7 +297,7 @@ When the target directory already has a `techpack.yaml`:
 4. Report:
    - **Missing**: Detected in repo but absent from pack
    - **Stale**: In pack but no longer detected
-   - **Improvements**: Missing dependencies, missing doctor checks, env vars without prompts
+   - **Improvements**: Missing runtime components, deprecated `dependencies:`/`isRequired:` keys, missing doctor checks, env vars without prompts
    - **Schema**: Verbose syntax that could use shorthand
 5. Offer to generate an updated manifest preserving existing structure
 
@@ -327,7 +326,6 @@ Skills from a registry (not bundled in the pack) use `type: skill` + `shell:`:
 - id: skill-xcodebuildmcp
   description: XcodeBuildMCP skill for Xcode integration
   type: skill
-  dependencies: [xcodebuildmcp]
   shell: "npx -y skills add cameroncooke/xcodebuildmcp -g -a claude-code -y"
 ```
 
@@ -343,17 +341,6 @@ doctorChecks:
     fixCommand: "brew services start ollama"
 ```
 
-### Command-to-Plugin Dependencies
-Slash commands that rely on plugins should declare the dependency:
-```yaml
-- id: command-review-pr
-  description: PR review command
-  dependencies: [gh, plugin-pr-review-toolkit]
-  command:
-    source: commands/review-pr.md
-    destination: review-pr.md
-```
-
 ### Placeholders in Commands and Templates
 `__KEY__` placeholders work in copyPackFile artifacts too (hooks, commands, skills) — not just
 templates and settings. Use this for branch prefixes, project paths, etc.
@@ -366,7 +353,7 @@ templates and settings. Use this for branch prefixes, project paths, etc.
 - Adding MCP servers speculatively — only include servers with clear evidence of need
 - Duplicating auto-derived doctor checks (brew, mcp, plugin, hook, skill, command, agent all get free checks)
 - Using `source: "."` in copyPackFile (copies entire repo root — always an error)
-- Forgetting `isRequired: true` on settings/gitignore components
+- Declaring `dependencies:` or `isRequired:` — both are ignored; order components instead
 - Writing hooks that can crash — always use `set -euo pipefail` + `trap 'exit 0' ERR`
 - Forgetting to validate JSON stdin in hooks (`cat` + `jq` validation pattern)
 
@@ -374,4 +361,4 @@ templates and settings. Use this for branch prefixes, project paths, etc.
 
 Add an MCP server only when the repo shows it needs one (see `references/stack-detection.md`), and
 ask the user when the evidence is ambiguous — every server a pack declares is installed for everyone
-who syncs it, while a missing one is easy to add later via `mcs sync --customize`.
+who syncs it, and users cannot opt out of one component without forking the pack.

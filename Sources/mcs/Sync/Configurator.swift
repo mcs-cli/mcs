@@ -38,13 +38,11 @@ struct Configurator {
 
     /// Full interactive configure flow — multi-select of registered packs.
     ///
-    /// - Parameter customize: When `true`, present per-pack component multi-select after pack selection.
     /// - Parameter globallyInstalledPacks: Identifiers configured in the global scope.
     ///   Deliberately has no default: omitting it would silently disable the block, and
     ///   "I have no global state to report" must be stated, not defaulted into.
     func interactiveConfigure(
         dryRun: Bool = false,
-        customize: Bool = false,
         globallyInstalledPacks: Set<String>
     ) throws {
         // Piped/closed stdin means the confirmation prompt silently returns its default,
@@ -72,8 +70,7 @@ struct Configurator {
             return
         }
 
-        let previousState = try ProjectState(stateFile: scope.stateFile)
-        let previousPacks = previousState.configuredPacks
+        let previousPacks = try ProjectState(stateFile: scope.stateFile).configuredPacks
 
         // Global sync installs *into* the global scope, so nothing there can block it.
         // Enforced here rather than trusted to callers.
@@ -117,7 +114,6 @@ struct Configurator {
         var groups = [SelectableGroup(
             title: groupTitle,
             items: items,
-            requiredItems: [],
             showsDelta: true,
             lockedItems: lockedNames
         )]
@@ -158,25 +154,11 @@ struct Configurator {
             }
         }
 
-        var excludedComponents: [String: Set<String>] = [:]
-        if customize, !selectedPacks.isEmpty {
-            excludedComponents = ConfiguratorSupport.selectComponentExclusions(
-                packs: selectedPacks,
-                previousState: previousState,
-                output: output
-            )
-        }
-
         if dryRun {
             try self.dryRun(packs: selectedPacks)
         } else {
             // Interactive flow already confirmed via the "Review changes" screen above.
-            try configure(
-                packs: selectedPacks,
-                confirmRemovals: false,
-                excludedComponents: excludedComponents,
-                customize: customize
-            )
+            try configure(packs: selectedPacks, confirmRemovals: false)
 
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
@@ -201,13 +183,14 @@ struct Configurator {
             artifactSummary: { strategy.printArtifactSummary($0, output: output) },
             removalSummary: { strategy.printRemovalSummary($0, output: output) }
         )
+        announceFormerExclusions(packs: packs, state: state)
 
         if !output.hasInteractiveStdin {
             let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
             let removals = state.configuredPacks.subtracting(packs.map(\.identifier))
             let unresolved = resolveNonInteractively(
                 packs: packs, state: state, removals: removals, seededValues: seededValues,
-                builtInValues: builtInValues, customize: false, reusePriorValuesSilently: false,
+                builtInValues: builtInValues, reusePriorValuesSilently: false,
                 reportWarnings: true
             ).unresolved
             if !unresolved.isEmpty {
@@ -236,7 +219,6 @@ struct Configurator {
     ///
     /// - Parameter confirmRemovals: When `true`, prompt the user before removing packs.
     ///   Pass `false` for non-interactive paths (`--pack`, `--all`).
-    /// - Parameter excludedComponents: Component IDs excluded per pack (packID -> Set<componentID>).
     /// - Parameter reusePriorValuesSilently: When `true`, skip the interactive
     ///   "Reuse these values?" gate even when stdin is a TTY — used by
     ///   `mcs update`, where re-asking only makes sense for genuinely new prompts.
@@ -244,8 +226,6 @@ struct Configurator {
     func configure(
         packs: [any TechPack],
         confirmRemovals: Bool = true,
-        excludedComponents: [String: Set<String>] = [:],
-        customize: Bool = false,
         reusePriorValuesSilently: Bool = false,
         seededValues: [String: String] = [:]
     ) throws {
@@ -266,7 +246,7 @@ struct Configurator {
             // Template-read warnings are left to resolveAllValues, which reports them once.
             let resolution = resolveNonInteractively(
                 packs: packs, state: state, removals: removals, seededValues: seededValues,
-                builtInValues: builtInValues, customize: customize,
+                builtInValues: builtInValues,
                 reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
             )
             guard resolution.unresolved.isEmpty else {
@@ -312,18 +292,13 @@ struct Configurator {
             unconfigurePack(packID, state: &state)
         }
 
-        // 1b. Remove artifacts for components newly excluded via --customize
-        removeNewlyExcludedComponentArtifacts(
-            packs: packs,
-            excludedComponents: excludedComponents,
-            state: &state
-        )
+        announceFormerExclusions(packs: packs, state: state)
+        state.clearLegacyExcludedComponents()
 
         // 2. Auto-install global dependencies (project scope only — global handles inline)
         if !scope.isGlobalScope {
             for pack in packs {
-                let excluded = excludedComponents[pack.identifier] ?? []
-                autoInstallGlobalDependencies(pack, excludedIDs: excluded)
+                autoInstallGlobalDependencies(pack)
             }
         }
 
@@ -341,20 +316,17 @@ struct Configurator {
         // 3–4b. Resolve all template/placeholder values upfront (single pass)
         let allValues = try resolveAllValues(
             packs: packs, state: &state, builtInValues: builtInValues,
-            nonInteractiveValues: nonInteractiveValues, customize: customize,
+            nonInteractiveValues: nonInteractiveValues,
             reusePriorValuesSilently: reusePriorValuesSilently
         )
 
-        // 4c. Pre-load templates (single disk read per pack), filtering excluded dependencies
-        let preloadedTemplates = preloadTemplates(
-            for: packs, excludedComponents: excludedComponents
-        )
+        // 4c. Pre-load templates (single disk read per pack)
+        let preloadedTemplates = preloadTemplates(for: packs)
 
         // 5. Install artifacts per pack and reconcile stale artifacts
         let (previousSettingsKeys, previousTemplateSections) = installAndReconcileArtifacts(
             packs: packs,
             additions: additions,
-            excludedComponents: excludedComponents,
             allValues: allValues,
             preloadedTemplates: preloadedTemplates,
             state: &state
@@ -365,7 +337,7 @@ struct Configurator {
 
         // 6. Compose settings file from ALL selected packs
         let (contributedKeys, settingsHashes) = try strategy.composeSettings(
-            packs: packs, excludedComponents: excludedComponents,
+            packs: packs,
             previousSettingsKeys: previousSettingsKeys,
             resolvedValues: allValues, output: output
         )
@@ -675,119 +647,19 @@ struct Configurator {
         return priors.merging(seededValues) { _, seeded in seeded }
     }
 
-    /// Remove artifacts for components that were previously included but are now excluded.
-    ///
-    /// When `--customize` changes which components are excluded within a still-selected pack,
-    /// artifacts from newly-excluded components must be cleaned up. This method compares
-    /// the previous exclusion set (from state) with the current one to find newly-excluded
-    /// components, then removes their artifacts (MCP servers, files, brew, plugins, gitignore)
-    /// driven by component definitions rather than artifact records.
-    private func removeNewlyExcludedComponentArtifacts(
-        packs: [any TechPack],
-        excludedComponents: [String: Set<String>],
-        state: inout ProjectState
-    ) {
+    /// Components stored as excluded by the removed `--customize` flag are installed now that packs
+    /// install whole; say so once, since otherwise they appear with no explanation.
+    private func announceFormerExclusions(packs: [any TechPack], state: ProjectState) {
+        let legacy = state.legacyExcludedComponents
         for pack in packs {
-            let previousExcluded = state.excludedComponents(for: pack.identifier)
-            let currentExcluded = excludedComponents[pack.identifier] ?? []
-            let newlyExcluded = currentExcluded.subtracting(previousExcluded)
-
-            guard !newlyExcluded.isEmpty else { continue }
-            guard var artifacts = state.artifacts(for: pack.identifier) else { continue }
-
-            let excludedDefs = pack.components.filter { newlyExcluded.contains($0.id) }
-            guard !excludedDefs.isEmpty else { continue }
-
-            let exec = makeExecutor()
-            let refCounter = ResourceRefCounter(
-                environment: environment, output: output, registry: registry
+            let names = pack.components
+                .filter { legacy[pack.identifier]?.contains($0.id) == true }
+                .map(\.displayName)
+            guard !names.isEmpty else { continue }
+            output.info(
+                "Previously excluded components of \(pack.displayName) will now be installed: "
+                    + names.sorted().joined(separator: ", ")
             )
-            let suffix = scope.labelSuffix
-            output.info("Removing excluded components from \(pack.displayName)\(suffix)...")
-
-            for component in excludedDefs {
-                switch component.installAction {
-                case let .mcpServer(config):
-                    let serverScope = scope.mcpScopeOverride ?? config.resolvedScope
-                    let ref = MCPServerRef(name: config.name, scope: serverScope)
-                    if removeMCPServerArtifact(ref, exec: exec) {
-                        artifacts.mcpServers.removeAll { $0.name == config.name }
-                        output.dimmed("  Removed MCP server: \(config.name)")
-                    } else {
-                        output.warn("  Could not remove MCP server '\(config.name)' — will retry on next sync")
-                    }
-
-                case let .copyPackFile(_, destination, fileType):
-                    let relativePath = strategy.fileRelativePath(
-                        destination: destination, fileType: fileType
-                    )
-                    if removeFileArtifactItem(relativePath: relativePath) {
-                        artifacts.files.removeAll { $0 == relativePath }
-                        artifacts.fileHashes.removeValue(forKey: relativePath)
-                    }
-                    if let hookCmd = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
-                        artifacts.hookCommands.removeAll { $0 == hookCmd }
-                    }
-
-                case let .brewInstall(package):
-                    let result = removeBrewArtifact(
-                        package, exec: exec, refCounter: refCounter,
-                        excludingScope: scope.scopeIdentifier,
-                        excludingPack: pack.identifier
-                    )
-                    switch result {
-                    case .removed:
-                        artifacts.brewPackages.removeAll { $0 == package }
-                        output.dimmed("  Removed brew package: \(package)")
-                    case .stillNeeded:
-                        break
-                    case .failed:
-                        output.warn("  Could not remove brew package '\(package)' — will retry on next sync")
-                    }
-
-                case let .plugin(name):
-                    let result = removePluginArtifact(
-                        name, exec: exec, refCounter: refCounter,
-                        excludingScope: scope.scopeIdentifier,
-                        excludingPack: pack.identifier
-                    )
-                    switch result {
-                    case .removed:
-                        artifacts.plugins.removeAll { $0 == name }
-                        output.dimmed("  Removed plugin: \(PluginRef(name).bareName)")
-                    case .stillNeeded:
-                        break
-                    case .failed:
-                        output.warn("  Could not remove plugin '\(PluginRef(name).bareName)' — will retry on next sync")
-                    }
-
-                case let .gitignoreEntries(entries):
-                    let gitignoreManager = GitignoreManager(shell: shell)
-                    for entry in entries {
-                        let result = removeGitignoreArtifact(
-                            entry, gitignoreManager: gitignoreManager, refCounter: refCounter,
-                            excludingScope: scope.scopeIdentifier,
-                            excludingPack: pack.identifier
-                        )
-                        switch result {
-                        case .removed:
-                            artifacts.gitignoreEntries.removeAll { $0 == entry }
-                            output.dimmed("  Removed gitignore entry: \(entry)")
-                        case .stillNeeded, .failed:
-                            // Kept by another scope, or the helper already warned — either way
-                            // the claim stays on the record, as brew and plugins do here.
-                            break
-                        }
-                    }
-
-                case .shellCommand, .settingsMerge:
-                    // Shell command side effects cannot be automatically reversed.
-                    // Settings keys are handled by step 6 (composeSettings recomposes from current pack definitions).
-                    break
-                }
-            }
-
-            state.setArtifacts(artifacts, for: pack.identifier)
         }
     }
 
@@ -804,7 +676,6 @@ struct Configurator {
         state: inout ProjectState,
         builtInValues: [String: String],
         nonInteractiveValues: [String: String],
-        customize: Bool,
         reusePriorValuesSilently: Bool
     ) throws -> [String: String] {
         let priorValues = state.resolvedValues ?? [:]
@@ -826,7 +697,6 @@ struct Configurator {
             reusableValues: plan.reusableValues,
             newDeclaredKeys: plan.newKeys,
             visibleValueKeys: CrossPackPromptResolver.visibleValueKeys(in: plan.declared),
-            customize: customize,
             reusePriorValuesSilently: reusePriorValuesSilently
         )
         if seedFromPriors {
@@ -880,7 +750,6 @@ struct Configurator {
         removals: Set<String>,
         seededValues: [String: String],
         builtInValues: [String: String],
-        customize: Bool,
         reusePriorValuesSilently: Bool,
         reportWarnings: Bool
     ) -> (resolved: [String: String], unresolved: [UnresolvedPrompt]) {
@@ -894,7 +763,7 @@ struct Configurator {
         )
         let reuse = Self.priorReuse(
             hasReusable: !plan.reusableValues.isEmpty, hasNewKeys: !plan.newKeys.isEmpty,
-            customize: customize, interactive: false, silently: reusePriorValuesSilently
+            interactive: false, silently: reusePriorValuesSilently
         )
         return CrossPackPromptResolver.resolveNonInteractively(
             packs: packs, context: context, plan: plan,
@@ -908,17 +777,16 @@ struct Configurator {
     static func priorReuse(
         hasReusable: Bool,
         hasNewKeys: Bool,
-        customize: Bool,
         interactive: Bool,
         silently: Bool
     ) -> PriorReuse {
-        guard hasReusable, !customize else { return .skip }
+        guard hasReusable else { return .skip }
         return !interactive || silently || hasNewKeys ? .reuse : .askGate
     }
 
     /// Returns `true` when reusable priors should short-circuit the prompt executors.
     ///
-    /// `--customize` always re-asks. Non-interactive reuses with a dimmed one-line
+    /// Non-interactive reuses with a dimmed one-line
     /// acknowledgement (visible in CI logs, not loud). Interactive with new prompts
     /// added since last sync reuses old values and prompts only for the new ones.
     /// Interactive with only reusable prompts shows the key list (values masked —
@@ -930,12 +798,11 @@ struct Configurator {
         reusableValues: [String: String],
         newDeclaredKeys: Set<String>,
         visibleValueKeys: Set<String>,
-        customize: Bool,
         reusePriorValuesSilently: Bool
     ) -> Bool {
         let decision = Self.priorReuse(
             hasReusable: !reusableValues.isEmpty, hasNewKeys: !newDeclaredKeys.isEmpty,
-            customize: customize, interactive: output.hasInteractiveStdin, silently: reusePriorValuesSilently
+            interactive: output.hasInteractiveStdin, silently: reusePriorValuesSilently
         )
         guard decision != .skip else { return false }
 
@@ -969,22 +836,14 @@ struct Configurator {
         return output.askYesNo("Reuse these values?", default: true)
     }
 
-    /// Pre-load templates from disk (single read per pack), filtering excluded dependencies.
-    ///
-    /// Templates whose `dependencies` include an excluded component are filtered out,
-    /// so they won't appear in the CLAUDE file or artifact records.
+    /// Pre-load templates from disk (single read per pack).
     /// Results are cached for use in both artifact installation (step 5)
     /// and CLAUDE file composition (step 7).
-    private func preloadTemplates(
-        for packs: [any TechPack],
-        excludedComponents: [String: Set<String>]
-    ) -> [String: [TemplateContribution]] {
+    private func preloadTemplates(for packs: [any TechPack]) -> [String: [TemplateContribution]] {
         var preloadedTemplates: [String: [TemplateContribution]] = [:]
         for pack in packs {
             do {
-                let excluded = excludedComponents[pack.identifier] ?? []
                 preloadedTemplates[pack.identifier] = try pack.templates
-                    .excludingDependencies(on: excluded)
             } catch {
                 output.warn("Could not load templates for \(pack.displayName): \(error.localizedDescription)")
             }
@@ -1004,7 +863,6 @@ struct Configurator {
     private func installAndReconcileArtifacts(
         packs: [any TechPack],
         additions: Set<String>,
-        excludedComponents: [String: Set<String>],
         allValues: [String: String],
         preloadedTemplates: [String: [TemplateContribution]],
         state: inout ProjectState
@@ -1013,7 +871,6 @@ struct Configurator {
         var previousTemplateSections: [String: [String]] = [:]
 
         for pack in packs {
-            let excluded = excludedComponents[pack.identifier] ?? []
             let previousArtifacts = state.artifacts(for: pack.identifier)
 
             // Snapshot previous metadata before overwriting (needed by steps 6-7)
@@ -1026,7 +883,6 @@ struct Configurator {
             var artifacts = strategy.installArtifacts(
                 pack,
                 previousArtifacts: previousArtifacts,
-                excludedIDs: excluded,
                 resolvedValues: allValues,
                 preloadedTemplates: preloadedTemplates[pack.identifier],
                 executor: &exec,
@@ -1039,7 +895,6 @@ struct Configurator {
                 packID: pack.identifier
             )
             state.setArtifacts(artifacts, for: pack.identifier)
-            state.setExcludedComponents(excluded, for: pack.identifier)
             state.recordPack(pack.identifier)
         }
 
@@ -1395,10 +1250,9 @@ struct Configurator {
     // MARK: - Global Dependencies
 
     /// Auto-install brew packages and plugins (project scope only).
-    private func autoInstallGlobalDependencies(_ pack: any TechPack, excludedIDs: Set<String> = []) {
+    private func autoInstallGlobalDependencies(_ pack: any TechPack) {
         let exec = makeExecutor()
         for component in pack.components {
-            guard !excludedIDs.contains(component.id) else { continue }
             guard !ComponentExecutor.isAlreadyInstalled(component) else { continue }
 
             switch component.installAction {
