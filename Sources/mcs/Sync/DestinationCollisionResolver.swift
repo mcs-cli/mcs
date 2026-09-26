@@ -151,15 +151,8 @@ enum DestinationCollisionResolver {
                 else {
                     return component
                 }
-                return ComponentDefinition(
-                    id: component.id,
-                    displayName: component.displayName,
-                    description: component.description,
-                    type: component.type,
-                    packIdentifier: component.packIdentifier,
-                    hookRegistration: component.hookRegistration,
-                    installAction: .copyPackFile(source: source, destination: newDestination, fileType: fileType),
-                    supplementaryChecks: component.supplementaryChecks
+                return component.withInstallAction(
+                    .copyPackFile(source: source, destination: newDestination, fileType: fileType)
                 )
             }
             return CollisionResolvedTechPack(wrapping: pack, components: newComponents)
