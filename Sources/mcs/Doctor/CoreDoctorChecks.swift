@@ -13,7 +13,8 @@ import Foundation
 //   exists in another, by calling `Configurator.unconfigurePack` rather than re-implementing
 //   removal. The check must refuse the fix unless it can prove nothing is lost — see
 //   `ScopeDuplicationCheck`, which gates on the global scope having installed every component,
-//   prompt-answer parity, and the recorded hash of every file it would delete. Do not copy the pattern without the gates.
+//   prompt-answer parity, and the recorded hash of every file it would delete. Do not copy the
+//   pattern without the gates.
 // - **Re-sync**: A check derived from a component or from recorded artifacts is repaired by
 //   re-syncing its scope onto the packs already configured there (`DoctorRunner`, through
 //   `ScopeReapplier`). Its own `fix()` only supplies the hint shown when that is not possible.

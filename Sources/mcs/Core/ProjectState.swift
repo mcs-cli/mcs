@@ -132,8 +132,9 @@ struct ProjectState {
         var configuredPacks: [String] = []
         var packArtifacts: [String: PackArtifactRecord] = [:]
         /// Written by the removed `--customize` flag; read once so sync can announce the
-        /// components it now installs, then cleared.
-        var excludedComponents: [String: [String]]?
+        /// components it now installs, then cleared. Optional so a file without it still decodes,
+        /// but always written (empty by default) because older releases fail to decode without it.
+        var excludedComponents: [String: [String]]? = [:]
         /// Template placeholder values resolved during the last sync.
         /// Used by doctor to re-render expected sections for content-hash comparison.
         var resolvedValues: [String: String]?
@@ -209,7 +210,6 @@ struct ProjectState {
     }
 
     mutating func clearLegacyExcludedComponents() {
-        // Emptied rather than removed: older releases fail to decode a state file without the key.
         storage.excludedComponents = [:]
     }
 
