@@ -28,11 +28,22 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
     var yes = false
 
+    /// Kept only to explain its removal instead of "Unknown option"; retire with #437 (b).
+    @Flag(name: .long, help: .hidden)
+    var customize = false
+
     var skipLock: Bool {
         dryRun
     }
 
     func validate() throws {
+        if customize {
+            throw ValidationError("""
+            --customize has been removed: a pack now installs every component it declares.
+            To install fewer components, fork the pack or write your own.
+            See https://github.com/mcs-cli/mcs/blob/main/docs/troubleshooting.md#components-you-excluded-are-installed-after-upgrading
+            """)
+        }
         if prune, pack.isEmpty || all {
             throw ValidationError("--prune requires --pack and cannot be combined with --all.")
         }
