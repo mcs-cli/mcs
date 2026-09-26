@@ -422,3 +422,68 @@ struct ListPacksJSONTests {
         #expect(object["status"] as? String == "missing")
     }
 }
+
+// MARK: - RemovePack scope bookkeeping
+
+struct RemovePackScopeTests {
+    private let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/unused-index.yaml"))
+
+    private func packs(at path: String, in data: ProjectIndex.IndexData) -> [String]? {
+        data.projects.first { $0.path == path }?.packs
+    }
+
+    @Test("A failed global scope keeps its claim while a cleaned project loses it")
+    func failedGlobalKeepsClaim() {
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: ProjectIndex.globalSentinel, packIDs: ["p"], in: &data)
+        index.upsert(projectPath: "/a", packIDs: ["p", "q"], in: &data)
+
+        RemovePack.pruneIndexClaims("p", keeping: [ProjectIndex.globalSentinel], stalePaths: [], index: index, in: &data)
+
+        #expect(packs(at: ProjectIndex.globalSentinel, in: data) == ["p"])
+        #expect(packs(at: "/a", in: data) == ["q"])
+    }
+
+    @Test("A failed project keeps its claim while the cleaned global scope loses it")
+    func failedProjectKeepsClaim() {
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: ProjectIndex.globalSentinel, packIDs: ["p"], in: &data)
+        index.upsert(projectPath: "/a", packIDs: ["p", "q"], in: &data)
+
+        RemovePack.pruneIndexClaims("p", keeping: ["/a"], stalePaths: [], index: index, in: &data)
+
+        #expect(packs(at: ProjectIndex.globalSentinel, in: data) == nil)
+        #expect(packs(at: "/a", in: data) == ["p", "q"])
+    }
+
+    @Test("Stale paths are pruned while a failed live project keeps its claim")
+    func stalePrunedFailedKept() {
+        var data = ProjectIndex.IndexData()
+        index.upsert(projectPath: "/stale", packIDs: ["p"], in: &data)
+        index.upsert(projectPath: "/a", packIDs: ["p"], in: &data)
+
+        RemovePack.pruneIndexClaims("p", keeping: ["/a"], stalePaths: ["/stale"], index: index, in: &data)
+
+        #expect(packs(at: "/stale", in: data) == nil)
+        #expect(packs(at: "/a", in: data) == ["p"])
+    }
+
+    @Test("Discovery refuses to guess when the global state or the index can't be read")
+    func unreadableScopeFilesThrow() throws {
+        let home = try makeTmpDir(label: "remove-scopes")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+        try FileManager.default.createDirectory(at: env.mcsDirectory, withIntermediateDirectories: true)
+
+        try "{ not json".write(to: env.globalStateFile, atomically: true, encoding: .utf8)
+        #expect { try RemovePack.affectedScopes("p", env: env) } throws: { error in
+            (error as? RemovePack.ScopeReadError)?.file == env.globalStateFile
+        }
+
+        try FileManager.default.removeItem(at: env.globalStateFile)
+        try "projects: [unterminated".write(to: env.projectsIndexFile, atomically: true, encoding: .utf8)
+        #expect { try RemovePack.affectedScopes("p", env: env) } throws: { error in
+            (error as? RemovePack.ScopeReadError)?.file == env.projectsIndexFile
+        }
+    }
+}

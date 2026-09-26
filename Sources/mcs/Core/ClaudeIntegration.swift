@@ -5,9 +5,9 @@ protocol ClaudeCLI: Sendable {
     /// Whether the Claude CLI is available on the system.
     var isAvailable: Bool { get }
     @discardableResult
-    func mcpAdd(name: String, scope: String, arguments: [String]) -> ShellResult
+    func mcpAdd(name: String, scope: String, arguments: [String], workingDirectory: URL?) -> ShellResult
     @discardableResult
-    func mcpRemove(name: String, scope: String) -> ShellResult
+    func mcpRemove(name: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginMarketplaceAdd(repo: String) -> ShellResult
     @discardableResult
@@ -32,30 +32,36 @@ struct ClaudeIntegration: ClaudeCLI {
     // MARK: - MCP Servers
 
     /// Add an MCP server (removes existing entry first for idempotence).
+    ///
+    /// `workingDirectory` picks the project a `local`- or `project`-scoped server belongs to:
+    /// the CLI keys those scopes by the directory it runs in.
     @discardableResult
     func mcpAdd(
         name: String,
         scope: String = "local",
-        arguments: [String] = []
+        arguments: [String] = [],
+        workingDirectory: URL? = nil
     ) -> ShellResult {
         // Remove first to avoid "already exists" errors
-        mcpRemove(name: name, scope: scope)
+        mcpRemove(name: name, scope: scope, workingDirectory: workingDirectory)
 
         var args = ["mcp", "add", "-s", scope, name]
         args.append(contentsOf: arguments)
         return shell.run(
             Constants.CLI.env,
             arguments: [Constants.CLI.claudeCommand] + args,
+            workingDirectory: workingDirectory?.path,
             additionalEnvironment: claudeEnv
         )
     }
 
-    /// Remove an MCP server.
+    /// Remove an MCP server. See `mcpAdd` for how `workingDirectory` selects the project.
     @discardableResult
-    func mcpRemove(name: String, scope: String = "local") -> ShellResult {
+    func mcpRemove(name: String, scope: String = "local", workingDirectory: URL? = nil) -> ShellResult {
         shell.run(
             Constants.CLI.env,
             arguments: [Constants.CLI.claudeCommand, "mcp", "remove", "-s", scope, name],
+            workingDirectory: workingDirectory?.path,
             additionalEnvironment: claudeEnv
         )
     }

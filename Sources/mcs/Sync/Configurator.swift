@@ -396,12 +396,18 @@ struct Configurator {
     ///     Pass `ProjectIndex.packRemoveSentinel` when removing a pack from
     ///     all scopes (e.g. `mcs pack remove`) so the ref counter excludes
     ///     every scope. Defaults to `nil` (uses `scope.scopeIdentifier`).
+    ///   - retryHint: Command named in the leftover-artifacts warning. Defaults to
+    ///     `scope.syncHint`; `mcs pack remove` passes its own, because a sync would keep the pack.
+    /// - Returns: `false` when some artifacts could not be removed and remain recorded in `state`.
+    @discardableResult
     func unconfigurePack(
         _ packID: String,
         state: inout ProjectState,
-        refCountScope: String? = nil
-    ) {
+        refCountScope: String? = nil,
+        retryHint: String? = nil
+    ) -> Bool {
         let suffix = scope.labelSuffix
+        let retryHint = retryHint ?? scope.syncHint
         output.info("Removing \(packID)\(suffix)...")
         let exec = makeExecutor()
 
@@ -409,7 +415,7 @@ struct Configurator {
             output.dimmed("No artifact record for \(packID) — skipping")
             state.removePack(packID)
             pruneOrphanResolvedValues(state: &state)
-            return
+            return true
         }
 
         var remaining = artifacts
@@ -432,9 +438,8 @@ struct Configurator {
             switch result {
             case .removed, .stillNeeded:
                 removedBrewPackages.insert(package)
-                if case .removed = result { output.dimmed("  Removed brew package: \(package)") }
             case .failed:
-                output.warn("  Could not remove brew package '\(package)' — will retry on next sync")
+                output.warn("  Could not remove brew package '\(package)' — re-run '\(retryHint)' to retry")
             }
         }
         remaining.brewPackages.removeAll { removedBrewPackages.contains($0) }
@@ -447,9 +452,8 @@ struct Configurator {
             switch result {
             case .removed, .stillNeeded:
                 removedPlugins.insert(pluginName)
-                if case .removed = result { output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)") }
             case .failed:
-                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — will retry on next sync")
+                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — re-run '\(retryHint)' to retry")
             }
         }
         remaining.plugins.removeAll { removedPlugins.contains($0) }
@@ -458,7 +462,6 @@ struct Configurator {
         for server in artifacts.mcpServers
             where removeMCPServerArtifact(server, exec: exec) {
             removedServers.insert(server)
-            output.dimmed("  Removed MCP server: \(server.name)")
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
 
@@ -484,8 +487,8 @@ struct Configurator {
                 output.warn("Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
                 output.warn("Settings for \(packID) were not cleaned up. Fix the file and re-run.")
                 state.setArtifacts(remaining, for: packID)
-                output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(scope.syncHint)' to retry.")
-                return
+                output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
+                return false
             }
             if hasHooksToRemove {
                 let commandsToRemove = Set(artifacts.hookCommands)
@@ -569,13 +572,15 @@ struct Configurator {
             remaining.gitignoreEntries.removeAll { removedEntries.contains($0) }
         }
 
-        if remaining.isEmpty {
+        let fullyRemoved = remaining.isEmpty
+        if fullyRemoved {
             state.removePack(packID)
         } else {
             state.setArtifacts(remaining, for: packID)
-            output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(scope.syncHint)' to retry.")
+            output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
         }
         pruneOrphanResolvedValues(state: &state)
+        return fullyRemoved
     }
 
     /// Drop `state.resolvedValues` entries whose keys no currently-configured pack declares as a
@@ -959,13 +964,9 @@ struct Configurator {
 
         // MCP servers (catches both removals and scope changes — MCPServerRef hashes on name+scope)
         let staleMCPs = Set(previous.mcpServers).subtracting(currentArtifacts.mcpServers)
-        for server in staleMCPs {
-            if removeMCPServerArtifact(server, exec: exec) {
-                output.dimmed("  Removed stale MCP server: \(server.name) (scope: \(server.scope))")
-            } else {
-                currentArtifacts.mcpServers.append(server)
-                output.warn("  Could not remove stale MCP server '\(server.name)' — will retry on next sync")
-            }
+        for server in staleMCPs where !removeMCPServerArtifact(server, exec: exec) {
+            currentArtifacts.mcpServers.append(server)
+            output.warn("  Could not remove stale MCP server '\(server.name)' — will retry on next sync")
         }
 
         // Files (also reconcile fileHashes to prevent stale content-drift warnings)
@@ -1035,9 +1036,7 @@ struct Configurator {
                     excludingScope: scope.scopeIdentifier, excludingPack: packID
                 )
                 switch result {
-                case .removed:
-                    output.dimmed("  Removed stale brew package: \(package)")
-                case .stillNeeded:
+                case .removed, .stillNeeded:
                     break
                 case .failed:
                     currentArtifacts.brewPackages.append(package)
@@ -1050,9 +1049,7 @@ struct Configurator {
                     excludingScope: scope.scopeIdentifier, excludingPack: packID
                 )
                 switch result {
-                case .removed:
-                    output.dimmed("  Removed stale plugin: \(PluginRef(name).bareName)")
-                case .stillNeeded:
+                case .removed, .stillNeeded:
                     break
                 case .failed:
                     currentArtifacts.plugins.append(name)
@@ -1144,8 +1141,8 @@ struct Configurator {
         case failed
     }
 
-    /// Remove a single MCP server.
-    /// - Returns: `true` if the server was successfully removed.
+    /// Remove a single MCP server. The executor logs the outcome.
+    /// - Returns: `true` if the server is no longer registered.
     private func removeMCPServerArtifact(
         _ server: MCPServerRef,
         exec: ComponentExecutor
@@ -1272,7 +1269,8 @@ struct Configurator {
 
     private func makeExecutor() -> ComponentExecutor {
         ComponentExecutor(
-            environment: environment, output: output, shell: shell, claudeCLI: claudeCLI
+            environment: environment, output: output, shell: shell, claudeCLI: claudeCLI,
+            mcpWorkingDirectory: scope.mcpWorkingDirectory
         )
     }
 }

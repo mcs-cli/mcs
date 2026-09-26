@@ -6,6 +6,7 @@ struct ComponentExecutor {
     let output: CLIOutput
     let shell: any ShellRunning
     let claudeCLI: any ClaudeCLI
+    var mcpWorkingDirectory: URL?
 
     // MARK: - Brew Packages
 
@@ -45,7 +46,9 @@ struct ComponentExecutor {
             args.append(contentsOf: config.args)
         }
 
-        let result = claudeCLI.mcpAdd(name: config.name, scope: config.resolvedScope, arguments: args)
+        let result = claudeCLI.mcpAdd(
+            name: config.name, scope: config.resolvedScope, arguments: args, workingDirectory: mcpWorkingDirectory
+        )
         return result.succeeded
     }
 
@@ -62,22 +65,30 @@ struct ComponentExecutor {
         return result.succeeded
     }
 
-    /// Uninstall a Homebrew package. Returns `true` if removal succeeded or package was already gone.
+    /// Uninstall a Homebrew package and log the outcome.
+    /// Returns `true` when the package is no longer installed, including when it already wasn't.
     func uninstallBrewPackage(_ package: String) -> Bool {
         let brew = Homebrew(shell: shell, environment: environment)
+        // Without Homebrew the package cannot exist; a `false` here would block `mcs pack remove` forever.
         guard brew.isInstalled else {
-            output.warn("Homebrew not found, cannot uninstall '\(package)'")
+            output.dimmed("  Homebrew not found — treating brew package '\(package)' as not installed")
+            return true
+        }
+        guard brew.isPackageInstalled(package) else {
+            output.dimmed("  Brew package '\(package)' is not installed — dropping it from tracking")
+            return true
+        }
+        let result = brew.uninstall(package)
+        guard result.succeeded else {
+            output.warn("Could not uninstall brew package '\(package)': \(String(result.stderr.prefix(200)))")
             return false
         }
-        guard brew.isPackageInstalled(package) else { return true }
-        let result = brew.uninstall(package)
-        if !result.succeeded {
-            output.warn("Could not uninstall brew package '\(package)': \(String(result.stderr.prefix(200)))")
-        }
-        return result.succeeded
+        output.dimmed("  Removed brew package: \(package)")
+        return true
     }
 
-    /// Remove a plugin via the Claude CLI. Returns `true` if removal succeeded.
+    /// Remove a plugin via the Claude CLI and log the outcome.
+    /// Returns `true` when the plugin is no longer installed, including when it already wasn't.
     func removePlugin(_ fullName: String) -> Bool {
         guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, cannot remove plugin")
@@ -85,10 +96,17 @@ struct ComponentExecutor {
         }
         let ref = PluginRef(fullName)
         let result = claudeCLI.pluginRemove(ref: ref)
-        if !result.succeeded {
-            output.warn("Could not remove plugin '\(ref.bareName)': \(result.stderr)")
+        // Plugins are installed at user scope, so "not found" is reliable from any directory.
+        if result.stderr.contains(Constants.CLI.pluginNotFound) {
+            output.dimmed("  Plugin '\(ref.bareName)' is not installed — dropping it from tracking")
+            return true
         }
-        return result.succeeded
+        guard result.succeeded else {
+            output.warn("Could not remove plugin '\(ref.bareName)': \(result.stderr)")
+            return false
+        }
+        output.dimmed("  Removed plugin: \(ref.bareName)")
+        return true
     }
 
     // MARK: - Gitignore
@@ -331,15 +349,23 @@ struct ComponentExecutor {
         try fm.copyItem(at: source, to: destination)
     }
 
-    /// Remove an MCP server by name and scope.
-    /// Returns `true` if removal succeeded.
+    /// Remove an MCP server by name and scope, and log the outcome.
+    /// Returns `true` if the server is no longer registered, including when it was already gone.
     @discardableResult
     func removeMCPServer(name: String, scope: String) -> Bool {
-        let result = claudeCLI.mcpRemove(name: name, scope: scope)
-        if !result.succeeded {
-            output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
+        let result = claudeCLI.mcpRemove(name: name, scope: scope, workingDirectory: mcpWorkingDirectory)
+        // A server removed out of band would otherwise fail every retry of `mcs pack remove`. Trusting
+        // "not found" relies on `mcpWorkingDirectory` pointing the CLI at this scope's project.
+        if result.stderr.contains(Constants.CLI.mcpServerNotFound) {
+            output.dimmed("  MCP server '\(name)' is not registered in \(scope) scope — dropping it from tracking")
+            return true
         }
-        return result.succeeded
+        guard result.succeeded else {
+            output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
+            return false
+        }
+        output.dimmed("  Removed MCP server: \(name) (scope: \(scope))")
+        return true
     }
 
     /// Compute and record a SHA-256 hash for a just-installed file.
