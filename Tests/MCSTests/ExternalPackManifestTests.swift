@@ -2402,7 +2402,7 @@ struct ExternalPackManifestTests {
         #expect(normalizedConfig.name == "serena")
     }
 
-    // MARK: - Shorthand: shorthand with all optional component fields
+    // MARK: - Shorthand: deprecated keys alongside other optional component fields
 
     @Test("Shorthand component with deprecated keys, hook metadata, and doctorChecks")
     func shorthandWithOptionalFields() throws {

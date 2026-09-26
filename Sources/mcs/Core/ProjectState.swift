@@ -209,7 +209,8 @@ struct ProjectState {
     }
 
     mutating func clearLegacyExcludedComponents() {
-        storage.excludedComponents = nil
+        // Emptied rather than removed: older releases fail to decode a state file without the key.
+        storage.excludedComponents = [:]
     }
 
     // MARK: - Resolved Values

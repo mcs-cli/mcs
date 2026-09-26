@@ -213,6 +213,26 @@ private struct LifecycleTestBed {
         try ProjectState(stateFile: env.globalStateFile)
     }
 
+    var projectStateFile: URL {
+        project
+            .appendingPathComponent(Constants.FileNames.claudeDirectory)
+            .appendingPathComponent(Constants.FileNames.mcsProject)
+    }
+
+    /// Writes the key the removed `--customize` flag used to persist; `ProjectState` has no setter for it.
+    func seedLegacyExclusions(_ exclusions: [String: [String]], in stateFile: URL) throws {
+        var json = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
+        )
+        json["excludedComponents"] = exclusions
+        try JSONSerialization.data(withJSONObject: json).write(to: stateFile)
+    }
+
+    func storedLegacyExclusions(in stateFile: URL) throws -> Any? {
+        let json = try JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
+        return json?["excludedComponents"]
+    }
+
     func settingsEnv() throws -> [String: Any] {
         let data = try Data(contentsOf: settingsLocalPath)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
@@ -967,12 +987,45 @@ struct PackUpdateTemplateTests {
 // MARK: - Scenario 4: Exclusions Stored by the Removed --customize Flag
 
 struct LegacyExclusionMigrationTests {
-    @Test("A component stored as excluded is installed on the next sync and the stored key is dropped")
+    @Test("A component stored as excluded is installed on the next sync and the stored exclusion is cleared")
     func legacyExclusionIsInstalledAndCleared() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        let pack = try MockTechPack(
+        let pack = try hookPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let hookFile = try excludeInstalledHook(bed: bed)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(FileManager.default.fileExists(atPath: hookFile.path))
+        #expect(try clearedButPresent(bed: bed))
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
+    }
+
+    @Test("Doctor fails a component stored as excluded until --fix re-syncs it and drops the exclusion")
+    func doctorFixInstallsLegacyExclusion() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try hookPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        let hookFile = try excludeInstalledHook(bed: bed)
+
+        #expect(try bed.runDoctor(registry: registry).issues > 0)
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        #expect(try runner.run().isHealthy)
+        #expect(FileManager.default.fileExists(atPath: hookFile.path))
+        #expect(try clearedButPresent(bed: bed))
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
+    }
+
+    private func hookPack(bed: LifecycleTestBed) throws -> MockTechPack {
+        try MockTechPack(
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
@@ -983,30 +1036,21 @@ struct LegacyExclusionMigrationTests {
                 ),
             ]
         )
-        let registry = TechPackRegistry(packs: [pack])
-        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+    }
 
-        // Recreate what an older mcs left behind: the component excluded and never installed.
+    /// Recreates what an older mcs left behind: the component excluded and never installed.
+    private func excludeInstalledHook(bed: LifecycleTestBed) throws -> URL {
         let hookFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookA.sh")
         try FileManager.default.removeItem(at: hookFile)
-        let stateFile = bed.project
-            .appendingPathComponent(Constants.FileNames.claudeDirectory)
-            .appendingPathComponent(Constants.FileNames.mcsProject)
-        var json = try #require(
-            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
-        )
-        json["excludedComponents"] = ["my-pack": ["my-pack.hookA"]]
-        try JSONSerialization.data(withJSONObject: json).write(to: stateFile)
+        try bed.seedLegacyExclusions(["my-pack": ["my-pack.hookA"]], in: bed.projectStateFile)
         #expect(try bed.projectState().legacyExcludedComponents == ["my-pack": ["my-pack.hookA"]])
+        return hookFile
+    }
 
-        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
-
-        #expect(FileManager.default.fileExists(atPath: hookFile.path))
-        let saved = try #require(
-            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
-        )
-        #expect(saved["excludedComponents"] == nil)
-        #expect(try bed.runDoctor(registry: registry).issues == 0)
+    /// Older releases require the key, so clearing must leave it in place, empty.
+    private func clearedButPresent(bed: LifecycleTestBed) throws -> Bool {
+        let stored = try bed.storedLegacyExclusions(in: bed.projectStateFile) as? [String: Any]
+        return stored?.isEmpty == true
     }
 }
 
@@ -2919,6 +2963,27 @@ struct ScopeDuplicationCheckTests {
     }
 
     // MARK: Fixability gates
+
+    @Test("Refuses to fix while the global scope still holds components an older release excluded")
+    func blocksFixOnIncompleteGlobalScope() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = try duplicatingPack(bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+        try bed.seedLegacyExclusions(["dup-pack": ["dup-pack.hookA"]], in: bed.env.globalStateFile)
+
+        let check = try #require(checks(bed: bed, registry: registry).first)
+        #expect(check.fixCommandPreview == nil)
+        let result = check.fix()
+        guard case let .notFixable(reason) = result else {
+            Issue.record("Expected .notFixable, got \(result)")
+            return
+        }
+        #expect(reason.contains("mcs sync --global"))
+        #expect(try bed.projectState().configuredPacks.contains("dup-pack"))
+    }
 
     @Test("Refuses to fix when the two scopes answered a prompt differently")
     func blocksFixOnDivergentPromptAnswers() throws {

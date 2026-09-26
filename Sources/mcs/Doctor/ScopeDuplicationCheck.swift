@@ -19,9 +19,9 @@ struct ScopeDuplicationCheck: DoctorCheck {
 
     /// Computed once by `checks(...)` and reused by `check()` and `fixCommandPreview`, which the
     /// runner reads four times in total within one pass. Diagnosing is not free — two state
-    /// decodes and a hash of every installed file — and nothing mutates
-    /// project state between those reads. `fix()` re-derives instead, because the user is prompted
-    /// in between and the filesystem may have moved on.
+    /// decodes and a hash of every installed file — and nothing mutates project state between
+    /// those reads. `fix()` re-derives instead, because the user is prompted in between and the
+    /// filesystem may have moved on.
     private let diagnosis: Diagnosis
 
     var name: String {
@@ -176,7 +176,8 @@ struct ScopeDuplicationCheck: DoctorCheck {
 
         // First obstacle wins — each gate names something the user must resolve before the
         // project copy can be removed without losing anything.
-        let blocked = divergentPromptObstacle(inputs)
+        let blocked = incompleteGlobalObstacle(inputs)
+            ?? divergentPromptObstacle(inputs)
             ?? editedFileObstacle(inputs)
 
         return .duplicated(
@@ -225,6 +226,13 @@ struct ScopeDuplicationCheck: DoctorCheck {
     }
 
     // MARK: - Obstacles to a lossless removal
+
+    /// Components an older release excluded globally stay uninstalled there until a global sync,
+    /// so the project copy may be the only one.
+    private static func incompleteGlobalObstacle(_ inputs: Inputs) -> String? {
+        guard inputs.globalState.legacyExcludedComponents[inputs.packID]?.isEmpty == false else { return nil }
+        return "run 'mcs sync --global' first — the global scope has not installed every component yet"
+    }
 
     /// Both scopes must have answered the pack's prompts identically, or removal would silently
     /// switch this project onto the global answer. The project's key set is used deliberately — a

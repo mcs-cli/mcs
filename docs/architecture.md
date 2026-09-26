@@ -281,6 +281,7 @@ Individual checks resolve component presence through two tiers:
 
 1. **Project path**: when packs are resolved from project scope, checks look in `<project>/.claude/` first (e.g., `<project>/.claude/skills/my-skill.md`)
 2. **Global fallback**: if not found at project scope, checks fall back to `~/.claude/` (covers globally-installed components)
+
 MCP server checks follow the same pattern: project-scoped entries (`projects[path].mcpServers` in `~/.claude.json`) are checked before global entries (`mcpServers`).
 
 Settings-reading checks do too. `PluginCheck` and the pack-declared `hookEventExists` / `settingsKeyEquals` checks read `<project>/.claude/settings.local.json` before `~/.claude/settings.json`, which mirrors Claude Code's own precedence — so they report on the configuration actually in effect rather than on one file in isolation. Doctor output names the file that answered, and a settings file that exists but cannot be parsed is always surfaced rather than skipped silently.
