@@ -4173,11 +4173,8 @@ struct DroppedDirectoryFileTests {
 // MARK: - Pack remove cleanup failure (Issue #409)
 
 struct PackRemoveCleanupFailureTests {
-    @Test("A scope left with artifacts is reported and can be retried")
-    func failedGlobalCleanupIsReportedAndRetryable() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
+    /// Configure a hook pack in both scopes, so each scope has settings `unconfigurePack` must rewrite.
+    private func configureHookPack(bed: LifecycleTestBed) throws -> TechPackRegistry {
         let hookSource = try bed.makeHookSource(name: "lint.sh")
         let pack = MockTechPack(
             identifier: "hook-pack",
@@ -4189,30 +4186,98 @@ struct PackRemoveCleanupFailureTests {
         )
         let registry = TechPackRegistry(packs: [pack])
         try configureBothScopes(bed: bed, pack: pack, registry: registry)
+        #expect(try bed.globalState().configuredPacks.contains("hook-pack"))
+        #expect(try bed.projectState().configuredPacks.contains("hook-pack"))
+        return registry
+    }
+
+    private func unconfigureScopes(
+        bed: LifecycleTestBed, registry: TechPackRegistry, projectPaths: [String]
+    ) -> [String] {
+        RemovePack.unconfigureScopes(
+            "hook-pack",
+            globallyConfigured: true,
+            projectPaths: projectPaths,
+            registry: registry,
+            env: bed.env,
+            shell: ShellRunner(environment: bed.env),
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+
+    @Test("A scope left with artifacts is reported and can be retried")
+    func failedGlobalCleanupIsReportedAndRetryable() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let registry = try configureHookPack(bed: bed)
 
         let settings = try String(contentsOf: bed.env.claudeSettings, encoding: .utf8)
         try "{ not json".write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
 
-        let unconfigure = { (projectPaths: [String]) in
-            RemovePack.unconfigureScopes(
-                "hook-pack",
-                globallyConfigured: true,
-                projectPaths: projectPaths,
-                registry: registry,
-                env: bed.env,
-                shell: ShellRunner(environment: bed.env),
-                output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
-            )
-        }
-
-        #expect(unconfigure([bed.project.path]) == [ProjectIndex.globalSentinel])
+        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: [bed.project.path])
+            == [ProjectIndex.globalSentinel])
         #expect(try bed.globalState().artifacts(for: "hook-pack")?.hookCommands.isEmpty == false)
         #expect(try !bed.projectState().configuredPacks.contains("hook-pack"))
 
         try settings.write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
 
         // The first run pruned the project's index claim, so a retry only reaches the global scope.
-        #expect(unconfigure([]) == [])
+        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: []) == [])
         #expect(try !bed.globalState().configuredPacks.contains("hook-pack"))
+    }
+
+    @Test("A failed project scope is reported by the exact path the index holds")
+    func failedProjectScopeIsReportedByIndexPath() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let registry = try configureHookPack(bed: bed)
+
+        let projectSettings = bed.project.appendingPathComponent(".claude/settings.local.json")
+        try "{ not json".write(to: projectSettings, atomically: true, encoding: .utf8)
+
+        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: [bed.project.path])
+            == [bed.project.path])
+        #expect(try bed.projectState().artifacts(for: "hook-pack")?.hookCommands.isEmpty == false)
+        #expect(try !bed.globalState().configuredPacks.contains("hook-pack"))
+    }
+
+    @Test("A failed MCP removal is kept for retry, and a server already gone counts as removed")
+    func mcpRemovalFailureAndAlreadyGone() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "mcp-pack",
+            displayName: "MCP Pack",
+            components: [bed.mcpComponent(pack: "mcp-pack", id: "server", name: "test-mcp")]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let unconfigure = {
+            var state = try bed.projectState()
+            let removed = bed.makeConfigurator(registry: registry).unconfigurePack(
+                "mcp-pack", state: &state, refCountScope: ProjectIndex.packRemoveSentinel
+            )
+            try state.save()
+            return removed
+        }
+
+        bed.mockCLI.result = ShellResult(exitCode: 1, stdout: "", stderr: "connection refused")
+        #expect(try unconfigure() == false)
+        #expect(try bed.projectState().artifacts(for: "mcp-pack")?.mcpServers.map(\.name) == ["test-mcp"])
+
+        bed.mockCLI.result = ShellResult(
+            exitCode: 1, stdout: "", stderr: "No MCP server named \"test-mcp\" in local scope"
+        )
+        #expect(try unconfigure() == true)
+        #expect(try !bed.projectState().configuredPacks.contains("mcp-pack"))
+
+        // The test process runs outside the sandbox project, so this only holds if every call is
+        // pointed at the project; otherwise "not found" would describe the wrong project.
+        #expect(!bed.mockCLI.mcpAddCalls.isEmpty)
+        #expect(bed.mockCLI.mcpAddCalls.allSatisfy { $0.workingDirectory == bed.project })
+        #expect(bed.mockCLI.mcpRemoveCalls.count == 2)
+        #expect(bed.mockCLI.mcpRemoveCalls.allSatisfy { $0.workingDirectory == bed.project })
     }
 }

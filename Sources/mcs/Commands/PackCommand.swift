@@ -206,6 +206,7 @@ struct RemovePack: LockedCommand {
         )
 
         // 6. Update project index — failed scopes keep their claim so ref counting still sees them
+        let indexUpdated: Bool
         do {
             var updatedIndex = try indexFile.load()
             for projectEntry in indexFile.projects(withPack: identifier, in: updatedIndex)
@@ -216,16 +217,19 @@ struct RemovePack: LockedCommand {
                 indexFile.remove(projectPath: stalePath, from: &updatedIndex)
             }
             try indexFile.save(updatedIndex)
+            indexUpdated = true
         } catch {
             ctx.output.error("Could not update project index: \(error.localizedDescription)")
-            ctx.output.error("Run 'mcs sync' to reconcile, or manually edit ~/.mcs/projects.yaml")
+            indexUpdated = false
         }
 
         // The registry entry and checkout stay so re-running the command can finish the job.
-        guard failedScopes.isEmpty else {
-            ctx.output.error("Pack '\(entry.displayName)' was not fully removed from:")
-            for scope in failedScopes {
-                ctx.output.plain("  \(Self.scopeDisplayName(scope))")
+        guard failedScopes.isEmpty, indexUpdated else {
+            if !failedScopes.isEmpty {
+                ctx.output.error("Pack '\(entry.displayName)' was not fully removed from:")
+                for scope in failedScopes {
+                    ctx.output.plain("  \(Self.scopeDisplayName(scope))")
+                }
             }
             ctx.output.error("Fix the errors above and re-run 'mcs pack remove \(identifier)'.")
             throw ExitCode.failure
@@ -276,14 +280,14 @@ struct RemovePack: LockedCommand {
                     registry: registry,
                     strategy: strategy
                 )
-                let removed = configurator.unconfigurePack(
+                let fullyRemoved = configurator.unconfigurePack(
                     packID,
                     state: &state,
                     refCountScope: ProjectIndex.packRemoveSentinel,
                     retryHint: "mcs pack remove \(packID)"
                 )
                 try state.save()
-                if !removed { failed.append(scopeID) }
+                if !fullyRemoved { failed.append(scopeID) }
             } catch {
                 output.warn("Cleanup for \(scopeDisplayName(scopeID)) failed: \(error.localizedDescription)")
                 failed.append(scopeID)

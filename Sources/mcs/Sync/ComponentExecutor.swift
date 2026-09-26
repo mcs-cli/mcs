@@ -6,6 +6,7 @@ struct ComponentExecutor {
     let output: CLIOutput
     let shell: any ShellRunning
     let claudeCLI: any ClaudeCLI
+    var mcpWorkingDirectory: URL?
 
     // MARK: - Brew Packages
 
@@ -45,7 +46,9 @@ struct ComponentExecutor {
             args.append(contentsOf: config.args)
         }
 
-        let result = claudeCLI.mcpAdd(name: config.name, scope: config.resolvedScope, arguments: args)
+        let result = claudeCLI.mcpAdd(
+            name: config.name, scope: config.resolvedScope, arguments: args, workingDirectory: mcpWorkingDirectory
+        )
         return result.succeeded
     }
 
@@ -332,14 +335,17 @@ struct ComponentExecutor {
     }
 
     /// Remove an MCP server by name and scope.
-    /// Returns `true` if removal succeeded.
+    /// Returns `true` if the server is no longer registered, including when it was already gone.
     @discardableResult
     func removeMCPServer(name: String, scope: String) -> Bool {
-        let result = claudeCLI.mcpRemove(name: name, scope: scope)
-        if !result.succeeded {
-            output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
+        let result = claudeCLI.mcpRemove(name: name, scope: scope, workingDirectory: mcpWorkingDirectory)
+        // A server removed out of band would otherwise fail every retry of `mcs pack remove`. Trusting
+        // "not found" relies on `mcpWorkingDirectory` pointing the CLI at this scope's project.
+        if result.succeeded || result.stderr.contains(Constants.CLI.mcpServerNotFound) {
+            return true
         }
-        return result.succeeded
+        output.warn("Could not remove MCP server '\(name)' (scope: \(scope)): \(result.stderr)")
+        return false
     }
 
     /// Compute and record a SHA-256 hash for a just-installed file.

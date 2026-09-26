@@ -7,11 +7,13 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
         let name: String
         let scope: String
         let arguments: [String]
+        var workingDirectory: URL?
     }
 
     struct MCPRemoveCall: Equatable {
         let name: String
         let scope: String
+        var workingDirectory: URL?
     }
 
     var isAvailable: Bool {
@@ -25,14 +27,16 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     var result = ShellResult(exitCode: 0, stdout: "", stderr: "")
 
     @discardableResult
-    func mcpAdd(name: String, scope: String, arguments: [String]) -> ShellResult {
-        mcpAddCalls.append(MCPAddCall(name: name, scope: scope, arguments: arguments))
+    func mcpAdd(name: String, scope: String, arguments: [String], workingDirectory: URL?) -> ShellResult {
+        mcpAddCalls.append(MCPAddCall(
+            name: name, scope: scope, arguments: arguments, workingDirectory: workingDirectory
+        ))
         return result
     }
 
     @discardableResult
-    func mcpRemove(name: String, scope: String) -> ShellResult {
-        mcpRemoveCalls.append(MCPRemoveCall(name: name, scope: scope))
+    func mcpRemove(name: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        mcpRemoveCalls.append(MCPRemoveCall(name: name, scope: scope, workingDirectory: workingDirectory))
         return result
     }
 

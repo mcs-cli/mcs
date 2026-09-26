@@ -440,7 +440,7 @@ struct Configurator {
                 removedBrewPackages.insert(package)
                 if case .removed = result { output.dimmed("  Removed brew package: \(package)") }
             case .failed:
-                output.warn("  Could not remove brew package '\(package)' — will retry on next sync")
+                output.warn("  Could not remove brew package '\(package)' — re-run '\(retryHint)' to retry")
             }
         }
         remaining.brewPackages.removeAll { removedBrewPackages.contains($0) }
@@ -455,7 +455,7 @@ struct Configurator {
                 removedPlugins.insert(pluginName)
                 if case .removed = result { output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)") }
             case .failed:
-                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — will retry on next sync")
+                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — re-run '\(retryHint)' to retry")
             }
         }
         remaining.plugins.removeAll { removedPlugins.contains($0) }
@@ -1280,7 +1280,8 @@ struct Configurator {
 
     private func makeExecutor() -> ComponentExecutor {
         ComponentExecutor(
-            environment: environment, output: output, shell: shell, claudeCLI: claudeCLI
+            environment: environment, output: output, shell: shell, claudeCLI: claudeCLI,
+            mcpWorkingDirectory: scope.mcpWorkingDirectory
         )
     }
 }

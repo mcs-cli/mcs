@@ -33,6 +33,10 @@ struct SyncScope {
     /// `nil` = use the pack's declared scope (project default); `"user"` = global scope.
     let mcpScopeOverride: String?
 
+    /// Directory the `claude mcp` commands run in, which selects the project for `local` scope.
+    /// Project: the project path, so a command started elsewhere still targets it; Global: `nil`.
+    let mcpWorkingDirectory: URL?
+
     /// Whether to scan template content (in addition to copyPackFile sources)
     /// for undeclared placeholders.
     let includeTemplatesInScan: Bool
@@ -71,6 +75,7 @@ extension SyncScope {
             claudeFilePath: projectPath.appendingPathComponent(Constants.FileNames.claudeLocalMD),
             scopeIdentifier: projectPath.path,
             mcpScopeOverride: nil,
+            mcpWorkingDirectory: projectPath,
             includeTemplatesInScan: true,
             runConfigureProjectHooks: true,
             isGlobalScope: false,
@@ -91,6 +96,7 @@ extension SyncScope {
             claudeFilePath: environment.globalClaudeMD,
             scopeIdentifier: ProjectIndex.globalSentinel,
             mcpScopeOverride: Constants.MCPScope.user,
+            mcpWorkingDirectory: nil,
             includeTemplatesInScan: false,
             runConfigureProjectHooks: false,
             isGlobalScope: true,

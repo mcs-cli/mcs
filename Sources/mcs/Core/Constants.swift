@@ -52,6 +52,9 @@ enum Constants {
 
         /// The Claude Code CLI binary name.
         static let claudeCommand = "claude"
+
+        /// Stderr text `claude mcp remove` prints when the server is not registered in that scope.
+        static let mcpServerNotFound = "No MCP server named"
     }
 
     // MARK: - JSON Keys
