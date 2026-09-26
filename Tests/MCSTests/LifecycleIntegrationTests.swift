@@ -4169,3 +4169,50 @@ struct DroppedDirectoryFileTests {
         #expect(try fm.contentsOfDirectory(atPath: installed.path).isEmpty)
     }
 }
+
+// MARK: - Pack remove cleanup failure (Issue #409)
+
+struct PackRemoveCleanupFailureTests {
+    @Test("A scope left with artifacts is reported and can be retried")
+    func failedGlobalCleanupIsReportedAndRetryable() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "lint.sh")
+        let pack = MockTechPack(
+            identifier: "hook-pack",
+            displayName: "Hook Pack",
+            components: [bed.hookComponent(
+                pack: "hook-pack", id: "lint", source: hookSource, destination: "lint.sh",
+                hookRegistration: HookRegistration(event: .postToolUse)
+            )]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try configureBothScopes(bed: bed, pack: pack, registry: registry)
+
+        let settings = try String(contentsOf: bed.env.claudeSettings, encoding: .utf8)
+        try "{ not json".write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
+
+        let unconfigure = { (projectPaths: [String]) in
+            RemovePack.unconfigureScopes(
+                "hook-pack",
+                globallyConfigured: true,
+                projectPaths: projectPaths,
+                registry: registry,
+                env: bed.env,
+                shell: ShellRunner(environment: bed.env),
+                output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+            )
+        }
+
+        #expect(unconfigure([bed.project.path]) == [ProjectIndex.globalSentinel])
+        #expect(try bed.globalState().artifacts(for: "hook-pack")?.hookCommands.isEmpty == false)
+        #expect(try !bed.projectState().configuredPacks.contains("hook-pack"))
+
+        try settings.write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
+
+        // The first run pruned the project's index claim, so a retry only reaches the global scope.
+        #expect(unconfigure([]) == [])
+        #expect(try !bed.globalState().configuredPacks.contains("hook-pack"))
+    }
+}

@@ -396,12 +396,18 @@ struct Configurator {
     ///     Pass `ProjectIndex.packRemoveSentinel` when removing a pack from
     ///     all scopes (e.g. `mcs pack remove`) so the ref counter excludes
     ///     every scope. Defaults to `nil` (uses `scope.scopeIdentifier`).
+    ///   - retryHint: Command named in the leftover-artifacts warning. Defaults to
+    ///     `scope.syncHint`; `mcs pack remove` passes its own, because a sync would keep the pack.
+    /// - Returns: `false` when some artifacts could not be removed and remain recorded in `state`.
+    @discardableResult
     func unconfigurePack(
         _ packID: String,
         state: inout ProjectState,
-        refCountScope: String? = nil
-    ) {
+        refCountScope: String? = nil,
+        retryHint: String? = nil
+    ) -> Bool {
         let suffix = scope.labelSuffix
+        let retryHint = retryHint ?? scope.syncHint
         output.info("Removing \(packID)\(suffix)...")
         let exec = makeExecutor()
 
@@ -409,7 +415,7 @@ struct Configurator {
             output.dimmed("No artifact record for \(packID) — skipping")
             state.removePack(packID)
             pruneOrphanResolvedValues(state: &state)
-            return
+            return true
         }
 
         var remaining = artifacts
@@ -484,8 +490,8 @@ struct Configurator {
                 output.warn("Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
                 output.warn("Settings for \(packID) were not cleaned up. Fix the file and re-run.")
                 state.setArtifacts(remaining, for: packID)
-                output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(scope.syncHint)' to retry.")
-                return
+                output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
+                return false
             }
             if hasHooksToRemove {
                 let commandsToRemove = Set(artifacts.hookCommands)
@@ -569,13 +575,15 @@ struct Configurator {
             remaining.gitignoreEntries.removeAll { removedEntries.contains($0) }
         }
 
-        if remaining.isEmpty {
+        let fullyRemoved = remaining.isEmpty
+        if fullyRemoved {
             state.removePack(packID)
         } else {
             state.setArtifacts(remaining, for: packID)
-            output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(scope.syncHint)' to retry.")
+            output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
         }
         pruneOrphanResolvedValues(state: &state)
+        return fullyRemoved
     }
 
     /// Drop `state.resolvedValues` entries whose keys no currently-configured pack declares as a

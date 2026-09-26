@@ -172,7 +172,7 @@ struct RemovePack: LockedCommand {
             ctx.output.plain("")
             ctx.output.plain("  Affected scopes:")
             if isGloballyConfigured {
-                ctx.output.plain("    Global (~/.claude/)")
+                ctx.output.plain("    \(Self.scopeDisplayName(ProjectIndex.globalSentinel))")
             }
             for path in liveProjectPaths {
                 ctx.output.plain("    \(path)")
@@ -195,53 +195,23 @@ struct RemovePack: LockedCommand {
         }
 
         // 5. Federated unconfigure — remove artifacts from all affected scopes
-        if isGloballyConfigured {
-            do {
-                var globalState = try ProjectState(stateFile: ctx.env.globalStateFile)
-                let configurator = Configurator(
-                    environment: ctx.env,
-                    output: ctx.output,
-                    shell: ctx.shell,
-                    registry: techPackRegistry,
-                    strategy: GlobalSyncStrategy(environment: ctx.env)
-                )
-                configurator.unconfigurePack(
-                    identifier,
-                    state: &globalState,
-                    refCountScope: ProjectIndex.packRemoveSentinel
-                )
-                try globalState.save()
-            } catch {
-                ctx.output.warn("Global cleanup failed: \(error.localizedDescription)")
-            }
-        }
+        let failedScopes = Self.unconfigureScopes(
+            identifier,
+            globallyConfigured: isGloballyConfigured,
+            projectPaths: liveProjectPaths,
+            registry: techPackRegistry,
+            env: ctx.env,
+            shell: ctx.shell,
+            output: ctx.output
+        )
 
-        for projectPath in liveProjectPaths {
-            do {
-                let projectURL = URL(fileURLWithPath: projectPath)
-                var projectState = try ProjectState(projectRoot: projectURL)
-                let configurator = Configurator(
-                    environment: ctx.env,
-                    output: ctx.output,
-                    shell: ctx.shell,
-                    registry: techPackRegistry,
-                    strategy: ProjectSyncStrategy(projectPath: projectURL, environment: ctx.env)
-                )
-                configurator.unconfigurePack(
-                    identifier,
-                    state: &projectState,
-                    refCountScope: ProjectIndex.packRemoveSentinel
-                )
-                try projectState.save()
-            } catch {
-                ctx.output.warn("Cleanup for \(projectPath) failed: \(error.localizedDescription)")
-            }
-        }
-
-        // 6. Update project index
+        // 6. Update project index — failed scopes keep their claim so ref counting still sees them
         do {
             var updatedIndex = try indexFile.load()
-            indexFile.removePack(identifier, from: &updatedIndex)
+            for projectEntry in indexFile.projects(withPack: identifier, in: updatedIndex)
+                where !failedScopes.contains(projectEntry.path) {
+                indexFile.removePack(identifier, fromProject: projectEntry.path, in: &updatedIndex)
+            }
             for stalePath in staleProjectPaths {
                 indexFile.remove(projectPath: stalePath, from: &updatedIndex)
             }
@@ -249,6 +219,16 @@ struct RemovePack: LockedCommand {
         } catch {
             ctx.output.error("Could not update project index: \(error.localizedDescription)")
             ctx.output.error("Run 'mcs sync' to reconcile, or manually edit ~/.mcs/projects.yaml")
+        }
+
+        // The registry entry and checkout stay so re-running the command can finish the job.
+        guard failedScopes.isEmpty else {
+            ctx.output.error("Pack '\(entry.displayName)' was not fully removed from:")
+            for scope in failedScopes {
+                ctx.output.plain("  \(Self.scopeDisplayName(scope))")
+            }
+            ctx.output.error("Fix the errors above and re-run 'mcs pack remove \(identifier)'.")
+            throw ExitCode.failure
         }
 
         // 7. Remove from registry
@@ -267,6 +247,53 @@ struct RemovePack: LockedCommand {
         }
 
         ctx.output.success("Pack '\(entry.displayName)' removed.")
+    }
+
+    /// Returns the index paths of scopes left with artifacts, so the caller can keep their claims.
+    static func unconfigureScopes(
+        _ packID: String,
+        globallyConfigured: Bool,
+        projectPaths: [String],
+        registry: TechPackRegistry,
+        env: Environment,
+        shell: any ShellRunning,
+        output: CLIOutput
+    ) -> [String] {
+        var strategies: [any SyncStrategy] = globallyConfigured ? [GlobalSyncStrategy(environment: env)] : []
+        strategies += projectPaths.map {
+            ProjectSyncStrategy(projectPath: URL(fileURLWithPath: $0), environment: env)
+        }
+
+        var failed: [String] = []
+        for strategy in strategies {
+            let scopeID = strategy.scope.scopeIdentifier
+            do {
+                var state = try ProjectState(stateFile: strategy.scope.stateFile)
+                let configurator = Configurator(
+                    environment: env,
+                    output: output,
+                    shell: shell,
+                    registry: registry,
+                    strategy: strategy
+                )
+                let removed = configurator.unconfigurePack(
+                    packID,
+                    state: &state,
+                    refCountScope: ProjectIndex.packRemoveSentinel,
+                    retryHint: "mcs pack remove \(packID)"
+                )
+                try state.save()
+                if !removed { failed.append(scopeID) }
+            } catch {
+                output.warn("Cleanup for \(scopeDisplayName(scopeID)) failed: \(error.localizedDescription)")
+                failed.append(scopeID)
+            }
+        }
+        return failed
+    }
+
+    private static func scopeDisplayName(_ scopeID: String) -> String {
+        scopeID == ProjectIndex.globalSentinel ? "Global (~/.claude/)" : scopeID
     }
 }
 

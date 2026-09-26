@@ -86,14 +86,6 @@ struct ProjectIndex {
         }
     }
 
-    /// Remove a specific pack from all project entries. Prunes entries with no remaining packs.
-    func removePack(_ packID: String, from data: inout IndexData) {
-        for i in data.projects.indices {
-            data.projects[i].packs.removeAll { $0 == packID }
-        }
-        data.projects.removeAll { $0.packs.isEmpty }
-    }
-
     // MARK: - Queries
 
     /// All project entries that have a given pack configured.

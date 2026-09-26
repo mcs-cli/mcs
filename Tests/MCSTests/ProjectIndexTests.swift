@@ -94,18 +94,6 @@ struct ProjectIndexTests {
 
     // MARK: - RemovePack
 
-    @Test("RemovePack removes pack from all entries and prunes empty entries")
-    func removePackFromAll() {
-        let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
-        var data = ProjectIndex.IndexData()
-        index.upsert(projectPath: "/path/a", packIDs: ["ios", "swift"], in: &data)
-        index.upsert(projectPath: "/path/b", packIDs: ["ios"], in: &data)
-        index.removePack("ios", from: &data)
-        #expect(data.projects.count == 1)
-        #expect(data.projects[0].path == "/path/a")
-        #expect(data.projects[0].packs == ["swift"])
-    }
-
     @Test("RemovePack from one project leaves other projects untouched")
     func removePackFromSingleProject() {
         let index = ProjectIndex(path: URL(fileURLWithPath: "/tmp/test.yaml"))
