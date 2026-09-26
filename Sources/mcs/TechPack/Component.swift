@@ -65,8 +65,6 @@ struct ComponentDefinition: Identifiable {
     let description: String // Human-readable description
     let type: ComponentType
     let packIdentifier: String? // nil for core components
-    let dependencies: [String] // IDs of components this depends on
-    let isRequired: Bool // If true, always installed with its pack/core
     /// Hook registration metadata for hookFile components. When set, the engine
     /// auto-registers this hook in settings.local.json with the specified handler fields.
     let hookRegistration: HookRegistration?
@@ -84,8 +82,6 @@ struct ComponentDefinition: Identifiable {
         description: String,
         type: ComponentType,
         packIdentifier: String?,
-        dependencies: [String],
-        isRequired: Bool,
         hookRegistration: HookRegistration? = nil,
         installAction: ComponentInstallAction,
         supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
@@ -95,8 +91,6 @@ struct ComponentDefinition: Identifiable {
         self.description = description
         self.type = type
         self.packIdentifier = packIdentifier
-        self.dependencies = dependencies
-        self.isRequired = isRequired
         self.hookRegistration = hookRegistration
         self.installAction = installAction
         self.supplementaryChecks = supplementaryChecks

@@ -28,16 +28,12 @@ struct BrewPackageCheck: DoctorCheck {
     let name: String
     let section: String
     let package: String
-    var isOptional: Bool = false
     var environment: Environment = .init()
 
     func check() -> CheckResult {
         let shell = ShellRunner(environment: environment)
         if Homebrew(shell: shell, environment: environment).provides(package) {
             return .pass("installed")
-        }
-        if isOptional {
-            return .warn("not found (optional)")
         }
         return .fail("not found")
     }

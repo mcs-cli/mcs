@@ -14,7 +14,6 @@ struct UpdateScopeResolver {
         let label: String
         let strategy: any SyncStrategy
         let configuredPackIDs: Set<String>
-        let excludedComponents: [String: Set<String>]
         let isGlobal: Bool
         /// The project root path. `nil` for the global scope.
         let projectPath: URL?
@@ -102,7 +101,6 @@ struct UpdateScopeResolver {
             label: label,
             strategy: strategy,
             configuredPackIDs: configured,
-            excludedComponents: state.allExcludedComponents,
             isGlobal: isGlobal,
             projectPath: projectPath
         )

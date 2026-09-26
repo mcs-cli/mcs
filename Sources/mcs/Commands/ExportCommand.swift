@@ -213,7 +213,7 @@ struct ExportCommand: ParsableCommand {
                 let warn = server.sensitiveEnvVarNames.isEmpty ? "" : " (contains sensitive env vars)"
                 return (name: server.name, description: server.isHTTP ? "HTTP MCP server\(warn)" : (server.command ?? "MCP server") + warn)
             }, category: .mcp)
-            groups.append(SelectableGroup(title: "MCP Servers", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "MCP Servers", items: items))
         }
 
         // Hook files
@@ -222,31 +222,31 @@ struct ExportCommand: ParsableCommand {
                 let eventInfo = hook.hookRegistration.map { " → \($0.event.rawValue)" } ?? " (unknown event)"
                 return (name: hook.filename, description: "Hook script\(eventInfo)")
             }, category: .hooks)
-            groups.append(SelectableGroup(title: "Hooks", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "Hooks", items: items))
         }
 
         // Skills
         if !config.skillFiles.isEmpty {
             let items = appendItems(config.skillFiles.map { (name: $0.filename, description: "Skill file") }, category: .skills)
-            groups.append(SelectableGroup(title: "Skills", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "Skills", items: items))
         }
 
         // Commands
         if !config.commandFiles.isEmpty {
             let items = appendItems(config.commandFiles.map { (name: $0.filename, description: "Slash command") }, category: .commands)
-            groups.append(SelectableGroup(title: "Commands", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "Commands", items: items))
         }
 
         // Agents
         if !config.agentFiles.isEmpty {
             let items = appendItems(config.agentFiles.map { (name: $0.filename, description: "Subagent") }, category: .agents)
-            groups.append(SelectableGroup(title: "Agents", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "Agents", items: items))
         }
 
         // Plugins
         if !config.plugins.isEmpty {
             let items = appendItems(config.plugins.map { (name: $0, description: "Plugin") }, category: .plugins)
-            groups.append(SelectableGroup(title: "Plugins", items: items, requiredItems: []))
+            groups.append(SelectableGroup(title: "Plugins", items: items))
         }
 
         // CLAUDE.md sections + user content
@@ -261,7 +261,7 @@ struct ExportCommand: ParsableCommand {
             claudeItems.append(appendSentinel(name: "User content", description: "Content outside managed sections", key: .userContent))
         }
         if !claudeItems.isEmpty {
-            groups.append(SelectableGroup(title: "CLAUDE.md Content", items: claudeItems, requiredItems: []))
+            groups.append(SelectableGroup(title: "CLAUDE.md Content", items: claudeItems))
         }
 
         // Gitignore + Settings
@@ -275,7 +275,7 @@ struct ExportCommand: ParsableCommand {
             extraItems.append(appendSentinel(name: "Additional settings", description: "env vars, permissions, etc.", key: .settings))
         }
         if !extraItems.isEmpty {
-            groups.append(SelectableGroup(title: "Other", items: extraItems, requiredItems: []))
+            groups.append(SelectableGroup(title: "Other", items: extraItems))
         }
 
         // Run multi-select

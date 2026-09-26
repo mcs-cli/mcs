@@ -157,8 +157,6 @@ enum DestinationCollisionResolver {
                     description: component.description,
                     type: component.type,
                     packIdentifier: component.packIdentifier,
-                    dependencies: component.dependencies,
-                    isRequired: component.isRequired,
                     hookRegistration: component.hookRegistration,
                     installAction: .copyPackFile(source: source, destination: newDestination, fileType: fileType),
                     supplementaryChecks: component.supplementaryChecks

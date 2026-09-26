@@ -33,7 +33,6 @@ components:
   - id: ollama-service
     description: Start Ollama background service
     type: configuration
-    dependencies: [ollama]
     shell: "brew services start ollama"
     doctorChecks:
       - type: commandExists
@@ -46,7 +45,6 @@ components:
   - id: ollama-embed-model
     description: Pull embedding model for documentation indexing
     type: configuration
-    dependencies: [ollama]
     shell: "ollama pull nomic-embed-text"
     doctorChecks:
       - type: commandExists
@@ -58,7 +56,6 @@ components:
   # ── MCP Servers ───────────────────────────────────────────
   - id: docs-mcp-server
     description: Documentation search with local embeddings
-    dependencies: [node, ollama]
     mcp:
       command: npx
       args: ["-y", "@arabold/docs-mcp-server@latest", "--read-only"]
@@ -79,7 +76,6 @@ components:
 
   - id: hook-sync-docs
     description: Index documentation on session start (async)
-    dependencies: [ollama, docs-mcp-server]
     hookEvent: SessionStart
     hookAsync: true
     hookTimeout: 120
@@ -91,7 +87,6 @@ components:
   # ── Configuration ─────────────────────────────────────────
   - id: settings
     description: Claude Code settings
-    isRequired: true
     settingsFile: config/settings.json
 
 templates:

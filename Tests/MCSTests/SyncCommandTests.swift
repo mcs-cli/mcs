@@ -11,7 +11,6 @@ struct SyncCommandTests {
         #expect(cmd.pack.isEmpty)
         #expect(cmd.all == false)
         #expect(cmd.dryRun == false)
-        #expect(cmd.customize == false)
         #expect(cmd.global == false)
     }
 
@@ -58,12 +57,6 @@ struct SyncCommandTests {
         #expect(cmd.skipLock == false)
     }
 
-    @Test("Parses --customize flag")
-    func parsesCustomize() throws {
-        let cmd = try SyncCommand.parse(["--customize"])
-        #expect(cmd.customize == true)
-    }
-
     @Test("Parses combined flags with path")
     func parsesCombined() throws {
         let cmd = try SyncCommand.parse(["--pack", "ios", "--dry-run", "/tmp/proj"])
@@ -98,13 +91,6 @@ struct SyncCommandTests {
         let cmd = try SyncCommand.parse(["--global", "--all"])
         #expect(cmd.global == true)
         #expect(cmd.all == true)
-    }
-
-    @Test("Parses --global with --customize")
-    func parsesGlobalCustomize() throws {
-        let cmd = try SyncCommand.parse(["--global", "--customize"])
-        #expect(cmd.global == true)
-        #expect(cmd.customize == true)
     }
 
     // MARK: - Global pack blocking

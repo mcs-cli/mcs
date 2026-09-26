@@ -57,7 +57,7 @@ extension ExternalPackManifest {
             throw ManifestError.invalidIdentifier(identifier)
         }
 
-        // Component ID prefix and dependency references
+        // Component ID prefix
         var seenComponentIDs = Set<String>()
         if let components {
             let expectedPrefix = "\(identifier)."
@@ -86,18 +86,6 @@ extension ExternalPackManifest {
                         throw ManifestError.invalidHookMetadata(
                             componentID: component.id,
                             reason: reason
-                        )
-                    }
-                }
-            }
-
-            // Validate intra-pack dependency references resolve to existing component IDs
-            for component in components {
-                for dep in component.dependencies ?? [] {
-                    if dep.hasPrefix(expectedPrefix), !seenComponentIDs.contains(dep) {
-                        throw ManifestError.unresolvedDependency(
-                            componentID: component.id,
-                            dependency: dep
                         )
                     }
                 }
@@ -151,14 +139,6 @@ extension ExternalPackManifest {
                         sectionIdentifier: template.sectionIdentifier,
                         packIdentifier: identifier
                     )
-                }
-                for dep in template.dependencies ?? [] {
-                    guard seenComponentIDs.contains(dep) else {
-                        throw ManifestError.templateDependencyMismatch(
-                            sectionIdentifier: template.sectionIdentifier,
-                            componentID: dep
-                        )
-                    }
                 }
             }
         }
@@ -432,9 +412,9 @@ extension ExternalPackManifest {
 // MARK: - Normalization
 
 extension ExternalPackManifest {
-    /// Returns a copy with short component IDs and intra-pack dependencies auto-prefixed
-    /// with the pack identifier. Throws if any component ID or template section identifier
-    /// contains a dot — pack authors must use short names and let the tool add the prefix.
+    /// Returns a copy with short component IDs auto-prefixed with the pack identifier. Throws if
+    /// any component ID or template section identifier contains a dot — pack authors must use
+    /// short names and let the tool add the prefix.
     func normalized() throws -> ExternalPackManifest {
         let prefix = "\(identifier)."
         let normalizedComponents = try components?.map { component -> ExternalComponentDefinition in
@@ -443,9 +423,6 @@ extension ExternalPackManifest {
                 throw ManifestError.dotInRawID(c.id)
             }
             c.id = prefix + c.id
-            c.dependencies = c.dependencies?.map { dep in
-                dep.contains(".") ? dep : prefix + dep
-            }
             return c
         }
         let normalizedTemplates = try templates?.map { template -> ExternalTemplateDefinition in
@@ -454,12 +431,6 @@ extension ExternalPackManifest {
                 throw ManifestError.dotInRawID(t.sectionIdentifier)
             }
             t.sectionIdentifier = prefix + t.sectionIdentifier
-            t.dependencies = try t.dependencies?.map { dep in
-                guard !dep.contains(".") else {
-                    throw ManifestError.dotInRawID(dep)
-                }
-                return prefix + dep
-            }
             return t
         }
         return ExternalPackManifest(
@@ -492,8 +463,6 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case duplicatePromptKey(String)
     case invalidDoctorCheck(name: String, reason: String)
     case dotInRawID(String)
-    case templateDependencyMismatch(sectionIdentifier: String, componentID: String)
-    case unresolvedDependency(componentID: String, dependency: String)
     case invalidHookMetadata(componentID: String, reason: String)
     case duplicateDestination(destination: String, fileType: String, componentIDs: [String])
     case ignoreEntryLoadBearing(entry: String, reason: String)
@@ -512,16 +481,12 @@ enum ManifestError: Error, Equatable, LocalizedError {
             "Duplicate component ID: '\(id)'"
         case let .templateSectionMismatch(section, pack):
             "Template section '\(section)' must be prefixed with '\(pack).' (e.g. '\(pack).main')"
-        case let .templateDependencyMismatch(section, component):
-            "Template '\(section)' depends on component '\(component)' which does not exist in the pack"
         case let .duplicatePromptKey(key):
             "Duplicate prompt key: '\(key)'"
         case let .invalidDoctorCheck(name, reason):
             "Invalid doctor check '\(name)': \(reason)"
         case let .dotInRawID(id):
             "ID '\(id)' must not contain dots — use a short name and the pack prefix will be added automatically"
-        case let .unresolvedDependency(componentID, dependency):
-            "Component '\(componentID)' depends on '\(dependency)' which does not exist in the pack"
         case let .invalidHookMetadata(componentID, reason):
             "Component '\(componentID)': \(reason)"
         case let .duplicateDestination(destination, fileType, componentIDs):
@@ -564,14 +529,14 @@ struct ExternalComponentDefinition: Codable, Equatable {
     let displayName: String
     let description: String
     let type: ExternalComponentType
-    var dependencies: [String]?
-    let isRequired: Bool?
+    /// Retired keys the manifest still declares; decoded only so `mcs pack validate` can warn.
+    let deprecatedKeys: [String]
     /// Hook registration metadata. When set, the engine auto-registers this hook
     /// in `settings.local.json` with the specified handler fields.
     /// YAML keys remain flat (`hookEvent`, `hookTimeout`, `hookAsync`, `hookStatusMessage`)
     /// for pack author ergonomics; the custom Codable implementation maps them to this struct.
     ///
-    /// `var` like `id` and `dependencies`, so a sanitizing copy can rewrite one field without
+    /// `var` like `id`, so a sanitizing copy can rewrite one field without
     /// respelling every other — a respelling silently drops any field added later.
     var hookRegistration: HookRegistration?
     let installAction: ExternalInstallAction
@@ -581,7 +546,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
 
     /// Standard keys matching stored properties (used by encode).
     enum CodingKeys: String, CodingKey {
-        case id, displayName, description, type, dependencies, isRequired
+        case id, displayName, description, type
         case hookEvent, hookMatcher, hookTimeout, hookAsync, hookStatusMessage, hookInterpreter
         case installAction, doctorChecks
     }
@@ -608,8 +573,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
         displayName: String,
         description: String,
         type: ExternalComponentType,
-        dependencies: [String]? = nil,
-        isRequired: Bool? = nil,
+        deprecatedKeys: [String] = [],
         hookRegistration: HookRegistration? = nil,
         installAction: ExternalInstallAction,
         doctorChecks: [ExternalDoctorCheckDefinition]? = nil
@@ -618,8 +582,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
         self.displayName = displayName
         self.description = description
         self.type = type
-        self.dependencies = dependencies
-        self.isRequired = isRequired
+        self.deprecatedKeys = deprecatedKeys
         self.hookRegistration = hookRegistration
         self.installAction = installAction
         self.doctorChecks = doctorChecks
@@ -633,8 +596,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
 
         id = try container.decode(String.self, forKey: .id)
         description = try container.decode(String.self, forKey: .description)
-        dependencies = try container.decodeIfPresent([String].self, forKey: .dependencies)
-        isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired)
+        deprecatedKeys = try DeprecatedManifestKey.declared(in: decoder)
         let hookEventRaw = try container.decodeIfPresent(String.self, forKey: .hookEvent)
         let hookMatcher = try container.decodeIfPresent(String.self, forKey: .hookMatcher)
         let hookTimeout = try container.decodeIfPresent(Int.self, forKey: .hookTimeout)
@@ -692,8 +654,6 @@ struct ExternalComponentDefinition: Codable, Equatable {
         try container.encode(displayName, forKey: .displayName)
         try container.encode(description, forKey: .description)
         try container.encode(type, forKey: .type)
-        try container.encodeIfPresent(dependencies, forKey: .dependencies)
-        try container.encodeIfPresent(isRequired, forKey: .isRequired)
         try container.encodeIfPresent(hookRegistration?.event.rawValue, forKey: .hookEvent)
         try container.encodeIfPresent(hookRegistration?.matcher, forKey: .hookMatcher)
         try container.encodeIfPresent(hookRegistration?.timeout, forKey: .hookTimeout)
@@ -1072,7 +1032,37 @@ struct ExternalTemplateDefinition: Codable, Equatable {
     var sectionIdentifier: String
     let placeholders: [String]?
     let contentFile: String
-    var dependencies: [String]?
+    /// Retired keys the manifest still declares; decoded only so `mcs pack validate` can warn.
+    let deprecatedKeys: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case sectionIdentifier, placeholders, contentFile
+    }
+
+    init(sectionIdentifier: String, placeholders: [String]?, contentFile: String, deprecatedKeys: [String] = []) {
+        self.sectionIdentifier = sectionIdentifier
+        self.placeholders = placeholders
+        self.contentFile = contentFile
+        self.deprecatedKeys = deprecatedKeys
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sectionIdentifier = try container.decode(String.self, forKey: .sectionIdentifier)
+        placeholders = try container.decodeIfPresent([String].self, forKey: .placeholders)
+        contentFile = try container.decode(String.self, forKey: .contentFile)
+        deprecatedKeys = try DeprecatedManifestKey.declared(in: decoder)
+    }
+}
+
+/// Keys that no longer have an effect: packs install whole, in declaration order.
+enum DeprecatedManifestKey: String, CodingKey, CaseIterable {
+    case isRequired, dependencies
+
+    static func declared(in decoder: Decoder) throws -> [String] {
+        let container = try decoder.container(keyedBy: Self.self)
+        return allCases.filter { container.contains($0) }.map(\.rawValue)
+    }
 }
 
 // MARK: - Configure Project

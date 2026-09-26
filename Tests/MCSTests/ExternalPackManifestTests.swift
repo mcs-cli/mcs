@@ -99,13 +99,12 @@ struct ExternalPackManifestTests {
         let server = try #require(manifest.components?[0])
         #expect(server.id == "my-pack.server")
         #expect(server.type == .mcpServer)
-        #expect(server.dependencies == ["my-pack.dep"])
-        #expect(server.isRequired == false)
+        #expect(server.deprecatedKeys == ["isRequired", "dependencies"])
 
         let dep = try #require(manifest.components?[1])
         #expect(dep.id == "my-pack.dep")
         #expect(dep.type == .brewPackage)
-        #expect(dep.isRequired == true)
+        #expect(dep.deprecatedKeys == ["isRequired"])
 
         // Templates
         #expect(manifest.templates?.count == 1)
@@ -1253,30 +1252,6 @@ struct ExternalPackManifestTests {
 
     // MARK: - Default values
 
-    @Test("Component defaults: dependencies is nil, isRequired is nil")
-    func componentDefaults() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: test
-        displayName: Test
-        description: Test
-        components:
-          - id: test.basic
-            displayName: Basic
-            description: A basic component
-            type: configuration
-            installAction:
-              type: settingsMerge
-        """
-
-        let manifest = try loadManifest(yaml)
-        let component = try #require(manifest.components?[0])
-
-        #expect(component.dependencies == nil)
-        #expect(component.isRequired == nil)
-        #expect(component.doctorChecks == nil)
-    }
-
     // MARK: - Hook contribution default position
 
     // MARK: - Normalization (auto-prefix)
@@ -1337,68 +1312,6 @@ struct ExternalPackManifestTests {
         #expect(throws: ManifestError.dotInRawID("my-pack.server")) {
             try raw.normalized()
         }
-    }
-
-    @Test("normalized() auto-prefixes intra-pack dependencies")
-    func normalizeIntraPackDeps() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        components:
-          - id: brew
-            displayName: Brew
-            description: A package
-            type: brewPackage
-            installAction:
-              type: brewInstall
-              package: my-pkg
-          - id: server
-            displayName: Server
-            description: A server
-            type: mcpServer
-            dependencies:
-              - brew
-            installAction:
-              type: mcpServer
-              name: server
-              command: npx
-              args: ["-y", "server@latest"]
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        #expect(normalized.components?[1].dependencies == ["my-pack.brew"])
-    }
-
-    @Test("normalized() leaves cross-pack dependencies unchanged")
-    func normalizeCrossPackDeps() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        components:
-          - id: server
-            displayName: Server
-            description: A server
-            type: mcpServer
-            dependencies:
-              - other-pack.tool
-              - brew
-            installAction:
-              type: mcpServer
-              name: server
-              command: npx
-              args: ["-y", "server@latest"]
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        #expect(normalized.components?[0].dependencies == ["other-pack.tool", "my-pack.brew"])
     }
 
     @Test("normalized() with no components returns manifest unchanged")
@@ -1500,195 +1413,6 @@ struct ExternalPackManifestTests {
         let normalized = try raw.normalized()
 
         // Should not throw — normalized section IDs now have the correct prefix
-        try normalized.validate()
-    }
-
-    // MARK: - Template dependency normalization and validation
-
-    @Test("normalized() auto-prefixes template dependencies")
-    func normalizeTemplateDependencies() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: My Pack
-        description: Test
-        components:
-          - id: serena
-            displayName: Serena
-            description: LSP
-            type: mcpServer
-            installAction:
-              type: mcpServer
-              name: serena
-              command: uvx
-              args: [serena]
-        templates:
-          - sectionIdentifier: serena
-            contentFile: templates/serena.md
-            dependencies:
-              - serena
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        #expect(normalized.templates?[0].dependencies == ["my-pack.serena"])
-    }
-
-    @Test("validate() rejects template dependency referencing nonexistent component")
-    func rejectTemplateDependencyMismatch() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        templates:
-          - sectionIdentifier: my-pack.serena
-            contentFile: templates/serena.md
-            dependencies:
-              - my-pack.nonexistent
-        """
-
-        let manifest = try loadManifest(yaml)
-        #expect(throws: ManifestError.templateDependencyMismatch(
-            sectionIdentifier: "my-pack.serena",
-            componentID: "my-pack.nonexistent"
-        )) {
-            try manifest.validate()
-        }
-    }
-
-    @Test("normalized() rejects template dependency containing dots")
-    func normalizeRejectsDottedTemplateDep() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: My Pack
-        description: Test
-        templates:
-          - sectionIdentifier: serena
-            contentFile: templates/serena.md
-            dependencies:
-              - my-pack.serena
-        """
-
-        let raw = try loadManifest(yaml)
-        #expect(throws: ManifestError.dotInRawID("my-pack.serena")) {
-            try raw.normalized()
-        }
-    }
-
-    @Test("validate() accepts template with no dependencies")
-    func acceptTemplateWithoutDependencies() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        templates:
-          - sectionIdentifier: my-pack.main
-            contentFile: templates/main.md
-        """
-
-        let manifest = try loadManifest(yaml)
-        try manifest.validate()
-        #expect(manifest.templates?[0].dependencies == nil)
-    }
-
-    // MARK: - Dependency resolution validation
-
-    @Test("validate() throws unresolvedDependency for nonexistent intra-pack dep")
-    func validateUnresolvedIntraPackDep() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        components:
-          - id: server
-            displayName: Server
-            description: A server
-            type: mcpServer
-            dependencies:
-              - nonexistent
-            installAction:
-              type: mcpServer
-              name: server
-              command: npx
-              args: ["-y", "server@latest"]
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        #expect(throws: ManifestError.unresolvedDependency(
-            componentID: "my-pack.server",
-            dependency: "my-pack.nonexistent"
-        )) {
-            try normalized.validate()
-        }
-    }
-
-    @Test("validate() passes for cross-pack dependencies")
-    func validateCrossPackDepsPass() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        components:
-          - id: server
-            displayName: Server
-            description: A server
-            type: mcpServer
-            dependencies:
-              - other-pack.tool
-            installAction:
-              type: mcpServer
-              name: server
-              command: npx
-              args: ["-y", "server@latest"]
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        // Should not throw — cross-pack deps are not validated
-        try normalized.validate()
-    }
-
-    @Test("validate() passes when all intra-pack deps resolve")
-    func validateResolvedIntraPackDeps() throws {
-        let yaml = """
-        schemaVersion: 1
-        identifier: my-pack
-        displayName: Test
-        description: Test
-        components:
-          - id: brew
-            displayName: Brew
-            description: A package
-            type: brewPackage
-            installAction:
-              type: brewInstall
-              package: my-pkg
-          - id: server
-            displayName: Server
-            description: A server
-            type: mcpServer
-            dependencies:
-              - brew
-            installAction:
-              type: mcpServer
-              name: server
-              command: npx
-              args: ["-y", "server@latest"]
-        """
-
-        let raw = try loadManifest(yaml)
-        let normalized = try raw.normalized()
-
-        // Should not throw — "brew" normalizes to "my-pack.brew" which exists
         try normalized.validate()
     }
 
@@ -2642,7 +2366,6 @@ struct ExternalPackManifestTests {
 
         let comps = try #require(normalized.components)
         #expect(comps[0].id == "my-pack.node")
-        #expect(comps[0].dependencies == ["my-pack.homebrew"])
         #expect(comps[1].id == "my-pack.homebrew")
     }
 
@@ -2681,7 +2404,7 @@ struct ExternalPackManifestTests {
 
     // MARK: - Shorthand: shorthand with all optional component fields
 
-    @Test("Shorthand component with dependencies, isRequired, and doctorChecks")
+    @Test("Shorthand component with deprecated keys, hook metadata, and doctorChecks")
     func shorthandWithOptionalFields() throws {
         let yaml = """
         schemaVersion: 1
@@ -2707,8 +2430,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .hookFile)
-        #expect(comp.dependencies == ["my-pack.jq"])
-        #expect(comp.isRequired == true)
+        #expect(comp.deprecatedKeys == ["isRequired", "dependencies"])
         #expect(comp.hookRegistration?.event == .sessionStart)
         #expect(comp.doctorChecks?.count == 1)
     }
@@ -2786,8 +2508,7 @@ struct ExternalPackManifestTests {
         let template = ExternalTemplateDefinition(
             sectionIdentifier: "ignore-pack.main",
             placeholders: nil,
-            contentFile: "templates/section.md",
-            dependencies: nil
+            contentFile: "templates/section.md"
         )
         let manifest = ignoreManifest(
             ignore: ["templates/section.md"],

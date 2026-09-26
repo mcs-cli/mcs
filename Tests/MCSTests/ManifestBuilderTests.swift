@@ -206,10 +206,8 @@ struct ManifestBuilderTests {
         // 10. Verify settings and gitignore (both .configuration type)
         let configComps = components.filter { $0.type == .configuration }
         #expect(configComps.count == 2)
-        let settingsComp = configComps.first { $0.id.contains("settings") }
-        #expect(settingsComp?.isRequired == true)
+        #expect(configComps.contains { $0.id.contains("settings") })
         let gitignoreComp = configComps.first { $0.id.contains("gitignore") }
-        #expect(gitignoreComp?.isRequired == true)
         guard case let .gitignoreEntries(entries) = gitignoreComp?.installAction else {
             Issue.record("Expected gitignoreEntries install action")
             return

@@ -115,7 +115,6 @@ private struct LifecycleTestBed {
 
     func hookComponent(
         pack: String, id: String, source: URL, destination: String,
-        isRequired: Bool = true,
         hookRegistration: HookRegistration? = nil
     ) -> ComponentDefinition {
         ComponentDefinition(
@@ -124,8 +123,6 @@ private struct LifecycleTestBed {
             description: "Hook \(id)",
             type: .hookFile,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: isRequired,
             hookRegistration: hookRegistration,
             installAction: .copyPackFile(source: source, destination: destination, fileType: .hook)
         )
@@ -140,8 +137,6 @@ private struct LifecycleTestBed {
             description: "Skill \(id)",
             type: .skill,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(source: source, destination: destination, fileType: .skill)
         )
     }
@@ -155,8 +150,6 @@ private struct LifecycleTestBed {
             description: "Command \(id)",
             type: .command,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: true,
             installAction: .copyPackFile(source: source, destination: destination, fileType: .command)
         )
     }
@@ -171,7 +164,7 @@ private struct LifecycleTestBed {
     }
 
     func brewComponent(
-        pack: String, id: String, package: String, isRequired: Bool = true
+        pack: String, id: String, package: String
     ) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -179,8 +172,6 @@ private struct LifecycleTestBed {
             description: "Brew \(id)",
             type: .brewPackage,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: isRequired,
             installAction: .brewInstall(package: package)
         )
     }
@@ -192,16 +183,13 @@ private struct LifecycleTestBed {
             description: "Settings \(id)",
             type: .configuration,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: true,
             installAction: .settingsMerge(source: source)
         )
     }
 
     func mcpComponent(
         pack: String, id: String, name: String,
-        command: String = "npx", args: [String] = [], env: [String: String] = [:],
-        isRequired: Bool = true
+        command: String = "npx", args: [String] = [], env: [String: String] = [:]
     ) -> ComponentDefinition {
         ComponentDefinition(
             id: "\(pack).\(id)",
@@ -209,8 +197,6 @@ private struct LifecycleTestBed {
             description: "MCP \(id)",
             type: .mcpServer,
             packIdentifier: pack,
-            dependencies: [],
-            isRequired: isRequired,
             installAction: .mcpServer(MCPServerConfig(
                 name: name, command: command, args: args, env: env
             ))
@@ -978,54 +964,49 @@ struct PackUpdateTemplateTests {
     }
 }
 
-// MARK: - Scenario 4: Component Exclusion Lifecycle
+// MARK: - Scenario 4: Exclusions Stored by the Removed --customize Flag
 
-struct ComponentExclusionLifecycleTests {
-    @Test("Exclude component removes its artifacts, re-include restores them")
-    func excludeAndReinclude() throws {
+struct LegacyExclusionMigrationTests {
+    @Test("A component stored as excluded is installed on the next sync and the stored key is dropped")
+    func legacyExclusionIsInstalledAndCleared() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        let hookA = try bed.makeHookSource(name: "hookA.sh", content: "#!/bin/bash\necho A")
-        let hookB = try bed.makeHookSource(name: "hookB.sh", content: "#!/bin/bash\necho B")
-
-        let pack = MockTechPack(
+        let pack = try MockTechPack(
             identifier: "my-pack",
             displayName: "My Pack",
             components: [
-                bed.hookComponent(pack: "my-pack", id: "hookA", source: hookA, destination: "hookA.sh", isRequired: false),
-                bed.hookComponent(pack: "my-pack", id: "hookB", source: hookB, destination: "hookB.sh", isRequired: false),
+                bed.hookComponent(
+                    pack: "my-pack", id: "hookA",
+                    source: bed.makeHookSource(name: "hookA.sh"),
+                    destination: "hookA.sh"
+                ),
             ]
         )
         let registry = TechPackRegistry(packs: [pack])
-        let configurator = bed.makeConfigurator(registry: registry)
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
 
-        let hookAPath = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookA.sh")
-        let hookBPath = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookB.sh")
-
-        // === Step 1: Configure with both ===
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(FileManager.default.fileExists(atPath: hookAPath.path))
-        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
-
-        // === Step 2: Reconfigure with hookA excluded ===
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["my-pack": Set(["my-pack.hookA"])]
+        // Recreate what an older mcs left behind: the component excluded and never installed.
+        let hookFile = bed.project.appendingPathComponent(".claude/hooks/my-pack/hookA.sh")
+        try FileManager.default.removeItem(at: hookFile)
+        let stateFile = bed.project
+            .appendingPathComponent(Constants.FileNames.claudeDirectory)
+            .appendingPathComponent(Constants.FileNames.mcsProject)
+        var json = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
         )
-        #expect(!FileManager.default.fileExists(atPath: hookAPath.path))
-        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
+        json["excludedComponents"] = ["my-pack": ["my-pack.hookA"]]
+        try JSONSerialization.data(withJSONObject: json).write(to: stateFile)
+        #expect(try bed.projectState().legacyExcludedComponents == ["my-pack": ["my-pack.hookA"]])
 
-        // Verify exclusion recorded in state
-        let state = try bed.projectState()
-        let excluded = state.excludedComponents(for: "my-pack")
-        #expect(excluded.contains("my-pack.hookA"))
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
 
-        // === Step 3: Re-include all ===
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-        #expect(FileManager.default.fileExists(atPath: hookAPath.path))
-        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
+        #expect(FileManager.default.fileExists(atPath: hookFile.path))
+        let saved = try #require(
+            JSONSerialization.jsonObject(with: Data(contentsOf: stateFile)) as? [String: Any]
+        )
+        #expect(saved["excludedComponents"] == nil)
+        #expect(try bed.runDoctor(registry: registry).issues == 0)
     }
 }
 
@@ -1226,8 +1207,6 @@ struct ShellCommandLifecycleTests {
                     description: "Install via shell",
                     type: .configuration,
                     packIdentifier: "shell-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .shellCommand(command: "touch '\(markerPath)'")
                 ),
             ]
@@ -1269,8 +1248,6 @@ struct ShellCommandLifecycleTests {
                     description: "Install with interactive flag",
                     type: .configuration,
                     packIdentifier: "interactive-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .shellCommand(command: "touch '\(markerPath)'", interactive: true)
                 ),
             ]
@@ -1352,124 +1329,6 @@ struct StaleArtifactCleanupTests {
 
         // === Doctor passes ===
         #expect(try bed.runDoctor(registry: registryV2).issues == 0)
-    }
-}
-
-// MARK: - Scenario 7: Template Dependency Filtering
-
-struct TemplateDependencyFilteringTests {
-    @Test("Excluding a component removes its dependent template sections")
-    func excludedComponentFiltersDependentTemplate() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        let hookSource = try bed.makeHookSource(name: "serena-hook.sh")
-
-        let pack = MockTechPack(
-            identifier: "my-pack",
-            displayName: "My Pack",
-            components: [
-                bed.mcpComponent(pack: "my-pack", id: "serena", name: "serena", args: ["-y", "serena"], isRequired: false),
-                bed.hookComponent(pack: "my-pack", id: "hook", source: hookSource, destination: "hook.sh"),
-            ],
-            templates: [
-                TemplateContribution(
-                    sectionIdentifier: "my-pack",
-                    templateContent: "## My Pack\nGeneral instructions.",
-                    placeholders: []
-                ),
-                TemplateContribution(
-                    sectionIdentifier: "my-pack-serena",
-                    templateContent: "## Serena Instructions\nUse Serena for code editing.",
-                    placeholders: [],
-                    dependencies: ["my-pack.serena"]
-                ),
-            ]
-        )
-        let registry = TechPackRegistry(packs: [pack])
-        let configurator = bed.makeConfigurator(registry: registry)
-
-        // === Step 1: Configure with all components ===
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-
-        let content = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
-        #expect(content.contains("<!-- mcs:begin my-pack -->"))
-        #expect(content.contains("<!-- mcs:begin my-pack-serena -->"))
-        #expect(content.contains("Use Serena for code editing."))
-
-        // === Step 2: Exclude Serena → dependent template removed ===
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["my-pack": Set(["my-pack.serena"])]
-        )
-
-        let afterContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
-        #expect(afterContent.contains("<!-- mcs:begin my-pack -->"))
-        #expect(afterContent.contains("General instructions."))
-        // Serena-dependent template section should be removed
-        #expect(!afterContent.contains("<!-- mcs:begin my-pack-serena -->"))
-        #expect(!afterContent.contains("Use Serena for code editing."))
-
-        // MCP server should have been removed
-        #expect(bed.mockCLI.mcpRemoveCalls.contains { $0.name == "serena" })
-
-        // === Step 3: Re-include → both templates restored ===
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-
-        let restoredContent = try String(contentsOf: bed.claudeLocalPath, encoding: .utf8)
-        #expect(restoredContent.contains("<!-- mcs:begin my-pack-serena -->"))
-        #expect(restoredContent.contains("Use Serena for code editing."))
-    }
-}
-
-// MARK: - Scenario 8: Global Scope Exclusion + Doctor
-
-struct GlobalScopeExclusionTests {
-    @Test("Global scope exclusion recorded and doctor skips excluded checks")
-    func globalExclusionAndDoctor() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        let hookA = try bed.makeHookSource(name: "globalA.sh")
-        let hookB = try bed.makeHookSource(name: "globalB.sh")
-
-        let pack = MockTechPack(
-            identifier: "global-pack",
-            displayName: "Global Pack",
-            components: [
-                bed.hookComponent(pack: "global-pack", id: "hookA", source: hookA, destination: "globalA.sh", isRequired: false),
-                bed.hookComponent(pack: "global-pack", id: "hookB", source: hookB, destination: "globalB.sh", isRequired: false),
-            ]
-        )
-        let registry = TechPackRegistry(packs: [pack])
-
-        // === Step 1: Configure global with both ===
-        let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
-        try configurator.configure(packs: [pack], confirmRemovals: false)
-
-        let hookAPath = bed.env.hooksDirectory.appendingPathComponent("global-pack/globalA.sh")
-        let hookBPath = bed.env.hooksDirectory.appendingPathComponent("global-pack/globalB.sh")
-        #expect(FileManager.default.fileExists(atPath: hookAPath.path))
-        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
-
-        // === Step 2: Reconfigure with hookA excluded ===
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["global-pack": Set(["global-pack.hookA"])]
-        )
-
-        #expect(!FileManager.default.fileExists(atPath: hookAPath.path))
-        #expect(FileManager.default.fileExists(atPath: hookBPath.path))
-
-        // Verify exclusion in global state
-        let globalState = try ProjectState(stateFile: bed.env.globalStateFile)
-        let excluded = globalState.excludedComponents(for: "global-pack")
-        #expect(excluded.contains("global-pack.hookA"))
-
-        // === Step 3: Doctor skips the excluded hook ===
-        #expect(try bed.runGlobalDoctor(registry: registry).issues == 0)
     }
 }
 
@@ -1737,7 +1596,7 @@ struct HookMetadataLifecycleTests {
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
         let registry = TechPackRegistry(packs: [pack])
         let configurator = bed.makeConfigurator(registry: registry)
-        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+        try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Hook must NOT be in project-scoped settings.local.json
         let fm = FileManager.default
@@ -1769,7 +1628,7 @@ struct HookMetadataLifecycleTests {
         let pack = MockTechPack(identifier: "test-pack", displayName: "Test Pack", components: [])
         let registry = TechPackRegistry(packs: [pack])
         let configurator = bed.makeConfigurator(registry: registry)
-        try configurator.configure(packs: [pack], confirmRemovals: false, excludedComponents: [:])
+        try configurator.configure(packs: [pack], confirmRemovals: false)
 
         // Not in project-scoped settings
         let fm = FileManager.default
@@ -2427,23 +2286,6 @@ struct PromptValueReuseLifecycleTests {
         #expect(try bed.projectState().resolvedValues?["PROJECT"] == "Legacy.xcodeproj")
     }
 
-    @Test("--customize off-TTY bypasses reuse: a prior only helps a pack whose own prompt accepts it")
-    func customizeBypassesReuseOffTTY() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-        let packs = try splitDetectPacks(bed: bed)
-        try storePrior(["PROJECT": "App.xcworkspace"], bed: bed)
-
-        // Reuse would keep the prior (see the split-fileDetect test); without it the first
-        // declaring pack answers alone, and its scan finds nothing.
-        #expect(throws: PromptResolutionError(
-            unresolved: [UnresolvedPrompt(packNames: ["Pack A"], key: "PROJECT")], isGlobalScope: false
-        )) {
-            try bed.makeConfigurator(registry: TechPackRegistry(packs: packs))
-                .configure(packs: packs, confirmRemovals: false, customize: true)
-        }
-    }
-
     @Test(
         "Non-TTY sync fails before removing anything when a selected pack can't be answered",
         arguments: [false, true]
@@ -2923,16 +2765,10 @@ struct HookInterpreterLifecycleTests {
 private func configureBothScopes(
     bed: LifecycleTestBed,
     pack: any TechPack,
-    registry: TechPackRegistry,
-    projectExclusions: [String: Set<String>] = [:],
-    globalExclusions: [String: Set<String>] = [:]
+    registry: TechPackRegistry
 ) throws {
-    try bed.makeConfigurator(registry: registry).configure(
-        packs: [pack], confirmRemovals: false, excludedComponents: projectExclusions
-    )
-    try bed.makeGlobalSyncConfigurator(registry: registry).configure(
-        packs: [pack], confirmRemovals: false, excludedComponents: globalExclusions
-    )
+    try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+    try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
 }
 
 // MARK: - Scope Duplication (Issue #371)
@@ -3039,49 +2875,6 @@ struct ScopeDuplicationCheckTests {
         #expect(message.contains("no artifacts overlap"))
     }
 
-    @Test("A template excluded in one scope is not counted as duplicated")
-    func templateFilteredByDependencyIsNotDuplicated() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        // The template depends on the hook, so excluding the hook globally drops the section
-        // there too — `Configurator.preloadTemplates` filters it before composition.
-        let pack = try MockTechPack(
-            identifier: "tmpl-pack",
-            displayName: "Template Pack",
-            components: [
-                bed.hookComponent(
-                    pack: "tmpl-pack", id: "hookA",
-                    source: bed.makeHookSource(name: "tmpl-hook.sh"),
-                    destination: "tmpl-hook.sh",
-                    isRequired: false
-                ),
-            ],
-            templates: [
-                TemplateContribution(
-                    sectionIdentifier: "tmpl-pack",
-                    templateContent: "Guidance.",
-                    placeholders: [],
-                    dependencies: ["tmpl-pack.hookA"]
-                ),
-            ]
-        )
-        let registry = TechPackRegistry(packs: [pack])
-        try configureBothScopes(
-            bed: bed, pack: pack, registry: registry,
-            globalExclusions: ["tmpl-pack": Set(["tmpl-pack.hookA"])]
-        )
-
-        let emitted = checks(bed: bed, registry: registry)
-        let check = try #require(emitted.first)
-        #expect(emitted.count == 1)
-        let result = check.check()
-        guard case .pass = result else {
-            Issue.record("Expected .pass — nothing survives in both scopes, got \(result)")
-            return
-        }
-    }
-
     // MARK: Factory scoping
 
     @Test("Emits nothing when no global scope has ever been synced")
@@ -3126,29 +2919,6 @@ struct ScopeDuplicationCheckTests {
     }
 
     // MARK: Fixability gates
-
-    @Test("Refuses to fix when the project installs a component the global scope excludes")
-    func blocksFixOnDivergentExclusions() throws {
-        let bed = try LifecycleTestBed()
-        defer { bed.cleanup() }
-
-        let pack = try duplicatingPack(bed: bed)
-        let registry = TechPackRegistry(packs: [pack])
-        try configureBothScopes(
-            bed: bed, pack: pack, registry: registry,
-            globalExclusions: ["dup-pack": Set(["dup-pack.hookA"])]
-        )
-
-        let check = try #require(checks(bed: bed, registry: registry).first)
-        #expect(check.fixCommandPreview == nil)
-        let result = check.fix()
-        guard case let .notFixable(reason) = result else {
-            Issue.record("Expected .notFixable, got \(result)")
-            return
-        }
-        #expect(reason.contains("hookA"))
-        #expect(try bed.projectState().configuredPacks.contains("dup-pack"))
-    }
 
     @Test("Refuses to fix when the two scopes answered a prompt differently")
     func blocksFixOnDivergentPromptAnswers() throws {
@@ -3284,8 +3054,6 @@ struct ScopeDuplicationCheckTests {
                     description: "Gitignore entries",
                     type: .configuration,
                     packIdentifier: "ignore-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .gitignoreEntries(entries: [".mcs-scratch"])
                 ),
             ]
@@ -3353,8 +3121,6 @@ struct GitignoreRefCountTests {
                     description: "Gitignore entries",
                     type: .configuration,
                     packIdentifier: id,
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .gitignoreEntries(entries: [entry])
                 ),
             ]
@@ -3808,7 +3574,6 @@ struct SyncPackAdditiveTests {
             registry: registry,
             previouslyConfigured: bed.projectState().configuredPacks,
             globallyInstalled: [],
-            excludedComponents: [:],
             scopeLabel: "Project",
             targetPath: bed.project.path,
             output: CLIOutput(colorsEnabled: false, interactiveStdin: false)

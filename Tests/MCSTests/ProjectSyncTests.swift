@@ -112,8 +112,6 @@ struct DryRunTests {
                 description: "A server",
                 type: .mcpServer,
                 packIdentifier: "pack-b",
-                dependencies: [],
-                isRequired: true,
                 installAction: .mcpServer(MCPServerConfig(
                     name: "server-b",
                     command: "/usr/bin/test",
@@ -208,8 +206,6 @@ struct PackSettingsMergeTests {
                 description: "Merges settings",
                 type: .configuration,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: settingsURL)
             )]
         )
@@ -268,8 +264,6 @@ struct PackSettingsMergeTests {
                 description: "Settings A",
                 type: .configuration,
                 packIdentifier: "pack-a",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: urlA)
             )]
         )
@@ -282,8 +276,6 @@ struct PackSettingsMergeTests {
                 description: "Settings B",
                 type: .configuration,
                 packIdentifier: "pack-b",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: urlB)
             )]
         )
@@ -325,8 +317,6 @@ struct PackSettingsMergeTests {
                 description: "Merges settings",
                 type: .configuration,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: settingsURL)
             )]
         )
@@ -375,8 +365,6 @@ struct PackSettingsMergeTests {
                 description: "No-op settings",
                 type: .configuration,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .settingsMerge(source: nil)
             )]
         )
@@ -588,8 +576,6 @@ struct AutoDerivedSettingsTests {
                 description: "Session start hook",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 hookRegistration: HookRegistration(event: .sessionStart),
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -611,8 +597,6 @@ struct AutoDerivedSettingsTests {
                 description: "PR review plugin",
                 type: .plugin,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 installAction: .plugin(name: "pr-review-toolkit@claude-plugins-official")
             )]
         )
@@ -682,8 +666,6 @@ struct AutoDerivedSettingsTests {
                 description: "No hookEvent",
                 type: .hookFile,
                 packIdentifier: "test-pack",
-                dependencies: [],
-                isRequired: true,
                 // hookEvent is nil
                 installAction: .copyPackFile(
                     source: hookSource,
@@ -741,8 +723,6 @@ struct AutoDerivedSettingsTests {
                     description: "Hook with event",
                     type: .hookFile,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     hookRegistration: HookRegistration(event: .sessionStart),
                     installAction: .copyPackFile(
                         source: hookSource,
@@ -756,8 +736,6 @@ struct AutoDerivedSettingsTests {
                     description: "Pack settings",
                     type: .configuration,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: true,
                     installAction: .settingsMerge(source: settingsURL)
                 ),
             ]
@@ -798,431 +776,6 @@ struct AutoDerivedSettingsTests {
         let artifacts = state.artifacts(for: "test-pack")
         #expect(artifacts != nil)
         #expect(artifacts?.hookCommands.contains("bash .claude/hooks/test-pack/session_start.sh") == true)
-    }
-}
-
-// MARK: - Excluded Components
-
-struct ConfiguratorExcludedComponentsTests {
-    private func makeTmpDir() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("mcs-exclude-test-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir
-    }
-
-    private func makeConfigurator(
-        projectPath: URL,
-        home: URL? = nil,
-        mockCLI: MockClaudeCLI = MockClaudeCLI()
-    ) -> Configurator {
-        let env = Environment(home: home)
-        return Configurator(
-            environment: env,
-            output: CLIOutput(),
-            shell: ShellRunner(environment: env),
-            strategy: ProjectSyncStrategy(projectPath: projectPath, environment: env),
-            claudeCLI: mockCLI
-        )
-    }
-
-    @Test("Excluded component is not installed")
-    func excludedComponentSkipped() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        // Pack with two plugin components
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.plugin-a",
-                    displayName: "Plugin A",
-                    description: "First plugin",
-                    type: .plugin,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .plugin(name: "plugin-a@test")
-                ),
-                ComponentDefinition(
-                    id: "test-pack.plugin-b",
-                    displayName: "Plugin B",
-                    description: "Second plugin",
-                    type: .plugin,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .plugin(name: "plugin-b@test")
-                ),
-            ]
-        )
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-
-        // Exclude plugin-b
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.plugin-b"]]
-        )
-
-        // Check settings.local.json — only plugin-a should be enabled
-        let settingsPath = claudeDir.appendingPathComponent("settings.local.json")
-        let settings = try Settings.load(from: settingsPath)
-        #expect(settings.enabledPlugins?["plugin-a"] == true)
-        #expect(settings.enabledPlugins?["plugin-b"] == nil)
-    }
-
-    @Test("Excluded components are persisted in project state")
-    func excludedComponentsPersisted() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        var state = try ProjectState(projectRoot: tmpDir)
-        state.recordPack("my-pack")
-        state.setExcludedComponents(["my-pack.mcp-server", "my-pack.hook"], for: "my-pack")
-        try state.save()
-
-        // Reload from disk
-        let reloaded = try ProjectState(projectRoot: tmpDir)
-        let excluded = reloaded.excludedComponents(for: "my-pack")
-        #expect(excluded == ["my-pack.mcp-server", "my-pack.hook"])
-    }
-
-    @Test("Removing a pack clears its exclusions")
-    func removePackClearsExclusions() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        var state = try ProjectState(projectRoot: tmpDir)
-        state.recordPack("my-pack")
-        state.setExcludedComponents(["my-pack.mcp-server"], for: "my-pack")
-        state.removePack("my-pack")
-        try state.save()
-
-        let reloaded = try ProjectState(projectRoot: tmpDir)
-        #expect(reloaded.excludedComponents(for: "my-pack").isEmpty)
-        #expect(!reloaded.configuredPacks.contains("my-pack"))
-    }
-
-    @Test("Excluded component filters its dependent template from CLAUDE.local.md")
-    func excludedComponentFiltersTemplate() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.serena",
-                    displayName: "Serena",
-                    description: "LSP navigation",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "serena", command: "uvx", args: ["serena"], env: [:]
-                    ))
-                ),
-            ],
-            templates: [
-                TemplateContribution(
-                    sectionIdentifier: "test-pack.serena",
-                    templateContent: "## Serena instructions",
-                    placeholders: [],
-                    dependencies: ["test-pack.serena"]
-                ),
-                TemplateContribution(
-                    sectionIdentifier: "test-pack.git",
-                    templateContent: "## Git instructions",
-                    placeholders: []
-                ),
-            ]
-        )
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-
-        // Exclude serena component
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.serena"]]
-        )
-
-        // CLAUDE.local.md should have git template but NOT serena template
-        let claudeLocalPath = tmpDir.appendingPathComponent("CLAUDE.local.md")
-        let content = try String(contentsOf: claudeLocalPath, encoding: .utf8)
-        #expect(content.contains("Git instructions"))
-        #expect(!content.contains("Serena instructions"))
-
-        // Artifact record should only track the git template section
-        let state = try ProjectState(projectRoot: tmpDir)
-        let artifacts = state.artifacts(for: "test-pack")
-        #expect(artifacts?.templateSections == ["test-pack.git"])
-    }
-
-    @Test("Previously written template section removed when its dependency is excluded")
-    func excludedComponentRemovesDependentTemplateSection() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.serena",
-                    displayName: "Serena",
-                    description: "LSP navigation",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "serena-dep-test", command: "uvx", args: ["serena"], env: [:]
-                    ))
-                ),
-            ],
-            templates: [
-                TemplateContribution(
-                    sectionIdentifier: "test-pack.serena",
-                    templateContent: "## Serena instructions",
-                    placeholders: [],
-                    dependencies: ["test-pack.serena"]
-                ),
-                TemplateContribution(
-                    sectionIdentifier: "test-pack.git",
-                    templateContent: "## Git instructions",
-                    placeholders: []
-                ),
-            ]
-        )
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-
-        // First sync: all components included — both templates written
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: [:]
-        )
-
-        let claudeLocalPath = tmpDir.appendingPathComponent("CLAUDE.local.md")
-        let content1 = try String(contentsOf: claudeLocalPath, encoding: .utf8)
-        #expect(content1.contains("Serena instructions"))
-        #expect(content1.contains("Git instructions"))
-
-        let state1 = try ProjectState(projectRoot: tmpDir)
-        let artifacts1 = state1.artifacts(for: "test-pack")
-        #expect(artifacts1?.templateSections.contains("test-pack.serena") == true)
-
-        // Second sync: exclude serena component — serena template section should be removed
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.serena"]]
-        )
-
-        let content2 = try String(contentsOf: claudeLocalPath, encoding: .utf8)
-        #expect(!content2.contains("Serena instructions"), "Serena template section should be removed from file")
-        #expect(content2.contains("Git instructions"), "Git template section should remain")
-
-        let state2 = try ProjectState(projectRoot: tmpDir)
-        let artifacts2 = state2.artifacts(for: "test-pack")
-        #expect(artifacts2?.templateSections == ["test-pack.git"])
-        #expect(artifacts2?.mcpServers.isEmpty == true, "Excluded MCP server should be removed")
-    }
-
-    @Test("Newly excluded MCP server is removed from artifact record")
-    func excludedMCPServerIsRemoved() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.mcp-a",
-                    displayName: "MCP A",
-                    description: "First MCP server",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "mcp-excl-a", command: "/usr/bin/true", args: [], env: [:]
-                    ))
-                ),
-                ComponentDefinition(
-                    id: "test-pack.mcp-b",
-                    displayName: "MCP B",
-                    description: "Second MCP server",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "mcp-excl-b", command: "/usr/bin/true", args: [], env: [:]
-                    ))
-                ),
-            ]
-        )
-
-        let mockCLI = MockClaudeCLI()
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir, mockCLI: mockCLI)
-
-        // First sync: both included
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: [:]
-        )
-
-        let state1 = try ProjectState(projectRoot: tmpDir)
-        let artifacts1 = state1.artifacts(for: "test-pack")
-        #expect(artifacts1?.mcpServers.count == 2)
-
-        // Reset mock to track only the second sync's calls
-        mockCLI.mcpRemoveCalls = []
-
-        // Second sync: exclude mcp-b
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.mcp-b"]]
-        )
-
-        // Verify mcp-excl-b was removed via the mock
-        #expect(mockCLI.mcpRemoveCalls.contains { $0.name == "mcp-excl-b" })
-
-        let state2 = try ProjectState(projectRoot: tmpDir)
-        let artifacts2 = state2.artifacts(for: "test-pack")
-        #expect(artifacts2?.mcpServers.count == 1)
-        #expect(artifacts2?.mcpServers.first?.name == "mcp-excl-a")
-    }
-
-    @Test("First run with exclusion does not crash")
-    func firstRunWithExclusionDoesNotCrash() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.mcp-a",
-                    displayName: "MCP A",
-                    description: "An MCP server",
-                    type: .mcpServer,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .mcpServer(MCPServerConfig(
-                        name: "mcp-firstrun", command: "/usr/bin/true", args: [], env: [:]
-                    ))
-                ),
-            ]
-        )
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-
-        // First-ever sync with component already excluded — should not error
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.mcp-a"]]
-        )
-
-        let state = try ProjectState(projectRoot: tmpDir)
-        #expect(state.artifacts(for: "test-pack")?.mcpServers.isEmpty == true)
-    }
-
-    @Test("Re-included file is reinstalled after exclusion")
-    func reincludedComponentIsReinstalled() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        let skillsDir = claudeDir.appendingPathComponent("skills")
-        try FileManager.default.createDirectory(at: skillsDir, withIntermediateDirectories: true)
-
-        let sourceFile = tmpDir.appendingPathComponent("reinclude-skill.md")
-        try "skill content".write(to: sourceFile, atomically: true, encoding: .utf8)
-
-        let pack = MockTechPack(
-            identifier: "test-pack",
-            displayName: "Test Pack",
-            components: [
-                ComponentDefinition(
-                    id: "test-pack.skill-r",
-                    displayName: "Skill R",
-                    description: "A skill file",
-                    type: .skill,
-                    packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
-                    installAction: .copyPackFile(
-                        source: sourceFile,
-                        destination: "reinclude-skill.md",
-                        fileType: .skill
-                    )
-                ),
-            ]
-        )
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-        let destFile = skillsDir.appendingPathComponent("reinclude-skill.md")
-
-        // First sync: included
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: [:]
-        )
-        #expect(FileManager.default.fileExists(atPath: destFile.path))
-        let state1 = try ProjectState(projectRoot: tmpDir)
-        #expect(state1.artifacts(for: "test-pack")?.files.isEmpty == false)
-
-        // Second sync: excluded
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: ["test-pack": ["test-pack.skill-r"]]
-        )
-        #expect(!FileManager.default.fileExists(atPath: destFile.path))
-        let state2 = try ProjectState(projectRoot: tmpDir)
-        #expect(state2.artifacts(for: "test-pack")?.files.isEmpty == true)
-
-        // Third sync: re-included
-        try configurator.configure(
-            packs: [pack],
-            confirmRemovals: false,
-            excludedComponents: [:]
-        )
-        #expect(FileManager.default.fileExists(atPath: destFile.path))
-        let state3 = try ProjectState(projectRoot: tmpDir)
-        #expect(state3.artifacts(for: "test-pack")?.files.isEmpty == false)
     }
 }
 
@@ -1270,8 +823,6 @@ struct StaleArtifactReconciliationTests {
                     description: "Kept MCP server",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-keep", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -1282,8 +833,6 @@ struct StaleArtifactReconciliationTests {
                     description: "MCP server to be dropped",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-drop", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -1314,8 +863,6 @@ struct StaleArtifactReconciliationTests {
                     description: "Kept MCP server",
                     type: .mcpServer,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
                     installAction: .mcpServer(MCPServerConfig(
                         name: "mcp-keep", command: "/usr/bin/true", args: [], env: [:]
                     ))
@@ -1359,8 +906,6 @@ struct StaleArtifactReconciliationTests {
                     description: "Pack settings",
                     type: .configuration,
                     packIdentifier: "test-pack",
-                    dependencies: [],
-                    isRequired: false,
                     installAction: .settingsMerge(source: settingsFileV1)
                 ),
             ]

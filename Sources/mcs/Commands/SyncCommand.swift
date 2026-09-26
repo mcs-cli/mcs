@@ -19,9 +19,6 @@ struct SyncCommand: LockedCommand {
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
-    @Flag(name: .shortAndLong, help: "Customize which components to include per pack")
-    var customize = false
-
     @Flag(name: .shortAndLong, help: "Install to global scope (MCP servers with user scope, files to ~/.claude/)")
     var global = false
 
@@ -97,8 +94,6 @@ struct SyncCommand: LockedCommand {
         )
 
         let globalState = try Self.loadGlobalState(env: env, output: output)
-        let persistedExclusions = globalState.allExcludedComponents
-
         if !prune, Self.scopeIsBlockedByUnloadablePack(
             configured: globalState.configuredPacks, registry: registry, output: output
         ) {
@@ -111,7 +106,6 @@ struct SyncCommand: LockedCommand {
                 registry: registry,
                 previouslyConfigured: globalState.configuredPacks,
                 globallyInstalled: nil,
-                excludedComponents: persistedExclusions,
                 scopeLabel: "Global",
                 targetPath: env.claudeDirectory.path,
                 output: output
@@ -119,7 +113,6 @@ struct SyncCommand: LockedCommand {
         } else {
             try configurator.interactiveConfigure(
                 dryRun: dryRun,
-                customize: customize,
                 globallyInstalledPacks: []
             )
         }
@@ -158,7 +151,6 @@ struct SyncCommand: LockedCommand {
             output.error("Delete .claude/.mcs-project and re-run 'mcs sync'.")
             throw ExitCode.failure
         }
-        let persistedExclusions = projectState.allExcludedComponents
         let previouslyConfigured = projectState.configuredPacks
 
         let globallyInstalledPacks = try Self.loadGlobalState(env: env, output: output).configuredPacks
@@ -175,7 +167,6 @@ struct SyncCommand: LockedCommand {
                 registry: registry,
                 previouslyConfigured: previouslyConfigured,
                 globallyInstalled: globallyInstalledPacks,
-                excludedComponents: persistedExclusions,
                 scopeLabel: "Project",
                 targetPath: projectPath.path,
                 output: output
@@ -183,7 +174,6 @@ struct SyncCommand: LockedCommand {
         } else {
             try configurator.interactiveConfigure(
                 dryRun: dryRun,
-                customize: customize,
                 globallyInstalledPacks: globallyInstalledPacks
             )
         }
@@ -322,7 +312,6 @@ struct SyncCommand: LockedCommand {
         registry: TechPackRegistry,
         previouslyConfigured: Set<String>,
         globallyInstalled: Set<String>?,
-        excludedComponents: [String: Set<String>],
         scopeLabel: String,
         targetPath: String,
         output: CLIOutput
@@ -358,11 +347,7 @@ struct SyncCommand: LockedCommand {
         if dryRun {
             try configurator.dryRun(packs: packs)
         } else {
-            try configurator.configure(
-                packs: packs,
-                confirmRemovals: prune && !yes,
-                excludedComponents: excludedComponents
-            )
+            try configurator.configure(packs: packs, confirmRemovals: prune && !yes)
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }

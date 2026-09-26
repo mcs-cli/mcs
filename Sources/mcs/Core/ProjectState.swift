@@ -131,9 +131,9 @@ struct ProjectState {
         var configuredAt: String?
         var configuredPacks: [String] = []
         var packArtifacts: [String: PackArtifactRecord] = [:]
-        /// Component IDs excluded per pack (packID -> [componentID]).
-        /// Exclusion-based: new components added by pack updates are included by default.
-        var excludedComponents: [String: [String]] = [:]
+        /// Written by the removed `--customize` flag; read once so sync can announce the
+        /// components it now installs, then cleared.
+        var excludedComponents: [String: [String]]?
         /// Template placeholder values resolved during the last sync.
         /// Used by doctor to re-render expected sections for content-hash comparison.
         var resolvedValues: [String: String]?
@@ -176,7 +176,7 @@ struct ProjectState {
     mutating func removePack(_ identifier: String) {
         storage.configuredPacks.removeAll { $0 == identifier }
         storage.packArtifacts.removeValue(forKey: identifier)
-        storage.excludedComponents.removeValue(forKey: identifier)
+        storage.excludedComponents?.removeValue(forKey: identifier)
     }
 
     /// The MCS version that last wrote this file.
@@ -202,25 +202,14 @@ struct ProjectState {
         storage.packArtifacts[packID] = record
     }
 
-    // MARK: - Component Exclusions
+    // MARK: - Legacy Component Exclusions
 
-    /// Get excluded component IDs for a pack.
-    func excludedComponents(for packID: String) -> Set<String> {
-        Set(storage.excludedComponents[packID] ?? [])
+    var legacyExcludedComponents: [String: [String]] {
+        storage.excludedComponents ?? [:]
     }
 
-    /// Set excluded component IDs for a pack. Pass empty set to clear exclusions.
-    mutating func setExcludedComponents(_ componentIDs: Set<String>, for packID: String) {
-        if componentIDs.isEmpty {
-            storage.excludedComponents.removeValue(forKey: packID)
-        } else {
-            storage.excludedComponents[packID] = componentIDs.sorted()
-        }
-    }
-
-    /// All excluded components across all packs: packID -> Set<componentID>.
-    var allExcludedComponents: [String: Set<String>] {
-        storage.excludedComponents.mapValues { Set($0) }
+    mutating func clearLegacyExcludedComponents() {
+        storage.excludedComponents = nil
     }
 
     // MARK: - Resolved Values

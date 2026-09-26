@@ -29,7 +29,7 @@ The export wizard discovers your MCP servers, hooks, skills, commands, agents, p
 - Brew dependency hints are added as TODO comments for MCP server commands
 
 **What you should review after export:**
-- Add `dependencies:` between components (e.g., MCP server depends on brew package)
+- Order components so each comes after what it needs (install order is declaration order)
 - Add `brew:` components for runtime dependencies (node, uv, python3)
 - Add `displayName:` where the auto-generated ID isn't descriptive enough
 - Add `supplementaryDoctorChecks:` for health verification
@@ -161,7 +161,6 @@ Register MCP servers with the Claude CLI:
   # Standard (stdio) transport
   - id: my-server
     description: Code analysis server
-    dependencies: [node]
     mcp:
       command: npx
       args: ["-y", "my-server@latest"]
@@ -206,7 +205,6 @@ Hook scripts run at specific Claude Code lifecycle events:
 ```yaml
   - id: session-hook
     description: Shows git status on session start
-    dependencies: [jq]
     hookEvent: SessionStart
     hook:
       source: hooks/session_start.sh
@@ -281,7 +279,6 @@ Merge Claude Code settings (plan mode, env vars, etc.):
 ```yaml
   - id: settings
     description: Claude Code configuration
-    isRequired: true
     settingsFile: config/settings.json
 ```
 
@@ -309,7 +306,6 @@ Add patterns to the user's global gitignore:
 ```yaml
   - id: gitignore
     description: Gitignore entries
-    isRequired: true
     gitignore:
       - .xcodebuildmcp
 ```
@@ -331,9 +327,11 @@ For anything that doesn't fit the other categories:
 
 ---
 
-## Dependencies
+## Install Order
 
-Components can depend on other components. Use short IDs — the engine auto-prefixes them with your pack identifier:
+A pack always installs every component it declares — there is no way for a user to leave one out. If someone needs a different set, they fork the pack or write their own.
+
+Components install in the order you declare them, so put each component after the ones it needs:
 
 ```yaml
 identifier: my-pack
@@ -345,21 +343,14 @@ components:
 
   - id: my-server
     description: Code search
-    dependencies: [node]           # → my-pack.node
     mcp:
       command: npx
       args: ["-y", "my-server@latest"]
 ```
 
-Component `dependencies` are declarative only for now ([#419](https://github.com/mcs-cli/mcs/issues/419)): validation rejects a short or `my-pack.`-prefixed reference that names no component in the pack, and nothing else reads them. They do not reorder installation — a project sync installs every brew package and plugin first, then the remaining components in declaration order, while a global sync installs all components in declaration order. Declare a dependency before the components that need it, and don't make a brew or plugin component depend on any other kind of component, since in a project sync it installs before them. (Excluding a component does drop templates, but through the template's own `dependencies:` — see [Templates](#templates).)
+A project sync installs every brew package and plugin first, then the remaining components in declaration order; a global sync installs all components in declaration order. So a brew or plugin component can't rely on any other kind of component, since in a project sync it installs before them.
 
-A cross-pack dependency uses the full `pack.component` form; it is not validated:
-
-```yaml
-  - id: my-tool
-    dependencies: [other-pack.node]   # Different pack — not auto-prefixed
-    brew: my-tool
-```
+`dependencies:` and `isRequired:` are deprecated and ignored. Older packs that still declare them keep loading, and `mcs pack validate` warns about each one.
 
 ---
 
@@ -683,8 +674,6 @@ mcs sync                  # Local packs pick up changes automatically
 **Make hooks resilient.** A crashing hook blocks Claude Code, so fail open. In bash, start with `set -euo pipefail` and `trap 'exit 0' ERR`, and check for required tools before using them (`command -v jq >/dev/null 2>&1 || exit 0`). In another language, do the equivalent: catch everything at the top level and exit 0 on anything unexpected.
 
 **Prefer a runtime users already have.** A hook is only as reliable as its interpreter. `bash` is always there; `node` or `python3` may be missing, or installed only inside a version manager that Claude Code's environment cannot see. Declare a brew component for the runtime your hooks need — `mcs pack validate` warns when you don't — and reach for a `.sh` wrapper when the interpreter needs shell initialisation first.
-
-**Use `isRequired: true`** for components that should always be installed (settings, gitignore). Required components can't be deselected during `mcs sync --customize`.
 
 **Add `fixCommand`** to doctor checks when auto-repair is possible. Users love `mcs doctor --fix`.
 

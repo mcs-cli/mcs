@@ -116,7 +116,6 @@ struct PickerDeltaTests {
         let group = SelectableGroup(
             title: "Packs",
             items: items,
-            requiredItems: [],
             showsDelta: true,
             lockedItems: locked
         )

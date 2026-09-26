@@ -27,15 +27,13 @@ Components are defined in the `components` array. Each component represents some
 
 ### Common Fields
 
-These fields are available on every component, regardless of which shorthand key is used:
+These fields are available on every component, regardless of which shorthand key is used. A pack installs every component it declares, in declaration order; the retired `dependencies` and `isRequired` keys are ignored, and `mcs pack validate` warns about them.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `id` | `String` | Yes | Short identifier (no dots). Auto-prefixed with `<pack>.` |
 | `description` | `String` | Yes | One-line description |
 | `displayName` | `String` | No | Display name (defaults to `id`) |
-| `dependencies` | `[String]` | No | Component IDs this depends on. Short form auto-prefixed |
-| `isRequired` | `Boolean` | No | If `true`, cannot be deselected in `--customize` mode |
 | `hookEvent` | `String` | No | Claude Code event for hook components |
 | `hookMatcher` | `String` | No | Regex to filter when hook fires (e.g., tool name for `PreToolUse`). Requires `hookEvent` |
 | `hookTimeout` | `Integer` | No | Seconds before canceling the hook (defaults: 600 command, 30 prompt, 60 agent) |
@@ -275,7 +273,6 @@ Infers: `type: agent`, `installAction: copyPackFile(fileType: agent)`
 ```yaml
 - id: settings
   description: Claude Code configuration
-  isRequired: true
   settingsFile: config/settings.json
 ```
 
@@ -294,7 +291,6 @@ Infers: `type: configuration`, `installAction: settingsFile`
 ```yaml
 - id: gitignore
   description: Global gitignore
-  isRequired: true
   gitignore:
     - .xcodebuildmcp
 ```
@@ -621,7 +617,6 @@ The engine validates manifests on load. These rules are enforced:
 - `schemaVersion` must be `1`
 - `identifier` must be non-empty, lowercase alphanumeric with hyphens, not starting with a hyphen
 - Component IDs must be short names without dots (auto-prefixed with `<pack>.`) and unique within the pack
-- Intra-pack dependency references must resolve to existing component IDs in the same pack
 - Template `sectionIdentifier` must be a short name without dots (auto-prefixed with `<pack>.`)
 - `hookTimeout` must be a positive integer
 - `hookMatcher`, `hookTimeout`, `hookAsync`, `hookStatusMessage` and `hookInterpreter` all require `hookEvent` to be set
@@ -651,6 +646,7 @@ The engine validates manifests on load. These rules are enforced:
 | Unreferenced root-level files | Files at the pack root (excluding `techpack.yaml`, `README.md`, `LICENSE`, etc.) not referenced by any component |
 | MCP dependency gap | MCP server uses `python`/`node` command but no brew component installs that runtime |
 | Missing python module | MCP server uses `python -m <module>` but `<module>/` directory not found in the pack |
+| Deprecated key | A component or template declares `dependencies` or `isRequired`, which are ignored |
 
 Infrastructure directories (`.git`, `.github`, `.gitlab`, `.vscode`, `node_modules`, `__pycache__`, `.build`) and common root-level files (`techpack.yaml`, `README.md`, `LICENSE`, `Makefile`, etc.) are excluded from unreferenced-file checks.
 
@@ -731,7 +727,6 @@ components:
 
   - id: prettier-server
     description: Code formatting MCP server
-    dependencies: [node]
     mcp:
       command: npx
       args: ["-y", "prettier-mcp-server@latest"]
@@ -752,12 +747,10 @@ components:
 
   - id: settings
     description: Plan mode and thinking
-    isRequired: true
     settingsFile: config/settings.json
 
   - id: gitignore
     description: Gitignore entries
-    isRequired: true
     gitignore:
       - .eslintcache
 

@@ -19,7 +19,7 @@ struct ScopeDuplicationCheck: DoctorCheck {
 
     /// Computed once by `checks(...)` and reused by `check()` and `fixCommandPreview`, which the
     /// runner reads four times in total within one pass. Diagnosing is not free — two state
-    /// decodes, a disk read per template, and a hash of every installed file — and nothing mutates
+    /// decodes and a hash of every installed file — and nothing mutates
     /// project state between those reads. `fix()` re-derives instead, because the user is prompted
     /// in between and the filesystem may have moved on.
     private let diagnosis: Diagnosis
@@ -167,30 +167,8 @@ struct ScopeDuplicationCheck: DoctorCheck {
     }
 
     private static func diagnose(_ inputs: Inputs) -> Diagnosis {
-        let pack = inputs.pack
-        let projectExcluded = inputs.projectState.excludedComponents(for: inputs.packID)
-        let globalExcluded = inputs.globalState.excludedComponents(for: inputs.packID)
-
-        // One partition, read from both sides: components shared with the global scope are
-        // candidates for duplication, and the rest are what removing the project copy would lose.
-        let globalIDs = Set(pack.components.filter { !globalExcluded.contains($0.id) }.map(\.id))
-        let projectComponents = pack.components.filter { !projectExcluded.contains($0.id) }
-        let duplicatedComponents = projectComponents.filter {
-            globalIDs.contains($0.id) && duplicatesAcrossScopes($0.installAction)
-        }
-        let projectOnly = projectComponents.filter { !globalIDs.contains($0.id) }
-
-        let duplicatedSectionCount: Int
-        do {
-            let templates = try pack.templates
-            duplicatedSectionCount = sectionIdentifiers(templates, excluding: projectExcluded)
-                .intersection(sectionIdentifiers(templates, excluding: globalExcluded))
-                .count
-        } catch {
-            return .resolved(.warn(
-                "could not load templates for '\(inputs.packID)': \(error.localizedDescription)"
-            ))
-        }
+        let duplicatedComponents = inputs.pack.components.filter { duplicatesAcrossScopes($0.installAction) }
+        let duplicatedSectionCount = Set(inputs.pack.templateSectionIdentifiers).count
 
         guard !duplicatedComponents.isEmpty || duplicatedSectionCount > 0 else {
             return .resolved(.pass("configured in both scopes, but no artifacts overlap"))
@@ -198,8 +176,7 @@ struct ScopeDuplicationCheck: DoctorCheck {
 
         // First obstacle wins — each gate names something the user must resolve before the
         // project copy can be removed without losing anything.
-        let blocked = divergentComponentsObstacle(projectOnly)
-            ?? divergentPromptObstacle(inputs)
+        let blocked = divergentPromptObstacle(inputs)
             ?? editedFileObstacle(inputs)
 
         return .duplicated(
@@ -230,13 +207,6 @@ struct ScopeDuplicationCheck: DoctorCheck {
         }
     }
 
-    private static func sectionIdentifiers(
-        _ templates: [TemplateContribution],
-        excluding excluded: Set<String>
-    ) -> Set<String> {
-        Set(templates.excludingDependencies(on: excluded).map(\.sectionIdentifier))
-    }
-
     private static func summarize(components: [ComponentDefinition], sectionCount: Int) -> String {
         let counts = components.reduce(into: [ComponentType: Int]()) { $0[$1.type, default: 0] += 1 }
         var parts = ComponentType.allCases.compactMap { type in
@@ -255,15 +225,6 @@ struct ScopeDuplicationCheck: DoctorCheck {
     }
 
     // MARK: - Obstacles to a lossless removal
-
-    /// The global scope must install everything the project scope does. Divergent `--customize`
-    /// choices mean removal would delete a component nothing else provides.
-    private static func divergentComponentsObstacle(_ projectOnly: [ComponentDefinition]) -> String? {
-        guard !projectOnly.isEmpty else { return nil }
-        let names = projectOnly.map(\.displayName).sorted().joined(separator: ", ")
-        return "the project scope installs \(names), which the global scope excludes — "
-            + "remove it with 'mcs sync' instead"
-    }
 
     /// Both scopes must have answered the pack's prompts identically, or removal would silently
     /// switch this project onto the global answer. The project's key set is used deliberately — a

@@ -35,7 +35,6 @@ protocol SyncStrategy {
     func installArtifacts(
         _ pack: any TechPack,
         previousArtifacts: PackArtifactRecord?,
-        excludedIDs: Set<String>,
         resolvedValues: [String: String],
         preloadedTemplates: [TemplateContribution]?,
         executor: inout ComponentExecutor,
@@ -55,7 +54,6 @@ protocol SyncStrategy {
     ///   and per-pack SHA-256 hashes of the contributed values for drift detection.
     func composeSettings(
         packs: [any TechPack],
-        excludedComponents: [String: Set<String>],
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput

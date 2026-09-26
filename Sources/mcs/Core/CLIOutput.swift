@@ -155,8 +155,7 @@ struct CLIOutput {
         var out = "\n" + sectionHeaderString("Already installed globally")
         for name in names {
             // ✓ rather than ●/○: those are toggle glyphs and would read as a checkbox.
-            // ✓ states a fact. Same green as "Always included" — both sections mean
-            // "you already have this", and the headers disambiguate.
+            // ✓ states a fact.
             out += "\(indent)\(green)\u{2713}\(reset) \(name)\n"
         }
         return out + "\n\(indent)\(dim)Manage these with 'mcs sync --global'\(reset)\n"
@@ -649,15 +648,6 @@ struct CLIOutput {
 
         output += lockedSectionString(groups.flatMap(\.lockedItems), indent: "    ")
 
-        let allRequired = groups.flatMap(\.requiredItems)
-        if !allRequired.isEmpty {
-            output += "\n"
-            output += sectionHeaderString("Always included")
-            for req in allRequired {
-                output += "    \(green)\u{2713}\(reset) \(req.name)\n"
-            }
-        }
-
         output += "\n"
         if let cursorRowState {
             let verb = PickerDelta.footerVerb(state: cursorRowState)
@@ -798,15 +788,6 @@ struct CLIOutput {
 
         write(lockedSectionString(groups.flatMap(\.lockedItems), indent: "       "))
 
-        let allRequired = groups.flatMap(\.requiredItems)
-        if !allRequired.isEmpty {
-            write("\n")
-            sectionHeader("Always included")
-            for req in allRequired {
-                write("       \(green)\u{2713}\(reset) \(req.name)\n")
-            }
-        }
-
         write("\n")
     }
 
@@ -860,14 +841,9 @@ struct SelectableItem {
     var globallyInstalled: Bool = false
 }
 
-struct RequiredItem {
-    let name: String
-}
-
 struct SelectableGroup {
     let title: String
     var items: [SelectableItem]
-    let requiredItems: [RequiredItem]
     /// When true, items' `baselineSelected` drives delta-tag rendering and a
     /// dynamic footer. Callers must populate `baselineSelected` on every item
     /// or the renderer will treat pre-installed packs as brand-new.

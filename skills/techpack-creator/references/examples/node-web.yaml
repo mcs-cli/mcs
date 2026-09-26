@@ -48,7 +48,6 @@ components:
   # ── Hooks ─────────────────────────────────────────────────
   - id: hook-session-start
     description: Git status and dependency check on session start
-    dependencies: [jq]
     hookEvent: SessionStart
     hook:
       source: hooks/session_start.sh
@@ -58,7 +57,6 @@ components:
   # component that installs the runtime.
   - id: hook-format-check
     description: Formats staged files after an edit
-    dependencies: [node]
     hookEvent: PostToolUse
     hookMatcher: "Edit|Write"
     hookAsync: true
@@ -75,14 +73,12 @@ components:
 
   - id: command-pr
     description: /pr command for creating pull requests
-    dependencies: [gh]
     command:
       source: commands/pr.md
       destination: pr.md
 
   - id: command-review-pr
     description: /review-pr command for multi-agent PR review
-    dependencies: [gh, plugin-pr-review]
     command:
       source: commands/review-pr.md
       destination: review-pr.md
@@ -90,7 +86,6 @@ components:
   # ── Configuration ─────────────────────────────────────────
   - id: settings
     description: Claude Code settings (plan mode, thinking)
-    isRequired: true
     settingsFile: config/settings.json
 
 templates:
