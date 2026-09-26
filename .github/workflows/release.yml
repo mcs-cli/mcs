@@ -16,7 +16,7 @@ jobs:
     name: Verify Version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Verify tag matches source version
         env:
@@ -29,14 +29,42 @@ jobs:
           fi
           echo "Version check passed: ${TAG_NAME}"
 
+  release-notes:
+    name: Release Notes
+    needs: verify-version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      notes: ${{ steps.build.outputs.notes }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build release notes
+        id: build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          NOTES=$(.github/scripts/release-notes.sh build "${TAG_NAME}")
+          echo "${NOTES}"
+          {
+            echo "notes<<RELEASE_NOTES_EOF"
+            echo "${NOTES}"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
   resolve:
     name: Resolve Dependencies
     needs: verify-version
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
@@ -53,9 +81,9 @@ jobs:
     needs: resolve
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -69,12 +97,12 @@ jobs:
 
   build-and-release:
     name: Build and Release
-    needs: [test]
+    needs: [test, release-notes]
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v5
+      - uses: actions/cache/restore@v6
         with:
           path: |
             .build/checkouts
@@ -113,10 +141,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
           TARBALL: ${{ env.TARBALL }}
+          NOTES: ${{ needs.release-notes.outputs.notes }}
         run: |
           gh release create "${TAG_NAME}" \
             --verify-tag \
-            --generate-notes \
+            --notes "${NOTES}" \
             "${TARBALL}" SHA256SUMS
 
       - name: Update Homebrew tap

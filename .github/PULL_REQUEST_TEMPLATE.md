@@ -12,6 +12,19 @@ GitHub auto-closes an issue only on a `Closes #N` reference in the body — the
 PR closes no issue.
 -->
 
+## Release note
+
+<!--
+What a user of `mcs` should know, one bullet per change. This text goes into the
+release notes as written, so describe the effect, not the implementation.
+
+Prefix each bullet with BREAKING: (users must change something), NEW:, or FIX:.
+No prefix means an improvement. Write a single "none" for internal-only changes
+(tests, CI, docs, refactors).
+-->
+
+-
+
 ## Changes
 
 <!--
