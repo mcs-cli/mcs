@@ -55,6 +55,9 @@ enum Constants {
 
         /// Stderr text `claude mcp remove` prints when the server is not registered in that scope.
         static let mcpServerNotFound = "No MCP server named"
+
+        /// Stderr text `claude plugin remove` prints when the plugin is not installed.
+        static let pluginNotFound = "not found in installed plugins"
     }
 
     // MARK: - JSON Keys

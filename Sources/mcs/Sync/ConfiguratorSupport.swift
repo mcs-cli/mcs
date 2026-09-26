@@ -237,21 +237,6 @@ enum ConfiguratorSupport {
         }
     }
 
-    /// Build a `ComponentExecutor` from the common dependencies.
-    static func makeExecutor(
-        environment: Environment,
-        output: CLIOutput,
-        shell: any ShellRunning,
-        claudeCLI: (any ClaudeCLI)? = nil
-    ) -> ComponentExecutor {
-        ComponentExecutor(
-            environment: environment,
-            output: output,
-            shell: shell,
-            claudeCLI: claudeCLI ?? ClaudeIntegration(shell: shell)
-        )
-    }
-
     /// Ensure global gitignore core entries are present.
     static func ensureGitignoreEntries(shell: any ShellRunning) throws {
         let manager = GitignoreManager(shell: shell)

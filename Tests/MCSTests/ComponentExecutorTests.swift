@@ -13,6 +13,32 @@ struct ComponentExecutorTests {
         )
     }
 
+    // MARK: - removePlugin
+
+    private func removePlugin(returning result: ShellResult) -> Bool {
+        let env = Environment()
+        let cli = MockClaudeCLI()
+        cli.result = result
+        let exec = ComponentExecutor(
+            environment: env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: env),
+            claudeCLI: cli
+        )
+        return exec.removePlugin("lint@acme")
+    }
+
+    @Test("removePlugin counts a plugin that is already uninstalled as removed")
+    func removePluginAlreadyGone() {
+        let stderr = "✘ Failed to uninstall plugin \"lint\": Plugin \"lint\" not found in installed plugins"
+        #expect(removePlugin(returning: ShellResult(exitCode: 1, stdout: "", stderr: stderr)))
+    }
+
+    @Test("removePlugin reports any other failure")
+    func removePluginRealFailure() {
+        #expect(!removePlugin(returning: ShellResult(exitCode: 1, stdout: "", stderr: "network unreachable")))
+    }
+
     // MARK: - installProjectFile placeholder substitution
 
     @Test("installProjectFile substitutes PROJECT_DIR_NAME and REPO_NAME placeholders")

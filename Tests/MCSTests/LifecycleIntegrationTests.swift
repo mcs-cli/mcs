@@ -4192,11 +4192,11 @@ struct PackRemoveCleanupFailureTests {
     }
 
     private func unconfigureScopes(
-        bed: LifecycleTestBed, registry: TechPackRegistry, projectPaths: [String]
+        bed: LifecycleTestBed, registry: TechPackRegistry, projectPaths: [String], globallyConfigured: Bool = true
     ) -> [String] {
         RemovePack.unconfigureScopes(
             "hook-pack",
-            globallyConfigured: true,
+            globallyConfigured: globallyConfigured,
             projectPaths: projectPaths,
             registry: registry,
             env: bed.env,
@@ -4211,19 +4211,45 @@ struct PackRemoveCleanupFailureTests {
         defer { bed.cleanup() }
         let registry = try configureHookPack(bed: bed)
 
+        let before = try RemovePack.affectedScopes("hook-pack", env: bed.env)
+        #expect(before == RemovePack.AffectedScopes(
+            globallyConfigured: true, liveProjectPaths: [bed.project.path], staleProjectPaths: []
+        ))
+
         let settings = try String(contentsOf: bed.env.claudeSettings, encoding: .utf8)
         try "{ not json".write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
 
-        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: [bed.project.path])
-            == [ProjectIndex.globalSentinel])
+        let failed = unconfigureScopes(bed: bed, registry: registry, projectPaths: before.liveProjectPaths)
+        #expect(failed == [ProjectIndex.globalSentinel])
         #expect(try bed.globalState().artifacts(for: "hook-pack")?.hookCommands.isEmpty == false)
         #expect(try !bed.projectState().configuredPacks.contains("hook-pack"))
 
+        let index = ProjectIndex(path: bed.env.projectsIndexFile)
+        var data = try index.load()
+        RemovePack.pruneIndexClaims("hook-pack", keeping: failed, stalePaths: [], index: index, in: &data)
+        try index.save(data)
         try settings.write(to: bed.env.claudeSettings, atomically: true, encoding: .utf8)
 
-        // The first run pruned the project's index claim, so a retry only reaches the global scope.
-        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: []) == [])
+        // A retry rediscovers only what the first run left: the global scope, whose claim was kept.
+        let retry = try RemovePack.affectedScopes("hook-pack", env: bed.env)
+        #expect(retry == RemovePack.AffectedScopes(
+            globallyConfigured: true, liveProjectPaths: [], staleProjectPaths: []
+        ))
+        #expect(unconfigureScopes(bed: bed, registry: registry, projectPaths: retry.liveProjectPaths) == [])
         #expect(try !bed.globalState().configuredPacks.contains("hook-pack"))
+    }
+
+    @Test("A project whose state file can't be read is reported as failed")
+    func unreadableProjectStateIsReportedAsFailed() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let registry = try configureHookPack(bed: bed)
+
+        try "{ not json".write(to: bed.projectStateFile, atomically: true, encoding: .utf8)
+
+        #expect(unconfigureScopes(
+            bed: bed, registry: registry, projectPaths: [bed.project.path], globallyConfigured: false
+        ) == [bed.project.path])
     }
 
     @Test("A failed project scope is reported by the exact path the index holds")

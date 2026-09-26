@@ -438,7 +438,6 @@ struct Configurator {
             switch result {
             case .removed, .stillNeeded:
                 removedBrewPackages.insert(package)
-                if case .removed = result { output.dimmed("  Removed brew package: \(package)") }
             case .failed:
                 output.warn("  Could not remove brew package '\(package)' — re-run '\(retryHint)' to retry")
             }
@@ -453,7 +452,6 @@ struct Configurator {
             switch result {
             case .removed, .stillNeeded:
                 removedPlugins.insert(pluginName)
-                if case .removed = result { output.dimmed("  Removed plugin: \(PluginRef(pluginName).bareName)") }
             case .failed:
                 output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — re-run '\(retryHint)' to retry")
             }
@@ -464,7 +462,6 @@ struct Configurator {
         for server in artifacts.mcpServers
             where removeMCPServerArtifact(server, exec: exec) {
             removedServers.insert(server)
-            output.dimmed("  Removed MCP server: \(server.name)")
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
 
@@ -967,13 +964,9 @@ struct Configurator {
 
         // MCP servers (catches both removals and scope changes — MCPServerRef hashes on name+scope)
         let staleMCPs = Set(previous.mcpServers).subtracting(currentArtifacts.mcpServers)
-        for server in staleMCPs {
-            if removeMCPServerArtifact(server, exec: exec) {
-                output.dimmed("  Removed stale MCP server: \(server.name) (scope: \(server.scope))")
-            } else {
-                currentArtifacts.mcpServers.append(server)
-                output.warn("  Could not remove stale MCP server '\(server.name)' — will retry on next sync")
-            }
+        for server in staleMCPs where !removeMCPServerArtifact(server, exec: exec) {
+            currentArtifacts.mcpServers.append(server)
+            output.warn("  Could not remove stale MCP server '\(server.name)' — will retry on next sync")
         }
 
         // Files (also reconcile fileHashes to prevent stale content-drift warnings)
@@ -1043,9 +1036,7 @@ struct Configurator {
                     excludingScope: scope.scopeIdentifier, excludingPack: packID
                 )
                 switch result {
-                case .removed:
-                    output.dimmed("  Removed stale brew package: \(package)")
-                case .stillNeeded:
+                case .removed, .stillNeeded:
                     break
                 case .failed:
                     currentArtifacts.brewPackages.append(package)
@@ -1058,9 +1049,7 @@ struct Configurator {
                     excludingScope: scope.scopeIdentifier, excludingPack: packID
                 )
                 switch result {
-                case .removed:
-                    output.dimmed("  Removed stale plugin: \(PluginRef(name).bareName)")
-                case .stillNeeded:
+                case .removed, .stillNeeded:
                     break
                 case .failed:
                     currentArtifacts.plugins.append(name)
@@ -1152,8 +1141,8 @@ struct Configurator {
         case failed
     }
 
-    /// Remove a single MCP server.
-    /// - Returns: `true` if the server was successfully removed.
+    /// Remove a single MCP server. The executor logs the outcome.
+    /// - Returns: `true` if the server is no longer registered.
     private func removeMCPServerArtifact(
         _ server: MCPServerRef,
         exec: ComponentExecutor
