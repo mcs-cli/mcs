@@ -68,7 +68,7 @@ struct ComponentDefinition: Identifiable {
     /// Hook registration metadata for hookFile components. When set, the engine
     /// auto-registers this hook in settings.local.json with the specified handler fields.
     let hookRegistration: HookRegistration?
-    let installAction: ComponentInstallAction
+    private(set) var installAction: ComponentInstallAction
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
     /// Used for components with .shellCommand or multi-step verification needs.
@@ -133,6 +133,14 @@ extension ComponentDefinition {
             ),
             destination
         )
+    }
+
+    func withInstallAction(_ action: ComponentInstallAction) -> ComponentDefinition {
+        // Copies `self` rather than calling the init: a stored property added later with a default
+        // would otherwise be silently reset by a field-by-field rebuild.
+        var copy = self
+        copy.installAction = action
+        return copy
     }
 }
 

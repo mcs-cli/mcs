@@ -282,6 +282,101 @@ struct HookAlwaysNamespaceTests {
     }
 }
 
+// MARK: - Wrapped Pack Preservation Tests
+
+private struct OverridingTechPack: TechPack {
+    let identifier = "my-pack"
+    let displayName = "My Pack"
+    let description = "Pack overriding every defaulted TechPack member"
+    let components: [ComponentDefinition]
+    let templates: [TemplateContribution] = []
+
+    var templateSectionIdentifiers: [String] {
+        ["my-section"]
+    }
+
+    func supplementaryDoctorChecks(projectRoot _: URL?) -> [any DoctorCheck] {
+        []
+    }
+
+    func configureProject(at _: URL, context _: ProjectConfigContext) throws {}
+
+    func templateValues(context _: ProjectConfigContext) throws -> [String: String] {
+        ["KEY": "value"]
+    }
+
+    func declaredPrompts(context _: ProjectConfigContext) -> [PromptDefinition] {
+        [PromptDefinition(
+            key: "KEY", type: .input,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: nil, scriptCommand: nil
+        )]
+    }
+}
+
+struct WrappedPackPreservationTests {
+    @Test("Namespaced component keeps every property except its destination")
+    func namespacedComponentKeepsProperties() {
+        let registration = HookRegistration(event: .sessionStart, matcher: "startup", timeout: 5)
+        let component = ComponentDefinition(
+            id: "my-pack.lint",
+            displayName: "lint",
+            description: "Lint hook",
+            type: .hookFile,
+            packIdentifier: "my-pack",
+            hookRegistration: registration,
+            installAction: .copyPackFile(source: collisionTestDummySource, destination: "lint.sh", fileType: .hook),
+            supplementaryChecks: { _, _ in
+                [FileExistsCheck(name: "lint-extra", section: "Hooks", path: collisionTestDummySource)]
+            }
+        )
+        let pack = makeCollisionPack(id: "my-pack", components: [component])
+
+        let result = DestinationCollisionResolver.resolveCollisions(
+            packs: [pack], output: collisionTestOutput, filesystemContext: MockCollisionContext()
+        )
+
+        let resolved = result[0].components[0]
+        guard case let .copyPackFile(source, destination, fileType) = resolved.installAction else {
+            Issue.record("Expected copyPackFile install action")
+            return
+        }
+        #expect(destination == "my-pack/lint.sh")
+        #expect(source == collisionTestDummySource)
+        #expect(fileType == .hook)
+        #expect(resolved.id == component.id)
+        #expect(resolved.displayName == component.displayName)
+        #expect(resolved.description == component.description)
+        #expect(resolved.type == component.type)
+        #expect(resolved.packIdentifier == component.packIdentifier)
+        #expect(resolved.hookRegistration == registration)
+        let checks = resolved.supplementaryChecks(nil, Environment())
+        #expect(checks.map(\.name) == ["lint-extra"])
+    }
+
+    @Test("Wrapped pack forwards overridden TechPack members instead of their defaults")
+    func wrappedPackForwardsOverrides() throws {
+        let pack = OverridingTechPack(components: [
+            makeCollisionComponent(pack: "my-pack", id: "lint", destination: "lint.sh", fileType: .hook),
+        ])
+        let context = ProjectConfigContext(
+            projectPath: FileManager.default.temporaryDirectory,
+            repoName: "test-repo",
+            output: collisionTestOutput
+        )
+
+        let result = DestinationCollisionResolver.resolveCollisions(
+            packs: [pack], output: collisionTestOutput, filesystemContext: MockCollisionContext()
+        )
+
+        let wrapped = result[0]
+        #expect(!(wrapped is OverridingTechPack))
+        #expect(wrapped.templateSectionIdentifiers == ["my-section"])
+        #expect(try wrapped.templateValues(context: context) == ["KEY": "value"])
+        #expect(wrapped.declaredPrompts(context: context).map(\.key) == ["KEY"])
+    }
+}
+
 // MARK: - User-File Conflict Tests
 
 struct UserFileConflictTests {
