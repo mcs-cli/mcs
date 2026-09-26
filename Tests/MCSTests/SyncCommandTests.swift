@@ -33,6 +33,16 @@ struct SyncCommandTests {
         #expect(throws: (any Error).self) { try SyncCommand.parse(["--pack", "ios", "--yes"]) }
     }
 
+    @Test("Removed --customize fails with an explanation and stays out of --help")
+    func rejectsRemovedCustomize() {
+        let error = #expect(throws: (any Error).self) { try SyncCommand.parse(["--customize"]) }
+        if let error {
+            #expect(SyncCommand.message(for: error).contains("--customize has been removed"))
+            #expect(SyncCommand.exitCode(for: error) != .success)
+        }
+        #expect(!SyncCommand.helpMessage().contains("--customize"))
+    }
+
     @Test("Parses --all flag")
     func parsesAll() throws {
         let cmd = try SyncCommand.parse(["--all"])
