@@ -1214,7 +1214,7 @@ struct UpdateCheckerContextStringTests {
     )
 
     @Test("CLI-only update offers brew commands without --trust-all")
-    func cliOnly() {
+    func cliOnly() throws {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
         )
@@ -1222,6 +1222,10 @@ struct UpdateCheckerContextStringTests {
         #expect(!context.contains("--trust-all"))
         #expect(context.contains("AskUserQuestion"))
         #expect(context.contains("mcs config set update-check false"))
+        let doctor = try #require(context.range(of: "'mcs doctor'"))
+        let cleanup = try #require(context.range(of: "mcs cleanup -af"))
+        #expect(doctor.lowerBound < cleanup.lowerBound)
+        #expect(context.contains("mcs doctor --fix --yes"))
         #expect(context.contains("mcs cleanup -af"))
     }
 

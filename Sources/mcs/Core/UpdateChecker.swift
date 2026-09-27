@@ -669,8 +669,16 @@ struct UpdateChecker {
         lines.append("On yes, run: \(commands.joined(separator: " && "))")
         lines.append(
             "Report the outcome. Claude Code picks up the new configuration without a restart."
-                + " If the updates succeeded, suggest removing the backup files they left behind and ask"
+                + " If the updates succeeded, run 'mcs doctor' (read-only, covered by the same yes) and"
+                + " summarize it before touching any backups."
+        )
+        lines.append(
+            "If every doctor check passes, suggest removing the backup files the updates left behind and ask"
                 + " a separate AskUserQuestion yes/no before running: mcs cleanup -af"
+        )
+        lines.append(
+            "If any doctor check fails, keep the backups: do not offer cleanup. Show the failures and ask a"
+                + " separate AskUserQuestion yes/no before running: mcs doctor --fix --yes"
         )
         lines.append("Only after these questions are settled, continue with the user's original request.")
         if hasPackUpdates {
