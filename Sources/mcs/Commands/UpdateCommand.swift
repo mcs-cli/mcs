@@ -28,6 +28,8 @@ struct UpdateCommand: LockedCommand {
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
+    @OptionGroup var trust: TrustOptions
+
     var skipLock: Bool {
         dryRun
     }
@@ -266,9 +268,10 @@ struct UpdateCommand: LockedCommand {
             return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
         }
 
+        var anyTrustDeclined = false
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: shell, output: output, packsDirectory: env.packsDirectory),
-            trustManager: PackTrustManager(output: output),
+            trustManager: PackTrustManager(output: output, policy: trust.policy),
             environment: env,
             output: output
         )
@@ -299,11 +302,16 @@ struct UpdateCommand: LockedCommand {
             case .trustDeclined:
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)
+                anyTrustDeclined = true
             case .fetchFailed, .manifestInvalid, .internalError:
                 output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
                 skipped.insert(entry.identifier)
                 failed.insert(entry.identifier)
             }
+        }
+
+        if anyTrustDeclined {
+            PackTrustManager.hintTrustAllIfUnattended(output: output, subject: "changed pack scripts")
         }
 
         return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)

@@ -3592,9 +3592,13 @@ struct BootstrapIntegrationTests {
         // Pins the flag's spelling and the direction of the mapping. Without this, a renamed
         // flag or an inverted ternary would ship green — every other trust test constructs the
         // policy directly and never parses an argument vector.
-        #expect(try BootstrapCommand.parse([]).trustPolicy == .prompt)
-        #expect(try BootstrapCommand.parse(["--trust-all"]).trustPolicy == .autoAccept)
-        #expect(try BootstrapCommand.parse(["--prune", "--yes"]).trustPolicy == .prompt)
+        #expect(try BootstrapCommand.parse([]).trust.policy == .prompt)
+        #expect(try BootstrapCommand.parse(["--trust-all"]).trust.policy == .autoAccept)
+        #expect(try BootstrapCommand.parse(["--prune", "--yes"]).trust.policy == .prompt)
+        #expect(try UpdateCommand.parse(["--all-projects"]).trust.policy == .prompt)
+        #expect(try UpdateCommand.parse(["--trust-all"]).trust.policy == .autoAccept)
+        #expect(try UpdatePack.parse(["some-pack"]).trust.policy == .prompt)
+        #expect(try UpdatePack.parse(["--trust-all"]).trust.policy == .autoAccept)
     }
 }
 

@@ -357,12 +357,14 @@ struct UpdatePack: LockedCommand {
     @Argument(help: "Pack identifier to update (omit for all)")
     var identifier: String?
 
+    @OptionGroup var trust: TrustOptions
+
     func perform() throws {
         let ctx = PackCommandContext()
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
-            trustManager: PackTrustManager(output: ctx.output),
+            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy),
             environment: ctx.env,
             output: ctx.output
         )
@@ -389,6 +391,7 @@ struct UpdatePack: LockedCommand {
         var updatedCount = 0
         var attemptedCount = 0
         var failedPacks: [String] = []
+        var anyTrustDeclined = false
 
         for entry in packsToUpdate {
             if entry.isLocalPack {
@@ -420,10 +423,15 @@ struct UpdatePack: LockedCommand {
                 ctx.output.packChangeSummary(diff)
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
+                anyTrustDeclined = true
             case .fetchFailed, .manifestInvalid, .internalError:
                 ctx.output.warn("\(entry.identifier): \(result.reason ?? "update failed")")
                 failedPacks.append(entry.identifier)
             }
+        }
+
+        if anyTrustDeclined {
+            PackTrustManager.hintTrustAllIfUnattended(output: ctx.output, subject: "changed pack scripts")
         }
 
         // Save all updates

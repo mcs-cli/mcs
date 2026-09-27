@@ -32,6 +32,7 @@ mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope
 mcs update --all-projects        # Refresh global + every project tracked in ~/.mcs/projects.yaml (asks confirmation)
 mcs update --dry-run             # Preview what would change
+mcs update --trust-all           # Trust changed pack scripts without prompting (no TTY needed)
 mcs doctor                       # Diagnose installation health
 mcs doctor --fix                 # Diagnose, then run fixes and re-sync scopes with repairable failures (one confirmation)
 mcs doctor --pack ios            # Only check a specific pack
