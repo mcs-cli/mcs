@@ -1213,40 +1213,78 @@ struct UpdateCheckerContextStringTests {
         identifier: "ios", displayName: "iOS", localSHA: "aaa", remoteSHA: "bbb"
     )
 
-    @Test("CLI-only update offers brew commands without --trust-all")
-    func cliOnly() throws {
+    @Test("CLI-only update offers brew commands without --trust-all, doctor or cleanup")
+    func cliOnly() {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
         )
-        #expect(context.contains(UpdateChecker.cliUpgradeCommands.joined(separator: " && ")))
-        #expect(!context.contains("--trust-all"))
+        #expect(context.contains("On yes, run: \(UpdateChecker.cliUpgradeCommands.joined(separator: " && "))\n"))
         #expect(context.contains("AskUserQuestion"))
         #expect(context.contains("mcs config set update-check false"))
+        #expect(!context.contains("--trust-all"))
+        #expect(!context.contains("mcs doctor"))
+        #expect(!context.contains("mcs cleanup"))
+        #expect(!context.contains(UpdateChecker.manualPackUpdateCommand))
+    }
+
+    @Test("Pack-only update warns about --trust-all and gates cleanup on doctor")
+    func packsOnly() throws {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil)
+        )
+        #expect(context.contains("On yes, run: \(UpdateChecker.hookPackUpdateCommand)\n"))
+        #expect(context.contains("without review"))
+        #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
+        #expect(!context.contains(UpdateChecker.cliUpgradeCommands[1]))
         let doctor = try #require(context.range(of: "'mcs doctor'"))
         let cleanup = try #require(context.range(of: "mcs cleanup -af"))
         #expect(doctor.lowerBound < cleanup.lowerBound)
         #expect(context.contains("mcs doctor --fix --yes"))
-        #expect(context.contains("mcs cleanup -af"))
     }
 
-    @Test("Pack-only update offers mcs update with the --trust-all warning")
-    func packsOnly() {
-        let context = UpdateChecker.buildContextString(
-            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil)
-        )
-        #expect(context.contains("mcs update -a --trust-all"))
-        #expect(context.contains("without review"))
-        #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
-        #expect(!context.contains("brew"))
-    }
-
-    @Test("CLI upgrade runs before the pack update")
-    func cliBeforePacks() throws {
+    @Test("CLI upgrade chains before the pack update and the request resumes last")
+    func cliBeforePacks() {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: cliUpdate)
         )
-        let brewUpgrade = try #require(context.range(of: "brew upgrade"))
-        let packs = try #require(context.range(of: "mcs update -a --trust-all"))
-        #expect(brewUpgrade.lowerBound < packs.lowerBound)
+        let chain = (UpdateChecker.cliUpgradeCommands + [UpdateChecker.hookPackUpdateCommand])
+            .joined(separator: " && ")
+        #expect(context.contains("On yes, run: \(chain)\n"))
+        #expect(context.hasSuffix("continue with the user's original request."))
+    }
+}
+
+// MARK: - Hook Config Gate Tests
+
+struct CheckUpdatesCommandHookGateTests {
+    private func makeHome(updateCheck: Bool) throws -> Environment {
+        let home = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mcs-hook-gate-\(UUID().uuidString)")
+        let env = Environment(home: home)
+        try FileManager.default.createDirectory(at: env.mcsDirectory, withIntermediateDirectories: true)
+        try "update-check: \(updateCheck)\n".write(to: env.mcsConfigFile, atomically: true, encoding: .utf8)
+        let cached = UpdateChecker.CheckResult(
+            packUpdates: [],
+            cliUpdate: UpdateChecker.CLIUpdate(currentVersion: MCSVersion.current, latestVersion: "9999.1.1")
+        )
+        UpdateChecker(environment: env, shell: ShellRunner(environment: env)).saveCache(cached)
+        return env
+    }
+
+    @Test("Hook mode returns nothing when update-check is disabled, even with a fresh cache")
+    func disabledSkipsCache() throws {
+        let env = try makeHome(updateCheck: false)
+        defer { try? FileManager.default.removeItem(at: env.homeDirectory) }
+        let command = try CheckUpdatesCommand.parse(["--hook"])
+        #expect(command.check(env: env, output: CLIOutput(colorsEnabled: false)) == nil)
+    }
+
+    @Test("Hook mode serves the fresh cache when update-check is enabled")
+    func enabledServesCache() throws {
+        let env = try makeHome(updateCheck: true)
+        defer { try? FileManager.default.removeItem(at: env.homeDirectory) }
+        let command = try CheckUpdatesCommand.parse(["--hook"])
+        let result = command.check(env: env, output: CLIOutput(colorsEnabled: false))
+        #expect(result?.cliUpdate?.latestVersion == "9999.1.1")
     }
 }

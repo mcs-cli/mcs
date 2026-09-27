@@ -344,14 +344,14 @@ mcs config set <key> <value>     # Set a value (true/false)
 
 These keys control a `SessionStart` hook in `~/.claude/settings.json` that runs `mcs check-updates` when you start a Claude Code session. The hook's output is injected into Claude's context so Claude can inform you about available updates.
 
-When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them. It runs nothing without your yes, and continues with your request after you answer. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. If the updates succeed, Claude runs `mcs doctor` and offers a separate cleanup of the backups they left (`mcs cleanup -af`) only when every check passes; on failures it keeps the backups and offers `mcs doctor --fix --yes` instead. Doctor covers the global scope and the current project only. For pack updates, Claude first warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). If you decline, run `mcs update --all-projects` in your own terminal to review each trust prompt. The notice also tells you how to turn it off, with `mcs config set update-check false`.
-
 - **Enabled (either key `true`)**: A synchronous `SessionStart` hook is registered. It respects the 24-hour cooldown.
 - **Disabled (both keys `false`)**: No hook is registered. You can still check manually with `mcs check-updates` or rely on `mcs sync` / `mcs doctor` which check using the 24-hour cache.
 
 When either key changes, `mcs config set` immediately adds or removes the hook from `~/.claude/settings.json` — no re-sync needed. The same hook is also converged during `mcs sync`.
 
 On first interactive sync, `mcs` prompts whether to enable automatic update notifications (sets both keys at once). Fine-tune later with `mcs config set`.
+
+When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them; for pack updates that question also warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). It runs nothing without your yes, and continues with your request once every question is answered. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. After a pack update Claude runs `mcs doctor` (global scope and current project only). If every check passes it asks, separately, whether to delete all mcs backups across tracked projects with `mcs cleanup -af`; if a check fails it keeps the backups and asks, separately, whether to run `mcs doctor --fix --yes`. If you decline the pack update, run `mcs update --all-projects` in your own terminal to review each trust prompt. The notice also tells you how to turn it off, with `mcs config set update-check false`.
 
 ---
 

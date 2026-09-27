@@ -16,12 +16,20 @@ struct CheckUpdatesCommand: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        let shell = ShellRunner(environment: env)
+        guard let result = check(env: env, output: output) else { return }
 
+        if json {
+            printJSON(result)
+        } else if !UpdateChecker.printResult(result, output: output, isHook: hook), !hook {
+            output.success("Everything is up to date.")
+        }
+    }
+
+    func check(env: Environment, output: CLIOutput) -> UpdateChecker.CheckResult? {
         // A hand-edited config can disable checks while the hook entry is still registered;
-        // bail before `performCheck`, which would otherwise serve a fresh cache written by sync.
+        // bail before `performCheck`, which would otherwise serve a <24h cache written by sync or doctor.
         if hook, !MCSConfig.load(from: env.mcsConfigFile).isUpdateCheckEnabled {
-            return
+            return nil
         }
 
         let registry = PackRegistryFile(path: env.packsRegistry)
@@ -36,20 +44,8 @@ struct CheckUpdatesCommand: ParsableCommand {
         }
 
         let relevantEntries = UpdateChecker.filterEntries(registryData.packs, environment: env)
-
-        let checker = UpdateChecker(environment: env, shell: shell)
-        let result = checker.performCheck(
-            entries: relevantEntries,
-            forceRefresh: !hook,
-            checkPacks: true,
-            checkCLI: true
-        )
-
-        if json {
-            printJSON(result)
-        } else if !UpdateChecker.printResult(result, output: output, isHook: hook), !hook {
-            output.success("Everything is up to date.")
-        }
+        let checker = UpdateChecker(environment: env, shell: ShellRunner(environment: env))
+        return checker.performCheck(entries: relevantEntries, forceRefresh: !hook)
     }
 
     /// Codable DTO for the `--json` output format.

@@ -27,6 +27,7 @@ struct UpdateChecker {
 
     static let cliUpgradeCommands = ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
     static let manualPackUpdateCommand = "mcs update --all-projects"
+    static let hookPackUpdateCommand = "mcs update -a --trust-all"
 
     @discardableResult
     static func addHook(to settings: inout Settings) -> Bool {
@@ -74,11 +75,7 @@ struct UpdateChecker {
         }
         let relevantEntries = filterEntries(allEntries, environment: env)
         let checker = UpdateChecker(environment: env, shell: shell)
-        let result = checker.performCheck(
-            entries: relevantEntries,
-            checkPacks: true,
-            checkCLI: true
-        )
+        let result = checker.performCheck(entries: relevantEntries)
         if !result.isEmpty {
             output.plain("")
             printResult(result, output: output)
@@ -541,8 +538,8 @@ struct UpdateChecker {
     func performCheck(
         entries: [PackRegistryFile.PackEntry],
         forceRefresh: Bool = false,
-        checkPacks: Bool,
-        checkCLI: Bool
+        checkPacks: Bool = true,
+        checkCLI: Bool = true
     ) -> CheckResult {
         // Load manifests once per call. Both the cache-invalidation hash (`ignoreHashes`) and
         // the parallel classifier in `checkPackUpdates` need them; loading here avoids a second
@@ -626,10 +623,9 @@ struct UpdateChecker {
         return true
     }
 
-    /// Build a context string for Claude from check results.
-    /// `additionalContext` arrives together with the user's first message and cannot pause it,
-    /// so the gate is an instruction to make AskUserQuestion Claude's first tool call.
     static func buildContextString(_ result: CheckResult) -> String {
+        // `additionalContext` arrives with the user's first message and can't pause it, so holding
+        // the request until the user answers relies on AskUserQuestion being the first tool call.
         var lines: [String] = []
         lines.append(
             "mcs update notifications. Before doing ANY work on the user's request, and before any other"
@@ -647,7 +643,7 @@ struct UpdateChecker {
             let names = result.packUpdates.map(\.displayName).joined(separator: ", ")
             let noun = result.packUpdates.count == 1 ? "tech pack has" : "tech packs have"
             lines.append("- \(result.packUpdates.count) \(noun) updates available: \(names).")
-            commands.append("mcs update -a --trust-all")
+            commands.append(hookPackUpdateCommand)
         }
         lines.append("- To stop these notifications, run: mcs config set update-check false")
         lines.append("")
@@ -668,25 +664,29 @@ struct UpdateChecker {
         lines.append("")
         lines.append("On yes, run: \(commands.joined(separator: " && "))")
         lines.append(
-            "Report the outcome. Claude Code picks up the new configuration without a restart."
-                + " If the updates succeeded, run 'mcs doctor' (read-only, covered by the same yes) and"
-                + " summarize it before touching any backups."
+            "Report the outcome. Most changes apply immediately; new hooks or MCP servers may need a new"
+                + " Claude Code session."
         )
-        lines.append(
-            "If every doctor check passes, suggest removing the backup files the updates left behind and ask"
-                + " a separate AskUserQuestion yes/no before running: mcs cleanup -af"
-        )
-        lines.append(
-            "If any doctor check fails, keep the backups: do not offer cleanup. Show the failures and ask a"
-                + " separate AskUserQuestion yes/no before running: mcs doctor --fix --yes"
-        )
-        lines.append("Only after these questions are settled, continue with the user's original request.")
         if hasPackUpdates {
+            lines.append(
+                "If the updates succeeded, run 'mcs doctor' (read-only, covered by the same yes) and summarize"
+                    + " it before touching any backups."
+            )
+            lines.append(
+                "If every doctor check passes, suggest removing all mcs backup files across tracked projects"
+                    + " (not only this update's) and ask a separate AskUserQuestion yes/no before running:"
+                    + " mcs cleanup -af"
+            )
+            lines.append(
+                "If any doctor check fails, keep the backups: do not offer cleanup. Show the failures and ask"
+                    + " a separate AskUserQuestion yes/no before running: mcs doctor --fix --yes"
+            )
             lines.append(
                 "On no, suggest running '\(manualPackUpdateCommand)' in a separate terminal to review each"
                     + " trust prompt."
             )
         }
+        lines.append("Only after these questions are settled, continue with the user's original request.")
         return lines.joined(separator: "\n")
     }
 
