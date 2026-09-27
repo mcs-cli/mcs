@@ -5,8 +5,8 @@ import Foundation
 struct PackTrustManager {
     /// How `promptForTrust` reaches its answer.
     ///
-    /// `autoAccept` exists for a declarative run whose file already states the intent and
-    /// which has no terminal to answer the prompt with.
+    /// `autoAccept` exists for an unattended run (`--trust-all`) that has no terminal to answer
+    /// the prompt with.
     enum TrustPolicy {
         case prompt
         case autoAccept

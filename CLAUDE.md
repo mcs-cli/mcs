@@ -32,6 +32,7 @@ mcs update --global              # Refresh only the global scope
 mcs update --project             # Refresh only the current project's scope
 mcs update --all-projects        # Refresh global + every project tracked in ~/.mcs/projects.yaml (asks confirmation)
 mcs update --dry-run             # Preview what would change
+mcs update --trust-all           # Trust changed executable content without prompting (no TTY needed)
 mcs doctor                       # Diagnose installation health
 mcs doctor --fix                 # Diagnose, then run fixes and re-sync scopes with repairable failures (one confirmation)
 mcs doctor --pack ios            # Only check a specific pack
@@ -45,6 +46,7 @@ mcs pack remove <name>           # Remove an external tech pack
 mcs pack remove <name> --force   # Remove without confirmation
 mcs pack list                    # List registered external packs
 mcs pack update [name]           # Refresh pack registry only (low-level fetch; use 'mcs update' for fetch + apply)
+mcs pack update --trust-all      # Trust changed executable content without prompting (no TTY needed)
 mcs pack validate [source]       # Validate a tech pack (path, identifier, or current directory)
 mcs cleanup                      # Find and delete backup files
 mcs cleanup --force              # Delete backups without confirmation
@@ -132,6 +134,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ValidatePackCommand.swift` — `mcs pack validate` read-only subcommand; structural validation via `ExternalPackLoader.validate(at:)` + heuristic checks via `PackHeuristics`
 - `ExportCommand.swift` — export wizard: reads live configuration and generates a reusable tech pack directory; supports `--global`, `--identifier`, `--non-interactive`, `--dry-run`
 - `CheckUpdatesCommand.swift` — lightweight update checker for packs (`git ls-remote`) and CLI version (`git ls-remote --tags`); respects config keys and 24-hour cooldown
+- `TrustOptions.swift` — shared `--trust-all` option group (`bootstrap`, `update`, `pack update`): maps the flag to `PackTrustManager.TrustPolicy` and prints the off-TTY hint after a declined trust prompt
 - `ConfigCommand.swift` — `mcs config list/get/set` for managing user preferences; `set` immediately syncs the SessionStart hook in `~/.claude/settings.json`
 
 ### Export (`Sources/mcs/Export/`)

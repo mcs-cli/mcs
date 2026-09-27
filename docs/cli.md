@@ -99,6 +99,7 @@ mcs update --global              # Only refresh the global scope
 mcs update --project             # Only refresh the current project's scope
 mcs update --all-projects        # Refresh global + every project in the index (machine-wide)
 mcs update --dry-run             # Preview without making changes
+mcs update --trust-all           # Trust changed executable content without prompting (no TTY required)
 ```
 
 | Flag | Description |
@@ -108,6 +109,7 @@ mcs update --dry-run             # Preview without making changes
 | `-p, --project` | Only refresh the current project's scope. Mutually exclusive with `--global` and `--all-projects`. |
 | `-a, --all-projects` | Refresh the global scope plus every project tracked in `~/.mcs/projects.yaml`. Asks for confirmation in interactive mode and lists the affected projects first. Mutually exclusive with `--global` and `--project`. |
 | `--dry-run` | Preview changes without writing any files. |
+| `--trust-all` | Approve each updated pack's new or changed executable content without prompting, so the trust prompt needs no TTY. Other prompts are unaffected. No-op with `--dry-run`, which returns before any pack is fetched. Grants code execution without review, and the approval persists — see the [`--trust-all` caveat](#mcs-bootstrap) under `mcs bootstrap`. |
 
 `mcs update` always refreshes the full configured set of every selected scope. To advance a single pack's registry pointer without applying anywhere, use [`mcs pack update <name>`](#mcs-pack-update-name).
 
@@ -118,7 +120,7 @@ mcs update --dry-run             # Preview without making changes
 - **Refresh-only** — does not add or remove packs. Use `mcs sync` to change the configured set.
 - **Multi-scope by default** — when configured packs exist in both global and project scopes, both are refreshed in one command (this was the original pain point that motivated the verb).
 
-**Trust prompts:** when a pack's scripts have changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run.
+**Trust prompts:** when a pack's executable content has changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run. Without a terminal the prompt reads as "no", so an unattended run needs `--trust-all` to take updates that change a pack's executable content. An unattended run that tracks a branch trusts whatever that branch next contains; pin packs to a tag (`mcs pack add <url> --ref <tag>`) where that matters.
 
 **Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default).
 
@@ -191,13 +193,14 @@ An empty registry prints `[]` and exits 0. If `~/.mcs/registry.yaml` or `~/.mcs/
 
 ```bash
 mcs pack update [name]           # Update pack(s) to latest version (registry only, no re-apply)
+mcs pack update --trust-all      # Trust changed executable content without prompting (no TTY required)
 ```
 
 Fetches the latest commits from the remote and updates the local checkout. Local packs are skipped (they are read in-place and pick up changes automatically). A checkout that was deleted is re-cloned at the pack's recorded `ref`.
 
 This is a low-level fetch — useful for pack authors testing upstream changes without applying them, or in CI workflows that handle the apply step separately. For most users, [`mcs update`](#mcs-update) is the right command: it does the same fetch *and* re-applies across every configured scope.
 
-Exits non-zero on a hard failure when running non-interactively (CI) or when every attempted pack failed, matching [`mcs update`](#mcs-update). A declined trust prompt is not a failure.
+Exits non-zero on a hard failure when running non-interactively (CI) or when every attempted pack failed, matching [`mcs update`](#mcs-update). A declined trust prompt is not a failure. Pass `--trust-all` to approve changed executable content when no terminal can answer the prompt; it grants code execution without review, and the approval persists — see the [`--trust-all` caveat](#mcs-bootstrap) under `mcs bootstrap`.
 
 ### `mcs pack validate [source]`
 

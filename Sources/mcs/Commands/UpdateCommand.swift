@@ -28,6 +28,8 @@ struct UpdateCommand: LockedCommand {
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
+    @OptionGroup var trust: TrustOptions
+
     var skipLock: Bool {
         dryRun
     }
@@ -110,6 +112,9 @@ struct UpdateCommand: LockedCommand {
             attemptedCount: updatePhase.attempted,
             isInteractive: output.hasInteractiveStdin
         )
+        if updatePhase.anyTrustDeclined {
+            trust.hintIfUnattended(output: output, subject: "changed executable content")
+        }
         if updateFailed {
             output.error("Failed to update: \(updatePhase.failed.sorted().joined(separator: ", "))")
         }
@@ -247,10 +252,18 @@ struct UpdateCommand: LockedCommand {
         var skipped: Set<String> = []
         var failed: Set<String> = []
         var attempted = 0
+        var anyTrustDeclined = false
 
         let entries = registryData.packs.filter { packIDsToUpdate.contains($0.identifier) }
         guard !entries.isEmpty else {
-            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+            return UpdatePhaseOutcome(
+                data: updatedData,
+                anyUpdated: anyUpdated,
+                skipped: skipped,
+                failed: failed,
+                attempted: attempted,
+                anyTrustDeclined: anyTrustDeclined
+            )
         }
 
         output.header("Updating packs")
@@ -263,12 +276,19 @@ struct UpdateCommand: LockedCommand {
                     output.dimmed("  \(entry.displayName): would check for updates")
                 }
             }
-            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+            return UpdatePhaseOutcome(
+                data: updatedData,
+                anyUpdated: anyUpdated,
+                skipped: skipped,
+                failed: failed,
+                attempted: attempted,
+                anyTrustDeclined: anyTrustDeclined
+            )
         }
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: shell, output: output, packsDirectory: env.packsDirectory),
-            trustManager: PackTrustManager(output: output),
+            trustManager: PackTrustManager(output: output, policy: trust.policy),
             environment: env,
             output: output
         )
@@ -299,6 +319,7 @@ struct UpdateCommand: LockedCommand {
             case .trustDeclined:
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)
+                anyTrustDeclined = true
             case .fetchFailed, .manifestInvalid, .internalError:
                 output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
                 skipped.insert(entry.identifier)
@@ -306,7 +327,14 @@ struct UpdateCommand: LockedCommand {
             }
         }
 
-        return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+        return UpdatePhaseOutcome(
+            data: updatedData,
+            anyUpdated: anyUpdated,
+            skipped: skipped,
+            failed: failed,
+            attempted: attempted,
+            anyTrustDeclined: anyTrustDeclined
+        )
     }
 
     /// Result of the fetch/trust update pass, before reapply. `skipped` packs are excluded
@@ -317,5 +345,6 @@ struct UpdateCommand: LockedCommand {
         let skipped: Set<String>
         let failed: Set<String>
         let attempted: Int
+        let anyTrustDeclined: Bool
     }
 }
