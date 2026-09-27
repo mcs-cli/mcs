@@ -18,6 +18,12 @@ struct CheckUpdatesCommand: ParsableCommand {
         let output = CLIOutput()
         let shell = ShellRunner(environment: env)
 
+        // A hand-edited config can disable checks while the hook entry is still registered;
+        // bail before `performCheck`, which would otherwise serve a fresh cache written by sync.
+        if hook, !MCSConfig.load(from: env.mcsConfigFile).isUpdateCheckEnabled {
+            return
+        }
+
         let registry = PackRegistryFile(path: env.packsRegistry)
         let registryData: PackRegistryFile.RegistryData
         do {
@@ -29,29 +35,14 @@ struct CheckUpdatesCommand: ParsableCommand {
             registryData = PackRegistryFile.RegistryData()
         }
 
-        let checkPacks: Bool
-        let checkCLI: Bool
-        if hook {
-            // Hook mode: respect the config key (default on — opt-out). One key drives both
-            // check families; the hook is on or off as a whole.
-            let config = MCSConfig.load(from: env.mcsConfigFile)
-            let enabled = config.isUpdateCheckEnabled
-            checkPacks = enabled
-            checkCLI = enabled
-        } else {
-            // User-invoked: always check both
-            checkPacks = true
-            checkCLI = true
-        }
-
         let relevantEntries = UpdateChecker.filterEntries(registryData.packs, environment: env)
 
         let checker = UpdateChecker(environment: env, shell: shell)
         let result = checker.performCheck(
             entries: relevantEntries,
             forceRefresh: !hook,
-            checkPacks: checkPacks,
-            checkCLI: checkCLI
+            checkPacks: true,
+            checkCLI: true
         )
 
         if json {

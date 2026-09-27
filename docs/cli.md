@@ -344,6 +344,8 @@ mcs config set <key> <value>     # Set a value (true/false)
 
 These keys control a `SessionStart` hook in `~/.claude/settings.json` that runs `mcs check-updates` when you start a Claude Code session. The hook's output is injected into Claude's context so Claude can inform you about available updates.
 
+When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them. It runs nothing without your yes, and continues with your request after you answer. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. If the updates succeed, Claude offers a separate cleanup of the backups they left, with `mcs cleanup -af`. For pack updates, Claude first warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). If you decline, run `mcs update --all-projects` in your own terminal to review each trust prompt. The notice also tells you how to turn it off, with `mcs config set update-check false`.
+
 - **Enabled (either key `true`)**: A synchronous `SessionStart` hook is registered. It respects the 24-hour cooldown.
 - **Disabled (both keys `false`)**: No hook is registered. You can still check manually with `mcs check-updates` or rely on `mcs sync` / `mcs doctor` which check using the 24-hour cache.
 

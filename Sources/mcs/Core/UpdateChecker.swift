@@ -25,6 +25,9 @@ struct UpdateChecker {
     static let hookTimeout: Int = 30
     static let hookStatusMessage = "Checking for updates..."
 
+    static let cliUpgradeCommands = ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
+    static let manualPackUpdateCommand = "mcs update --all-projects"
+
     @discardableResult
     static func addHook(to settings: inout Settings) -> Bool {
         settings.addHookEntry(
@@ -602,7 +605,7 @@ struct UpdateChecker {
             if let cli = result.cliUpdate {
                 output.warn(
                     "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run 'brew upgrade \(Constants.MCSRepo.brewFormula)' to update."
+                        + "Run '\(cliUpgradeCommands.joined(separator: " && "))' to update."
                 )
             }
             if !result.packUpdates.isEmpty {
@@ -614,7 +617,7 @@ struct UpdateChecker {
                     output.plain("         \u{2022} \(pack.displayName) (\(local) \u{2192} \(remote))")
                 }
                 output.plain(
-                    "       Run 'mcs update --all-projects' to update and re-apply across every"
+                    "       Run '\(manualPackUpdateCommand)' to update and re-apply across every"
                         + " configured project plus the global scope."
                 )
             }
@@ -624,26 +627,56 @@ struct UpdateChecker {
     }
 
     /// Build a context string for Claude from check results.
-    /// Uses strong directive language to ensure Claude relays the notification visibly.
-    private static func buildContextString(_ result: CheckResult) -> String {
+    /// `additionalContext` arrives together with the user's first message and cannot pause it,
+    /// so the gate is an instruction to make AskUserQuestion Claude's first tool call.
+    static func buildContextString(_ result: CheckResult) -> String {
         var lines: [String] = []
         lines.append(
-            "STOP. Before doing ANY work, you MUST relay the following update notifications to the user."
-                + " This is non-negotiable even if the user's message is a task request."
+            "mcs update notifications. Before doing ANY work on the user's request, and before any other"
+                + " tool call, tell the user:"
         )
-        lines.append("")
+        var commands: [String] = []
         if let cli = result.cliUpdate {
             lines.append(
                 "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion))."
-                    + " The user should run: brew upgrade \(Constants.MCSRepo.brewFormula)"
             )
+            commands += cliUpgradeCommands
         }
-        if !result.packUpdates.isEmpty {
+        let hasPackUpdates = !result.packUpdates.isEmpty
+        if hasPackUpdates {
             let names = result.packUpdates.map(\.displayName).joined(separator: ", ")
             let noun = result.packUpdates.count == 1 ? "tech pack has" : "tech packs have"
+            lines.append("- \(result.packUpdates.count) \(noun) updates available: \(names).")
+            commands.append("mcs update -a --trust-all")
+        }
+        lines.append("- To stop these notifications, run: mcs config set update-check false")
+        lines.append("")
+        lines.append(
+            "Then make the AskUserQuestion tool your first tool call: one yes/no question asking whether to"
+                + " apply all of these updates now. If AskUserQuestion is unavailable, ask in plain text and"
+                + " end your turn to wait for the answer. Never run these commands without an explicit yes,"
+                + " and ask at most once per session."
+        )
+        if hasPackUpdates {
             lines.append(
-                "- \(result.packUpdates.count) \(noun) updates available: \(names)."
-                    + " The user should run: mcs update --all-projects"
+                "In that question, warn the user that --trust-all approves the packs' new or changed executable"
+                    + " content (hooks, scripts, MCP server commands) without review. That content runs with"
+                    + " the user's privileges, hooks and MCP servers run on every Claude Code session, and the"
+                    + " approval persists in ~/.mcs/registry.yaml."
+            )
+        }
+        lines.append("")
+        lines.append("On yes, run: \(commands.joined(separator: " && "))")
+        lines.append(
+            "Report the outcome. Claude Code picks up the new configuration without a restart."
+                + " If the updates succeeded, suggest removing the backup files they left behind and ask"
+                + " a separate AskUserQuestion yes/no before running: mcs cleanup -af"
+        )
+        lines.append("Only after these questions are settled, continue with the user's original request.")
+        if hasPackUpdates {
+            lines.append(
+                "On no, suggest running '\(manualPackUpdateCommand)' in a separate terminal to review each"
+                    + " trust prompt."
             )
         }
         return lines.joined(separator: "\n")

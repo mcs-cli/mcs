@@ -1204,3 +1204,45 @@ struct UpdateCheckerResultTests {
         #expect(!result.isEmpty)
     }
 }
+
+// MARK: - Hook Context Tests
+
+struct UpdateCheckerContextStringTests {
+    private let cliUpdate = UpdateChecker.CLIUpdate(currentVersion: "1.0.0", latestVersion: "2.0.0")
+    private let packUpdate = UpdateChecker.PackUpdate(
+        identifier: "ios", displayName: "iOS", localSHA: "aaa", remoteSHA: "bbb"
+    )
+
+    @Test("CLI-only update offers brew commands without --trust-all")
+    func cliOnly() {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
+        )
+        #expect(context.contains(UpdateChecker.cliUpgradeCommands.joined(separator: " && ")))
+        #expect(!context.contains("--trust-all"))
+        #expect(context.contains("AskUserQuestion"))
+        #expect(context.contains("mcs config set update-check false"))
+        #expect(context.contains("mcs cleanup -af"))
+    }
+
+    @Test("Pack-only update offers mcs update with the --trust-all warning")
+    func packsOnly() {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil)
+        )
+        #expect(context.contains("mcs update -a --trust-all"))
+        #expect(context.contains("without review"))
+        #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
+        #expect(!context.contains("brew"))
+    }
+
+    @Test("CLI upgrade runs before the pack update")
+    func cliBeforePacks() throws {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: cliUpdate)
+        )
+        let brewUpgrade = try #require(context.range(of: "brew upgrade"))
+        let packs = try #require(context.range(of: "mcs update -a --trust-all"))
+        #expect(brewUpgrade.lowerBound < packs.lowerBound)
+    }
+}
