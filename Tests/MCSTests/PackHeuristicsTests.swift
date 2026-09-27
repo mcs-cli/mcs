@@ -132,46 +132,14 @@ struct PackHeuristicsTests {
         #expect(!findings.contains { $0.message.contains("installs node") })
     }
 
-    @Test("A tap-qualified brew package is reported as a third-party tap")
-    func tapQualifiedPackageWarns() throws {
+    @Test("A tap-qualified brew package alone produces no findings")
+    func tapQualifiedPackageDoesNotWarn() throws {
         let tmpDir = try makeTmpDir(label: "heuristics")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let brew = brewComponent(
-            id: "test-pack.xcodebuildmcp",
-            displayName: "XcodeBuildMCP",
-            package: "getsentry/xcodebuildmcp/xcodebuildmcp"
-        )
+        let brew = brewComponent(package: "getsentry/xcodebuildmcp/xcodebuildmcp")
         let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
-        #expect(findings.contains {
-            $0.severity == .warning
-                && $0.message.contains("third-party tap 'getsentry/xcodebuildmcp'")
-        })
-    }
-
-    @Test("First-party and non-tap package forms are not reported as third-party taps", arguments: [
-        "homebrew/core/node",
-        "homebrew/cask/font-fira-code",
-        "./Formula/local.rb",
-        "https://example.com/formula.rb",
-    ])
-    func nonThirdPartyPackageFormsDoNotWarn(package: String) throws {
-        let tmpDir = try makeTmpDir(label: "heuristics")
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let brew = brewComponent(package: package)
-        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
-        #expect(!findings.contains { $0.message.contains("third-party tap") })
-    }
-
-    @Test("A core formula is not reported as a third-party tap")
-    func coreFormulaDoesNotWarnAboutTaps() throws {
-        let tmpDir = try makeTmpDir(label: "heuristics")
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        let brew = brewComponent(id: "test-pack.node", displayName: "Node", package: "node")
-        let findings = PackHeuristics.check(manifest: minimalManifest(components: [brew]), packPath: tmpDir)
-        #expect(!findings.contains { $0.message.contains("third-party tap") })
+        #expect(findings.isEmpty)
     }
 
     @Test("A versioned formula satisfies the runtime requirement")

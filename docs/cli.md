@@ -223,7 +223,7 @@ mcs pack validate ios            # Validate an installed pack by identifier
 | Severity | Exit code | Examples |
 |----------|-----------|---------|
 | Error | 1 | Empty pack (no components/templates/configure), `source: "."` copying entire pack root, missing settings file sources |
-| Warning | 0 | Unreferenced files in subdirectories, unreferenced root-level content files, MCP server using python/node without brew component, missing python module directory, `brew:` package installed from a third-party tap |
+| Warning | 0 | Unreferenced files in subdirectories, unreferenced root-level content files, MCP server using python/node without brew component, missing python module directory |
 
 Structural errors always cause exit code 1 and stop further analysis. Heuristic errors also cause exit code 1. Warnings are advisory and do not affect the exit code.
 
