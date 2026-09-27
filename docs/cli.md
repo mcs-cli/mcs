@@ -351,6 +351,8 @@ When either key changes, `mcs config set` immediately adds or removes the hook f
 
 On first interactive sync, `mcs` prompts whether to enable automatic update notifications (sets both keys at once). Fine-tune later with `mcs config set`.
 
+When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them; for pack updates that question also warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). It runs nothing without your yes, and continues with your request once every question is answered. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. After a pack update Claude runs `mcs doctor` (global scope and current project only). If every check passes it asks, separately, whether to delete all mcs backups across tracked projects with `mcs cleanup -af`; if a check fails it keeps the backups and asks, separately, whether to run `mcs doctor --fix --yes`. If you decline the pack update, run `mcs update --all-projects` in your own terminal to review each trust prompt. The notice also tells you how to turn it off, with `mcs config set update-check false`.
+
 ---
 
 **Next**: Learn to build packs from scratch in [Creating Tech Packs](creating-tech-packs.md).

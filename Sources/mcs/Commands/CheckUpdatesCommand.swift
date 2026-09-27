@@ -16,7 +16,21 @@ struct CheckUpdatesCommand: ParsableCommand {
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
-        let shell = ShellRunner(environment: env)
+        guard let result = check(env: env, output: output) else { return }
+
+        if json {
+            printJSON(result)
+        } else if !UpdateChecker.printResult(result, output: output, isHook: hook), !hook {
+            output.success("Everything is up to date.")
+        }
+    }
+
+    func check(env: Environment, output: CLIOutput) -> UpdateChecker.CheckResult? {
+        // A hand-edited config can disable checks while the hook entry is still registered;
+        // bail before `performCheck`, which would otherwise serve a <24h cache written by sync or doctor.
+        if hook, !MCSConfig.load(from: env.mcsConfigFile).isUpdateCheckEnabled {
+            return nil
+        }
 
         let registry = PackRegistryFile(path: env.packsRegistry)
         let registryData: PackRegistryFile.RegistryData
@@ -29,36 +43,9 @@ struct CheckUpdatesCommand: ParsableCommand {
             registryData = PackRegistryFile.RegistryData()
         }
 
-        let checkPacks: Bool
-        let checkCLI: Bool
-        if hook {
-            // Hook mode: respect the config key (default on — opt-out). One key drives both
-            // check families; the hook is on or off as a whole.
-            let config = MCSConfig.load(from: env.mcsConfigFile)
-            let enabled = config.isUpdateCheckEnabled
-            checkPacks = enabled
-            checkCLI = enabled
-        } else {
-            // User-invoked: always check both
-            checkPacks = true
-            checkCLI = true
-        }
-
         let relevantEntries = UpdateChecker.filterEntries(registryData.packs, environment: env)
-
-        let checker = UpdateChecker(environment: env, shell: shell)
-        let result = checker.performCheck(
-            entries: relevantEntries,
-            forceRefresh: !hook,
-            checkPacks: checkPacks,
-            checkCLI: checkCLI
-        )
-
-        if json {
-            printJSON(result)
-        } else if !UpdateChecker.printResult(result, output: output, isHook: hook), !hook {
-            output.success("Everything is up to date.")
-        }
+        let checker = UpdateChecker(environment: env, shell: ShellRunner(environment: env))
+        return checker.performCheck(entries: relevantEntries, forceRefresh: !hook)
     }
 
     /// Codable DTO for the `--json` output format.
