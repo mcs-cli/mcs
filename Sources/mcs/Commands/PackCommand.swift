@@ -431,7 +431,7 @@ struct UpdatePack: LockedCommand {
         }
 
         if anyTrustDeclined {
-            PackTrustManager.hintTrustAllIfUnattended(output: ctx.output, subject: "changed pack scripts")
+            trust.hintIfUnattended(output: ctx.output, subject: "changed executable content")
         }
 
         // Save all updates

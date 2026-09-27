@@ -112,6 +112,9 @@ struct UpdateCommand: LockedCommand {
             attemptedCount: updatePhase.attempted,
             isInteractive: output.hasInteractiveStdin
         )
+        if updatePhase.anyTrustDeclined {
+            trust.hintIfUnattended(output: output, subject: "changed executable content")
+        }
         if updateFailed {
             output.error("Failed to update: \(updatePhase.failed.sorted().joined(separator: ", "))")
         }
@@ -249,10 +252,18 @@ struct UpdateCommand: LockedCommand {
         var skipped: Set<String> = []
         var failed: Set<String> = []
         var attempted = 0
+        var anyTrustDeclined = false
 
         let entries = registryData.packs.filter { packIDsToUpdate.contains($0.identifier) }
         guard !entries.isEmpty else {
-            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+            return UpdatePhaseOutcome(
+                data: updatedData,
+                anyUpdated: anyUpdated,
+                skipped: skipped,
+                failed: failed,
+                attempted: attempted,
+                anyTrustDeclined: anyTrustDeclined
+            )
         }
 
         output.header("Updating packs")
@@ -265,10 +276,16 @@ struct UpdateCommand: LockedCommand {
                     output.dimmed("  \(entry.displayName): would check for updates")
                 }
             }
-            return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+            return UpdatePhaseOutcome(
+                data: updatedData,
+                anyUpdated: anyUpdated,
+                skipped: skipped,
+                failed: failed,
+                attempted: attempted,
+                anyTrustDeclined: anyTrustDeclined
+            )
         }
 
-        var anyTrustDeclined = false
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: shell, output: output, packsDirectory: env.packsDirectory),
             trustManager: PackTrustManager(output: output, policy: trust.policy),
@@ -310,11 +327,14 @@ struct UpdateCommand: LockedCommand {
             }
         }
 
-        if anyTrustDeclined {
-            PackTrustManager.hintTrustAllIfUnattended(output: output, subject: "changed pack scripts")
-        }
-
-        return UpdatePhaseOutcome(data: updatedData, anyUpdated: anyUpdated, skipped: skipped, failed: failed, attempted: attempted)
+        return UpdatePhaseOutcome(
+            data: updatedData,
+            anyUpdated: anyUpdated,
+            skipped: skipped,
+            failed: failed,
+            attempted: attempted,
+            anyTrustDeclined: anyTrustDeclined
+        )
     }
 
     /// Result of the fetch/trust update pass, before reapply. `skipped` packs are excluded
@@ -325,5 +345,6 @@ struct UpdateCommand: LockedCommand {
         let skipped: Set<String>
         let failed: Set<String>
         let attempted: Int
+        let anyTrustDeclined: Bool
     }
 }

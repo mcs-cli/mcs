@@ -140,15 +140,6 @@ struct PackTrustManager {
 
     // MARK: - Prompt
 
-    /// Off a TTY the trust prompt takes its `false` default, so a decline reads as "the user
-    /// said no" when it may mean there was nobody to ask. Redirected stdin carrying a real "n"
-    /// is equally off-TTY, though, so the hint offers the possibility rather than asserting it.
-    static func hintTrustAllIfUnattended(output: CLIOutput, subject: String) {
-        guard !output.hasInteractiveStdin else { return }
-        output.plain("  If no terminal was available to answer the trust prompt, pass")
-        output.plain("  --trust-all to approve \(subject) without review.")
-    }
-
     /// Display all trustable items and prompt the user for approval.
     /// A pack with no executable content is trusted implicitly.
     ///

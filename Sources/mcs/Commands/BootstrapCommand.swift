@@ -16,8 +16,8 @@ struct BootstrapCommand: LockedCommand {
     @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
     var yes: Bool = false
 
-    /// Shared by both trust surfaces bootstrap can reach: a fresh `PackAdder.add` and a
-    /// `ref:` advance through `PackUpdater`. Auto-accepting only the first leaves the second
+    /// `trust.policy` must reach both trust surfaces bootstrap can reach: a fresh `PackAdder.add`
+    /// and a `ref:` advance through `PackUpdater`. Auto-accepting only the first leaves the second
     /// prompting whenever an advanced `ref:` brings new or changed scripts.
     @OptionGroup var trust: TrustOptions
 
@@ -236,7 +236,7 @@ struct BootstrapCommand: LockedCommand {
                         // Bootstrap auto-accepts duplicates and collisions, so trust is the
                         // only thing `.declined` can mean here.
                         ctx.output.error("Bootstrap aborted: pack '\(displaySource)' was not added.")
-                        PackTrustManager.hintTrustAllIfUnattended(output: ctx.output, subject: "declared packs")
+                        trust.hintIfUnattended(output: ctx.output, subject: "declared packs")
                         throw ExitCode.failure
                     case .previewed:
                         // PackAdder only returns .previewed when Options.preview is true;
@@ -371,7 +371,7 @@ struct BootstrapCommand: LockedCommand {
             return entry
         case .trustDeclined:
             ctx.output.error("Bootstrap aborted: trust declined for '\(target.identifier)'")
-            PackTrustManager.hintTrustAllIfUnattended(output: ctx.output, subject: "declared packs")
+            trust.hintIfUnattended(output: ctx.output, subject: "declared packs")
             throw ExitCode.failure
         case .fetchFailed, .manifestInvalid, .internalError:
             ctx.output.error("Bootstrap aborted: \(result.reason ?? "update failed") (\(target.identifier))")
