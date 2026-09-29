@@ -9,27 +9,45 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Restore the Swift toolchain
+      id: toolchain
+      uses: actions/cache@v6
+      with:
+        # swiftly keeps the toolchains and env.sh under the data dir and its selected-version
+        # state under the config dir; a hit needs both or `swift` resolves to nothing.
+        path: |
+          ~/.local/share/swiftly
+          ~/.config/swiftly
+        key: swiftly-${{ runner.os }}-${{ runner.arch }}-${{ inputs.swift-version }}
+
+    - name: Install the toolchain's system dependencies
+      # Not cacheable — these are system packages, and the toolchain needs them on a cache hit too.
+      # The names are Ubuntu-release-specific, so a miss is tolerated here: on a cache miss the
+      # install step below asks swiftly for the authoritative list and retries.
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update
+        for pkg in libcurl4-openssl-dev pkg-config python3-lldb-13; do
+          sudo apt-get -y install "$pkg" || echo "::warning::apt could not install $pkg"
+        done
+
     - name: Install Swift via swiftly
+      if: steps.toolchain.outputs.cache-hit != 'true'
       # swiftly refuses to install a toolchain until Swift's own system dependencies are present,
       # and names the missing ones in an `apt-get -y install …` line. Those names differ by Ubuntu
-      # release and architecture — 22.04 wants pkg-config and python3-lldb-13 where 24.04 does not —
-      # so they are read back from swiftly rather than hardcoded into a list that goes stale.
-      # Unpacked outside the checkout so the tree the caller builds and tests in stays clean.
+      # release and architecture, so they are read back from swiftly rather than trusted to the
+      # list above. Unpacked outside the checkout so the tree the caller builds in stays clean.
       shell: bash
       env:
         SWIFT_VERSION: ${{ inputs.swift-version }}
       run: |
         set -euo pipefail
         cd "$RUNNER_TEMP"
-        sudo apt-get update
         curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
         tar zxf "swiftly-$(uname -m).tar.gz"
         ./swiftly init --quiet-shell-followup --assume-yes --skip-install
-        # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
-        # continuing without swiftly on PATH if the layout ever moves.
-        ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
-        test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
-        . "$ENV_SH"
+        . "${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
 
         LOG="$RUNNER_TEMP/swiftly-install.log"
         if ! swiftly install --use "$SWIFT_VERSION" --assume-yes 2>&1 | tee "$LOG"; then
@@ -41,4 +59,15 @@ runs:
           done
           swiftly install --use "$SWIFT_VERSION" --assume-yes
         fi
+
+    - name: Put Swift on PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
+        # continuing without swiftly on PATH if the layout ever moves or a cache hit is partial.
+        ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+        test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
+        . "$ENV_SH"
         echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+        "$SWIFTLY_BIN_DIR/swift" --version

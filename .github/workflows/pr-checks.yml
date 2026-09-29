@@ -72,9 +72,6 @@ jobs:
           key: spm-${{ matrix.os }}-${{ hashFiles('Package.swift') }}
           restore-keys: spm-${{ matrix.os }}-
 
-      - name: Swift version
-        run: swift --version
-
       - name: Resolve packages
         run: swift package resolve
 
