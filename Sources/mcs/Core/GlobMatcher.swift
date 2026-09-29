@@ -1,5 +1,9 @@
-import Darwin
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Thin wrapper over POSIX `fnmatch(3)` for path-vs-pattern matching.
 ///
