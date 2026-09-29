@@ -27,8 +27,11 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        sudo apt-get update
+        # No `apt-get update` first: it costs more than everything else here, and the runner images
+        # ship a usable index. A package that cannot be resolved falls back to updating once.
         for pkg in libcurl4-openssl-dev pkg-config python3-lldb-13; do
+          sudo apt-get -y install "$pkg" && continue
+          sudo apt-get update
           sudo apt-get -y install "$pkg" || echo "::warning::apt could not install $pkg"
         done
 
