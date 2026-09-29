@@ -156,11 +156,11 @@ struct ComponentExecutor {
             )
 
             var isDir: ObjCBool = false
-            fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
-            if isDir.boolValue {
+            if sourceIsDirectory {
                 // Source is a directory — copy all files recursively
                 try fm.createDirectory(at: destURL, withIntermediateDirectories: true)
                 let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
@@ -239,12 +239,12 @@ struct ComponentExecutor {
             )
 
             var isDir: ObjCBool = false
-            fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
             var installedPaths: [String] = []
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
-            if isDir.boolValue {
+            if sourceIsDirectory {
                 try fm.createDirectory(at: destURL, withIntermediateDirectories: true)
                 let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
                 for file in contents {
@@ -323,9 +323,9 @@ struct ComponentExecutor {
     ) throws {
         let fm = FileManager.default
         var isDir: ObjCBool = false
-        fm.fileExists(atPath: source.path, isDirectory: &isDir)
+        let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
 
-        if isDir.boolValue {
+        if sourceIsDirectory {
             try fm.createDirectory(at: destination, withIntermediateDirectories: true)
             let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
             for child in contents {
