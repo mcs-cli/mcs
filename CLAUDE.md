@@ -12,7 +12,8 @@ Swift CLI tool (`mcs`) that configures Claude Code with MCP servers, plugins, sk
 # Development
 swift build                      # Build the CLI
 swift test                       # Run tests
-swift build -c release --arch arm64 --arch x86_64  # Universal binary
+swift build -c release --arch arm64 --arch x86_64  # macOS universal binary
+swift build -c release --static-swift-stdlib       # Linux release binary
 
 # CLI usage (after install)
 mcs sync [path]                  # Sync project: multi-select packs, compose artifacts (default command)
@@ -67,7 +68,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 ## Architecture
 
 ### Swift Package Structure
-- **Package.swift** — swift-tools-version: 6.0, macOS 13+, deps: swift-argument-parser, Yams
+- **Package.swift** — swift-tools-version: 6.0, macOS 13+ and Linux (glibc), deps: swift-argument-parser, Yams, swift-crypto
 - **Sources/mcs/** — main executable target
 - **Tests/MCSTests/** — test target
 
@@ -79,14 +80,17 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `Environment.swift` — paths, arch detection, brew path, claude-home cwd detection (`isInsideClaudeHome(_:)`)
 - `CLIOutput.swift` — ANSI colors, logging, prompts, multi-select, doctor summary
 - `ShellRunner.swift` — Process execution wrapper
+- `PTYBridge.swift` — the per-descriptor `poll(2)` decisions of the interactive PTY bridge, pure so every `revents` combination is table-tested
 - `Settings.swift` — Codable model for `settings.json` and `settings.local.json`, deep-merge
 - `Backup.swift` — timestamped backups for mixed-ownership files (CLAUDE.local.md), backup discovery and deletion
 - `GitignoreManager.swift` — global gitignore management, core entry list
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/uninstall/list` (scope + working directory, like MCP) and `marketplace add/list`
-- `ClaudePrerequisite.swift` — Claude Code CLI availability check with optional Homebrew auto-install
+- `ClaudePrerequisite.swift` — Claude Code CLI availability check; macOS offers a Homebrew install, Linux prints the native-installer and npm commands
 - `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
-- `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
+- `FileHasher.swift` — SHA-256 file and directory hashing via swift-crypto's `Crypto`, which re-exports CryptoKit on Darwin (used by `PackTrustManager` and `ComponentExecutor`)
 - `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
+- `Locked.swift` — `NSLock`-backed value box with the `withLock { $0 }` shape of the Darwin-only `OSAllocatedUnfairLock` (`Synchronization.Mutex` is macOS 15+, above the macOS 13 floor)
+- `TerminalAttributes.swift` — termios helpers for the raw-mode picker; `c_cc` is indexed through the platform's own `VMIN`/`VTIME` and flag masks are converted through `tcflag_t`
 - `PathContainment.swift` — centralized path-boundary checks and relative-path utilities (symlink-safe containment, traversal prevention)
 - `PluginRef.swift` — parsed `name@repo` plugin references; resolves the `name@<marketplace-name>` id Claude Code keys plugins by (`@org/repo` needs a `marketplace list` lookup), plus the `plugin list` / `marketplace list` JSON models
 - `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
@@ -95,7 +99,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ProjectIndex.swift` — cross-project index (`~/.mcs/projects.yaml`) mapping project paths to pack IDs for reference counting
 - `MCSError.swift` — error types for the CLI
 - `MCSConfig.swift` — user preferences (`~/.mcs/config.yaml`): `update-check`. Load is pure (never writes); the one-shot migration from the deprecated `update-check-packs` / `update-check-cli` pair to the unified `update-check` key is persisted by callers via `persistMigrationIfNeeded` on write-safe paths only (skipped on dry-run and SessionStart-hook reads).
-- `UpdateChecker.swift` — pack freshness checks (`git ls-remote`), CLI version checks (`git ls-remote --tags`), cooldown management
+- `UpdateChecker.swift` — pack freshness checks (`git ls-remote`), CLI version checks (`git ls-remote --tags`), cooldown management, and the platform's self-upgrade command (`brew upgrade` on macOS; on Linux a staged-and-verified tarball swap at the path `/proc/self/exe` resolves, or nothing when it cannot)
 
 ### TechPack System (`Sources/mcs/TechPack/`)
 - `TechPack.swift` — protocol for tech packs (components, templates, hooks, doctor checks, project configuration)
@@ -186,6 +190,15 @@ swiftlint --fix
 - CI runs both in strict mode (warnings become errors) with GitHub Actions inline annotations
 - SwiftLint excludes `Tests/` — only Sources and Package.swift are linted
 - **Never use `try?` to silently discard errors** — use `do/catch` and surface the error (via `output.warn()`, logging, or propagation). `try?` hides root causes and makes debugging impossible. The only acceptable use is when the absence of a result is the *entire* semantic meaning (e.g., `FileManager.fileExists` alternative)
+- **Platform support**: `mcs` builds for macOS 13+ and Linux (glibc). The canonical shape is
+```swift
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
+```
+  Platform-dependent **values and control flow** live only in `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift`, `Core/ClaudePrerequisite.swift` and `Core/UpdateChecker.swift` — everything else calls into them. `TerminalAttributes` is on the list without a single `#if`: it owns the termios layout, which differs per platform through `VMIN`/`VTIME`/`tcflag_t` rather than through a branch. `ClaudePrerequisite` and `UpdateChecker` are there because what differs is control flow, not a value: macOS offers a Homebrew install of Claude Code and a `brew upgrade` of mcs itself, and Linux can do neither, so there is no constant to move. The `#if canImport(Darwin) / #elseif canImport(Glibc)` import chain at the top of a file that calls libc directly (`ShellRunner`, `PTYBridge`, `CLIOutput`, `FileLock`, `GlobMatcher`) is not platform knowledge in this sense — it selects the same API from a different module — and is allowed wherever it is needed. SHA-256 comes from swift-crypto's `Crypto` on both platforms; it re-exports CryptoKit on Darwin, so no `#if` is needed to hash. A `#if` is for a value or API that genuinely differs, never to make a diagnostic go away; the same goes for `_ =`. Several Foundation methods are `@discardableResult` on Darwin and not on Linux — use the result, it always means something. A test gated out on one platform is a coverage regression: give the `#else` branch the equivalent assertion. Rationale and the compatibility matrix are in `docs/linux-support.md`
 - **Comments carry the non-obvious "why", not a narration of the code** — don't restate the line below, don't describe what the code used to do. If the code already says it, delete the comment; if the rationale needs more than a line or two, it belongs in the issue or a memory. State a given rationale once, at the site that owns it, rather than repeating it at every call site
 
 ## Testing
