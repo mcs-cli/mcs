@@ -33,7 +33,10 @@ enum HookInterpreter {
     /// author at publish time to declare `hookInterpreter` explicitly.
     private static let ambiguousExtensions: Set<String> = ["ts", "mts", "cts", "tsx"]
 
-    /// Interpreters whose absence is not worth reporting — always present on macOS.
+    /// Interpreters whose absence is not worth reporting — always present on macOS. `zsh` is not
+    /// installed by default on Debian, Ubuntu or Fedora, so a `.zsh` hook's missing interpreter goes
+    /// unreported there; a per-platform set would be a sixth home for platform knowledge for one
+    /// entry, so this is listed as a known limitation instead.
     private static let assumedPresent: Set<String> = ["bash", "sh", "zsh"]
 
     /// Longest interpreter string accepted, guarding against a pathological manifest value.

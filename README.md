@@ -10,6 +10,7 @@
 
 [![Swift 6.0+](https://img.shields.io/badge/Swift-6.0+-F05138.svg?logo=swift&logoColor=white)](https://swift.org)
 [![macOS](https://img.shields.io/badge/macOS-13+-000000.svg?logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Linux](https://img.shields.io/badge/Linux-glibc-FCC624.svg?logo=linux&logoColor=black)](docs/linux-support.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-FBB040.svg?logo=homebrew&logoColor=white)](https://github.com/mcs-cli/homebrew-tap)
 [![Tech Packs](https://img.shields.io/badge/Tech_Packs-Browse-8B5CF6.svg)](https://techpacks.mcs-cli.dev)
@@ -21,9 +22,24 @@
 
 ### 1. Install
 
+**macOS** — Homebrew:
+
 ```bash
 brew install mcs-cli/tap/mcs
 ```
+
+**Linux** (x86_64 or aarch64, glibc 2.35+, `libstdc++6`) — download the release tarball from
+[the latest release](https://github.com/mcs-cli/mcs/releases/latest):
+
+```bash
+# ...-linux-x86_64.tar.gz or ...-linux-aarch64.tar.gz
+tar -xzf mcs-<version>-linux-<arch>.tar.gz
+install -D -m 0755 mcs ~/.local/bin/mcs
+```
+
+Supported platforms: macOS 13+ and Linux (glibc, x86_64 and aarch64). See
+[Linux support](docs/linux-support.md) for prerequisites, the compatibility matrix and the
+handful of behaviours that differ.
 
 ### 2. Add tech packs
 
@@ -156,7 +172,7 @@ Use `mcs pack validate` to check your pack for structural errors and best practi
 
 ## 🔍 Verifying Your Setup with Poirot
 
-After `mcs sync`, want to confirm everything landed correctly? [**Poirot**](https://github.com/leonardocardoso/poirot) is a native macOS companion that gives you a visual overview of your Claude Code configuration — MCP servers, settings, sessions, and more — all in one place.
+After `mcs sync`, want to confirm everything landed correctly? [**Poirot**](https://github.com/leonardocardoso/poirot) (macOS only) is a native companion that gives you a visual overview of your Claude Code configuration — MCP servers, settings, sessions, and more — all in one place.
 
 The perfect complement to `mcs`: configure your environment with `mcs`, then use Poirot to see exactly what's installed and running.
 
@@ -171,6 +187,7 @@ The perfect complement to `mcs`: configure your environment with `mcs`, then use
 | 📋 [Tech Pack Schema](docs/techpack-schema.md) | Complete `techpack.yaml` field reference |
 | 🏗️ [Architecture](docs/architecture.md) | Internal design, sync flow, safety guarantees, and extension points |
 | 🔧 [Troubleshooting](docs/troubleshooting.md) | Common issues and fixes |
+| 🐧 [Linux support](docs/linux-support.md) | Supported configurations, prerequisites, compatibility matrix, and porting decisions |
 
 ---
 
@@ -179,7 +196,8 @@ The perfect complement to `mcs`: configure your environment with `mcs`, then use
 ```bash
 swift build                                            # Build
 swift test                                             # Run tests
-swift build -c release --arch arm64 --arch x86_64      # Universal binary
+swift build -c release --arch arm64 --arch x86_64      # macOS universal binary
+swift build -c release --static-swift-stdlib           # Linux release binary
 ```
 
 See [Architecture](docs/architecture.md) for project structure and design decisions.
