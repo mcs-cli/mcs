@@ -1,7 +1,8 @@
 name: Linux Smoke
 
-# Manual only: this is the Linux acceptance check behind docs/linux-support.md's compatibility
-# matrix. It exercises whole command flows against a real pack, which the unit suite cannot.
+# The same flows PR checks run, on demand: useful for reproducing a Linux-only failure or
+# exercising a runner PR checks does not cover. The steps live in .github/actions/mcs-smoke so
+# there is one definition of what a smoke run is.
 on:
   workflow_dispatch:
     inputs:
@@ -37,104 +38,6 @@ jobs:
           swift build -c release
           echo "MCS=$(swift build -c release --show-bin-path)/mcs" >> "$GITHUB_ENV"
 
-      # A stand-in for the Claude Code CLI: every command below calls ensureClaudeCLI, which
-      # refuses to run without it, and nothing here asserts on what Claude itself does.
-      - name: Stub the claude CLI
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/claude"
-          chmod +x "$HOME/.local/bin/claude"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      # A local pack: exercises the same manifest, trust and artifact paths as a git pack without
-      # depending on a network fetch inside the smoke test.
-      - name: Create a fixture pack
-        run: |
-          mkdir -p "$RUNNER_TEMP/fixture-pack/skills/greet" "$RUNNER_TEMP/project"
-          cat > "$RUNNER_TEMP/fixture-pack/techpack.yaml" <<'PACK'
-          schemaVersion: 1
-          identifier: smoke
-          displayName: Smoke Pack
-          description: Fixture pack for the Linux smoke test
-          prompts:
-            - key: GREETING
-              type: input
-              prompt: Greeting to use
-              default: hello
-          components:
-            - id: greet-skill
-              displayName: Greet skill
-              description: Skill whose body is substituted from a prompt value
-              skill:
-                source: skills/greet
-                destination: greet
-            - id: git-present
-              displayName: git
-              description: A formula whose name is also its command, so the PATH probe satisfies it
-              brew: git
-          PACK
-          cat > "$RUNNER_TEMP/fixture-pack/skills/greet/SKILL.md" <<'SKILL'
-          ---
-          name: greet
-          description: Says __GREETING__
-          ---
-          Says __GREETING__.
-          SKILL
-          cat > "$RUNNER_TEMP/project/mcs.yaml" <<BOOT
-          schemaVersion: 1
-          packs:
-            - source: $RUNNER_TEMP/fixture-pack
-              values:
-                GREETING: hei
-          BOOT
-
-      - name: mcs pack add (local) and pack list --json
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" pack add "$RUNNER_TEMP/fixture-pack"
-          "$MCS" pack list --json
-          "$MCS" pack validate smoke
-
-      - name: mcs bootstrap --trust-all
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          git init -q .
-          "$MCS" bootstrap --trust-all
-          test -f .claude/skills/greet/SKILL.md
-          grep -q hei .claude/skills/greet/SKILL.md
-
-      - name: mcs sync --pack --prune --yes
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" sync --pack smoke --prune --yes
-
-      - name: mcs doctor and doctor --fix
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" doctor
-          "$MCS" doctor --fix --yes
-
-      - name: mcs update --trust-all and check-updates
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" update --project --trust-all
-          "$MCS" check-updates --json
-
-      # The non-interactive resolution path: no TTY here, so every prompt has to come from the
-      # seeded value or a declared default rather than blocking on stdin.
-      - name: Non-interactive prompt resolution
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" sync --all < /dev/null
-
-      - name: mcs export and cleanup
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" export "$RUNNER_TEMP/exported" --identifier exported --non-interactive
-          test -f "$RUNNER_TEMP/exported/techpack.yaml"
-          "$MCS" cleanup --force
-
-      - name: mcs pack remove
-        working-directory: ${{ runner.temp }}/project
-        run: |
-          "$MCS" pack remove smoke --force
+      - uses: ./.github/actions/mcs-smoke
+        with:
+          mcs: ${{ env.MCS }}

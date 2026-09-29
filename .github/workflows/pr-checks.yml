@@ -130,7 +130,15 @@ jobs:
 
       # The shape release.yml ships. Without this, a break in it first shows up on a tag.
       - name: Build release binary
-        run: swift build -c release --static-swift-stdlib
+        run: |
+          swift build -c release --static-swift-stdlib
+          echo "MCS=$(swift build -c release --static-swift-stdlib --show-bin-path)/mcs" >> "$GITHUB_ENV"
+
+      # Whole command flows against a real pack, riding on the binary just built — the unit suite
+      # cannot reach them, and here they cost seconds rather than a build.
+      - uses: ./.github/actions/mcs-smoke
+        with:
+          mcs: ${{ env.MCS }}
 
   build-universal:
     name: Universal Binary
@@ -152,4 +160,11 @@ jobs:
         run: swift package resolve
 
       - name: Build universal binary
-        run: swift build -c release --arch arm64 --arch x86_64
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          echo "MCS=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/mcs" >> "$GITHUB_ENV"
+
+      # The same flows the Linux jobs run, against the universal binary users actually install.
+      - uses: ./.github/actions/mcs-smoke
+        with:
+          mcs: ${{ env.MCS }}

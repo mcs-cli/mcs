@@ -1,0 +1,149 @@
+name: mcs smoke flows
+description: Run whole mcs command flows against a fixture pack, using an already-built binary.
+
+inputs:
+  mcs:
+    description: Path to the mcs binary under test.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # A stand-in for the Claude Code CLI: every command below calls ensureClaudeCLI, which refuses
+    # to run without it, and nothing here asserts on what Claude itself does.
+    - name: Stub the claude CLI
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.local/bin"
+        printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/claude"
+        chmod +x "$HOME/.local/bin/claude"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    # A local pack exercises the same manifest, trust and artifact paths as a git pack without
+    # making the smoke run depend on a network fetch.
+    - name: Create a fixture pack
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$RUNNER_TEMP/fixture-pack/skills/greet" "$RUNNER_TEMP/project"
+        cat > "$RUNNER_TEMP/fixture-pack/techpack.yaml" <<'PACK'
+        schemaVersion: 1
+        identifier: smoke
+        displayName: Smoke Pack
+        description: Fixture pack for the smoke flows
+        prompts:
+          - key: GREETING
+            type: input
+            prompt: Greeting to use
+            default: hello
+        components:
+          - id: greet-skill
+            displayName: Greet skill
+            description: Skill whose body is substituted from a prompt value
+            skill:
+              source: skills/greet
+              destination: greet
+          - id: git-present
+            displayName: git
+            description: A formula whose name is also its command, so the PATH probe satisfies it
+            brew: git
+        PACK
+        cat > "$RUNNER_TEMP/fixture-pack/skills/greet/SKILL.md" <<'SKILL'
+        ---
+        name: greet
+        description: Says __GREETING__
+        ---
+        Says __GREETING__.
+        SKILL
+        cat > "$RUNNER_TEMP/project/mcs.yaml" <<BOOT
+        schemaVersion: 1
+        packs:
+          - source: $RUNNER_TEMP/fixture-pack
+            values:
+              GREETING: hei
+        BOOT
+
+    - name: mcs pack add (local), pack list --json, pack validate
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" pack add "$RUNNER_TEMP/fixture-pack"
+        "$MCS" pack list --json
+        "$MCS" pack validate smoke
+
+    - name: mcs bootstrap --trust-all
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        git init -q .
+        "$MCS" bootstrap --trust-all
+        # The seeded value has to reach the installed artifact, not just the prompt store.
+        test -f .claude/skills/greet/SKILL.md
+        grep -q hei .claude/skills/greet/SKILL.md
+
+    - name: mcs sync --pack --prune --yes
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" sync --pack smoke --prune --yes
+
+    - name: mcs doctor and doctor --fix
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" doctor
+        "$MCS" doctor --fix --yes
+
+    - name: mcs update --trust-all and check-updates
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" update --project --trust-all
+        "$MCS" check-updates --json
+
+    # No TTY here, so every prompt has to resolve from the stored prior or a declared default
+    # rather than blocking on stdin.
+    - name: Non-interactive prompt resolution
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" sync --all < /dev/null
+
+    - name: mcs export and cleanup
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" export "$RUNNER_TEMP/exported" --identifier exported --non-interactive
+        test -f "$RUNNER_TEMP/exported/techpack.yaml"
+        "$MCS" cleanup --force
+
+    - name: mcs pack remove
+      shell: bash
+      working-directory: ${{ runner.temp }}/project
+      env:
+        MCS: ${{ inputs.mcs }}
+      run: |
+        set -euo pipefail
+        "$MCS" pack remove smoke --force
