@@ -5,7 +5,7 @@ This document describes the internal architecture of `mcs` for contributors and 
 ## Package Structure
 
 ```
-Package.swift                    # swift-tools-version: 6.0, macOS 13+
+Package.swift                    # swift-tools-version: 6.0, macOS 13+ and Linux (glibc)
 Sources/mcs/
     CLI.swift                    # @main entry, version, subcommand registration
     Core/                        # Shared infrastructure
@@ -32,7 +32,7 @@ The primary command is **`mcs sync`**, which handles both global and per-project
 
 ### Environment (`Core/Environment.swift`)
 
-Central path resolution for all file locations. Detects architecture (arm64/x86_64), resolves Homebrew path, and locates the user's shell RC file. Key paths:
+Central path resolution for all file locations. Detects architecture (arm64/x86_64), resolves the Homebrew path, and locates the user's shell RC file. The Homebrew prefix is derived from a `brew` on `PATH` when there is one, resolving symlinks and stripping a trailing `Homebrew` component, and falls back to `Homebrew.defaultPrefix` otherwise (see [Linux support, D7](linux-support.md#d7--homebrew-on-linux)). Key paths:
 
 - `~/.claude/` — Claude Code configuration directory
 - `~/.claude/settings.json` — user settings (global)
@@ -94,6 +94,14 @@ Written by `mcs sync` after convergence.
 | **Written by** | `mcs sync --global` | `mcs sync` |
 | **Format** | JSON | JSON |
 | **Tracks** | Globally installed components, pack IDs, file hashes | Per-pack artifact records, configured pack IDs |
+
+### Locked (`Core/Locked.swift`)
+
+A value guarded by an `NSLock`, used by `WarningCounter` and by `ScriptRunner`'s timeout flag. See [Linux support, D2](linux-support.md#d2--lockedvalue-replaces-osallocatedunfairlock) for why it is not `OSAllocatedUnfairLock` or `Synchronization.Mutex`.
+
+### TerminalAttributes (`Core/TerminalAttributes.swift`)
+
+termios helpers for the raw-mode pickers. `c_cc` is a fixed-size tuple whose length and element order are platform-defined and `tcflag_t` differs in type, so the control-character index comes from the platform's own `VMIN`/`VTIME` and every flag mask is converted through `tcflag_t`.
 
 ### Backup (`Core/Backup.swift`)
 
@@ -373,9 +381,13 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 
 The codebase uses Swift 6's strict concurrency. All core types conform to `Sendable`. `TechPack` is a `Sendable` protocol. No mutable global state exists outside the installer's in-progress mutation context.
 
+## Platform Support
+
+`mcs` builds for macOS 13+ and for Linux (glibc, x86_64 and aarch64). Which files may hold platform-dependent code, and how to add a new platform branch, is in [Linux support, section 7](linux-support.md#7-how-to-add-a-platform-specific-path); the rest of that document covers the compatibility matrix and the decisions behind each branch.
+
 ---
 
-**Next**: Having issues? See [Troubleshooting](troubleshooting.md).
+**Next**: Having issues? See [Troubleshooting](troubleshooting.md). Running on Linux? See [Linux support](linux-support.md).
 
 ---
 

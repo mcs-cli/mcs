@@ -28,7 +28,7 @@ struct ExternalDoctorCheckTests {
             command: "/bin/ls",
             args: [],
             fixCommand: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
         let result = check.check()
         if case .pass = result {
@@ -46,7 +46,7 @@ struct ExternalDoctorCheckTests {
             command: "/bin/ls",
             args: ["--nonexistent-flag-xyz"],
             fixCommand: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
         let result = check.check()
         if case .fail = result {
@@ -64,7 +64,7 @@ struct ExternalDoctorCheckTests {
             command: "nonexistent-tool-xyz-12345",
             args: [],
             fixCommand: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
         let result = check.check()
         if case .fail = result {
@@ -74,7 +74,7 @@ struct ExternalDoctorCheckTests {
         }
     }
 
-    @Test("Command exists fix returns notFixable when no fix command")
+    @Test("Command exists fix returns notFixable naming the command when no fix command")
     func commandExistsNoFix() {
         let check = ExternalCommandExistsCheck(
             name: "test",
@@ -82,14 +82,14 @@ struct ExternalDoctorCheckTests {
             command: "nonexistent",
             args: [],
             fixCommand: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
         let result = check.fix()
-        if case .notFixable = result {
-            // expected
-        } else {
+        guard case let .notFixable(message) = result else {
             Issue.record("Expected .notFixable, got \(result)")
+            return
         }
+        #expect(message.contains("'nonexistent'"))
     }
 
     // MARK: - ExternalFileExistsCheck
@@ -114,6 +114,54 @@ struct ExternalDoctorCheckTests {
             // expected
         } else {
             Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("A global-scoped tilde path resolves under the injected home")
+    func fileExistsResolvesTildeAgainstInjectedHome() throws {
+        let home = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "content".write(to: home.appendingPathComponent(".marker"), atomically: true, encoding: .utf8)
+
+        let check = ExternalFileExistsCheck(
+            name: "marker",
+            section: "Files",
+            path: "~/.marker",
+            scope: .global,
+            projectRoot: nil,
+            environment: Environment(home: home)
+        )
+        if case .pass = check.check() {
+            // expected
+        } else {
+            Issue.record("Expected .pass against the injected home, got \(check.check())")
+        }
+    }
+
+    @Test("The factory hands its environment to every global path check", arguments: [
+        ExternalDoctorCheckType.fileExists, .directoryExists, .fileContains, .fileNotContains,
+    ])
+    func factoryThreadsEnvironmentIntoPathChecks(type: ExternalDoctorCheckType) throws {
+        let home = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".marker-dir"), withIntermediateDirectories: true)
+        try "present".write(to: home.appendingPathComponent(".marker"), atomically: true, encoding: .utf8)
+
+        let isDirectory = type == .directoryExists
+        let definition = ExternalDoctorCheckDefinition(
+            type: type,
+            name: "marker",
+            path: isDirectory ? "~/.marker-dir" : "~/.marker",
+            pattern: type == .fileNotContains ? "absent" : (type == .fileContains ? "present" : nil),
+            scope: .global
+        )
+        let check = ExternalDoctorCheckFactory.makeCheck(
+            from: definition, packPath: home, projectRoot: nil,
+            scriptRunner: makeScriptRunner(), environment: Environment(home: home)
+        )
+        guard case .pass = check.check() else {
+            Issue.record("\(type) resolved ~ somewhere other than the injected home: \(check.check())")
+            return
         }
     }
 
@@ -465,7 +513,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check.name == "git check")
@@ -498,7 +546,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check.section == "External Pack")
@@ -530,7 +578,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check is ExternalHookEventExistsCheck)
@@ -556,7 +604,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         // `command` means something different per check type; this asserts it lands on the hook
@@ -592,7 +640,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check is ExternalSettingsKeyEqualsCheck)
@@ -633,11 +681,11 @@ struct ExternalDoctorCheckTests {
 
         let hookCheck = ExternalDoctorCheckFactory.makeCheck(
             from: settingsCheckDefinition(type: .hookEventExists, scope: nil),
-            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner(), environment: Environment()
         )
         let keyCheck = ExternalDoctorCheckFactory.makeCheck(
             from: settingsCheckDefinition(type: .settingsKeyEquals, scope: nil),
-            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+            packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect((hookCheck as? ExternalHookEventExistsCheck)?.projectRoot == projectRoot)
@@ -671,7 +719,7 @@ struct ExternalDoctorCheckTests {
             )
             let check = ExternalDoctorCheckFactory.makeCheck(
                 from: definition, packPath: tmpDir, projectRoot: tmpDir,
-                scriptRunner: makeScriptRunner()
+                scriptRunner: makeScriptRunner(), environment: Environment()
             )
             #expect(
                 (check is any ScopedPathCheck) == type.honorsScope,
@@ -691,11 +739,11 @@ struct ExternalDoctorCheckTests {
         for scope in [ExternalDoctorCheckScope.global, .project] {
             let hookCheck = ExternalDoctorCheckFactory.makeCheck(
                 from: settingsCheckDefinition(type: .hookEventExists, scope: scope),
-                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner(), environment: Environment()
             )
             let keyCheck = ExternalDoctorCheckFactory.makeCheck(
                 from: settingsCheckDefinition(type: .settingsKeyEquals, scope: scope),
-                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner()
+                packPath: tmpDir, projectRoot: projectRoot, scriptRunner: makeScriptRunner(), environment: Environment()
             )
 
             #expect((hookCheck as? ExternalHookEventExistsCheck)?.projectRoot == projectRoot)
@@ -729,7 +777,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check is MisconfiguredDoctorCheck)
@@ -761,7 +809,7 @@ struct ExternalDoctorCheckTests {
             from: definition,
             packPath: tmpDir,
             projectRoot: nil,
-            scriptRunner: makeScriptRunner()
+            scriptRunner: makeScriptRunner(), environment: Environment()
         )
 
         #expect(check is MisconfiguredDoctorCheck)

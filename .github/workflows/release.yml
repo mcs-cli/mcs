@@ -5,8 +5,10 @@ on:
     tags:
       - '[0-9]*.[0-9]*.[0-9]*'
 
+# Read-only by default; only the job that publishes gets write access, so a build step that
+# downloads and runs a toolchain never holds a token that can push tags or releases.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
@@ -64,89 +66,137 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
-
-      - name: Resolve packages
-        run: swift package resolve
+      - uses: ./.github/actions/spm-deps
 
   test:
-    name: Test
+    name: Test (${{ matrix.runner }})
     needs: resolve
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+          # --no-parallel: see "Known limitations" in docs/linux-support.md.
+          - runner: ubuntu-22.04
+            test-flags: --no-parallel
+          - runner: ubuntu-22.04-arm
+            test-flags: --no-parallel
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v6
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-swift-linux
+
+      - uses: ./.github/actions/spm-deps
         with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          restore-only: 'true'
 
       - name: Test
-        run: swift test
+        env:
+          TEST_FLAGS: ${{ matrix.test-flags }}
+        run: |
+          read -ra FLAGS <<< "$TEST_FLAGS"
+          swift test "${FLAGS[@]}"
 
-  build-and-release:
-    name: Build and Release
-    needs: [test, release-notes]
-    runs-on: macos-latest
+  build:
+    name: Build ${{ matrix.asset }} Binary
+    needs: test
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            asset: macos-universal
+            build-flags: --arch arm64 --arch x86_64
+          # 22.04 on purpose, on both arches: it sets the glibc floor of the published binaries at 2.35.
+          - runner: ubuntu-22.04
+            asset: linux-x86_64
+            arch: x86_64
+            build-flags: --static-swift-stdlib
+          - runner: ubuntu-22.04-arm
+            asset: linux-aarch64
+            arch: aarch64
+            build-flags: --static-swift-stdlib
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache/restore@v6
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-swift-linux
 
-      - name: Build universal binary
+      - uses: ./.github/actions/spm-deps
+        with:
+          restore-only: 'true'
+
+      - name: Build release binary
+        env:
+          BUILD_FLAGS: ${{ matrix.build-flags }}
         run: |
-          swift build -c release --arch arm64 --arch x86_64
-          echo "BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)" >> "$GITHUB_ENV"
+          read -ra FLAGS <<< "$BUILD_FLAGS"
+          swift build -c release "${FLAGS[@]}"
+          echo "BIN_DIR=$(swift build -c release "${FLAGS[@]}" --show-bin-path)" >> "$GITHUB_ENV"
 
       - name: Verify binary
         env:
           TAG_NAME: ${{ github.ref_name }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
           BUILT_VERSION=$("${BIN_DIR}/mcs" --version)
           if [ "$BUILT_VERSION" != "$TAG_NAME" ]; then
             echo "::error::Built binary reports version '${BUILT_VERSION}' but tag is '${TAG_NAME}'"
             exit 1
           fi
+          # A Linux asset name encodes the arch, so a mismatch would ship a binary nobody can run.
+          if [ -n "$EXPECTED_ARCH" ] && [ "$(uname -m)" != "$EXPECTED_ARCH" ]; then
+            echo "::error::Runner is $(uname -m) but the asset is named ${EXPECTED_ARCH}"
+            exit 1
+          fi
           echo "Binary verified: ${BUILT_VERSION}"
 
-      - name: Prepare artifacts
+      - name: Prepare artifact
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          ASSET: ${{ matrix.asset }}
+        run: tar -czf "mcs-${TAG_NAME}-${ASSET}.tar.gz" -C "${BIN_DIR}" mcs
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mcs-${{ matrix.asset }}
+          path: mcs-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [build, release-notes]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          merge-multiple: true
+
+      - name: Checksum artifacts
         env:
           TAG_NAME: ${{ github.ref_name }}
         run: |
-          TARBALL="mcs-${TAG_NAME}-macos-universal.tar.gz"
-          tar -czf "${TARBALL}" -C "${BIN_DIR}" mcs
-          shasum -a 256 "${TARBALL}" > SHA256SUMS
-          echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
+          # sha256sum, not shasum: identical "<hash>  <file>" output and present on every runner.
+          sha256sum -- *.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          echo "TARBALL=mcs-${TAG_NAME}-macos-universal.tar.gz" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_NAME: ${{ github.ref_name }}
-          TARBALL: ${{ env.TARBALL }}
           NOTES: ${{ needs.release-notes.outputs.notes }}
         run: |
           gh release create "${TAG_NAME}" \
+            --repo "${{ github.repository }}" \
             --verify-tag \
             --notes "${NOTES}" \
-            "${TARBALL}" SHA256SUMS
+            ./*.tar.gz SHA256SUMS
 
       - name: Update Homebrew tap
         env:
@@ -155,10 +205,15 @@ jobs:
           TARBALL: ${{ env.TARBALL }}
         if: env.HOMEBREW_TAP_TOKEN != ''
         run: |
-          SHA=$(shasum -a 256 "${TARBALL}" | cut -d' ' -f1)
+          # The formula keeps pointing at the macOS tarball; Linux ships as plain release assets.
+          SHA=$(sha256sum "${TARBALL}" | cut -d' ' -f1)
 
           git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/mcs-cli/homebrew-tap.git" tap
           cd tap
+          # This job has no checkout and Ubuntu runners have dotless hostnames, so git cannot
+          # auto-detect an author and would refuse the commit. Same identity as auto-release.yml.
+          git config user.email "autorelease@mcs-cli.dev"
+          git config user.name "MCS Auto Release"
           cat > Formula/mcs.rb << FORMULA
           class Mcs < Formula
             desc "Configure Claude Code with MCP servers, plugins, skills, and hooks"
@@ -167,6 +222,9 @@ jobs:
             sha256 "${SHA}"
             version "${TAG_NAME}"
             license "MIT"
+            # A Mach-O universal binary: on Linuxbrew this fails clearly instead of installing
+            # something that cannot run. Linux installs from the release tarballs.
+            depends_on :macos
 
             def install
               libexec.install "mcs"

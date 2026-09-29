@@ -17,10 +17,11 @@ struct GitignoreManager {
     ///
     /// Every path here is anchored to `shell.environment.homeDirectory`, never to the process's
     /// own home. In production the two are the same (`Environment()` derives from
-    /// `NSHomeDirectory()`), but they differ under an injected `Environment(home:)` — and this
-    /// type both reads *and writes* the file, so resolving the process home let a sandboxed
-    /// caller mutate the real user's global gitignore. `HOME` is passed to `git config` for the
-    /// same reason: `--global` resolves `$HOME/.gitconfig`, which would otherwise escape too.
+    /// `Environment.defaultHomeDirectory()`), but they differ under an injected
+    /// `Environment(home:)` — and this type both reads *and writes* the file, so resolving the
+    /// process home let a sandboxed caller mutate the real user's global gitignore. `HOME` is
+    /// passed to `git config` for the same reason: `--global` resolves `$HOME/.gitconfig`, which
+    /// would otherwise escape too.
     func resolveGlobalGitignorePath() -> URL {
         let home = shell.environment.homeDirectory
         let result = shell.run(
@@ -47,7 +48,7 @@ struct GitignoreManager {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
         if !fm.fileExists(atPath: path.path) {
-            fm.createFile(atPath: path.path, contents: nil)
+            try Data().write(to: path)
         }
     }
 

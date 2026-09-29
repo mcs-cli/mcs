@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Result of running a shell command.
 struct ShellResult {
@@ -72,6 +77,13 @@ extension ShellRunning {
 
 /// Runs shell commands and captures output.
 struct ShellRunner: ShellRunning {
+    /// The warning for a failed shell component. A command that ran in a terminal already printed
+    /// its own output, so its `stderr` is empty unless the PTY bridge itself failed before `exec`.
+    static func failureMessage(name: String, stderr: String, ranInTerminal: Bool) -> String {
+        if !stderr.isEmpty { return "\(name) failed: \(stderr.prefix(200))" }
+        return ranInTerminal ? "\(name) failed (see output above)" : "\(name) failed"
+    }
+
     let environment: Environment
 
     /// Check if a command exists on PATH.
@@ -194,19 +206,26 @@ struct ShellRunner: ShellRunning {
         environment env: [String: String],
         workingDirectory: String?
     ) -> ShellResult {
-        // Prepare environment and argv as C strings for execve().
+        // After fork() only async-signal-safe calls are legal, so every C string the child needs is
+        // allocated and checked here, in the parent: a NULL mid-vector would silently truncate it at
+        // execve. Glibc imports `execve`/`chdir` with non-optional parameters, hence the unwrap.
         let envp: [UnsafeMutablePointer<CChar>?] = env.map { key, value in
             strdup("\(key)=\(value)")
         } + [nil]
         defer { envp.compactMap(\.self).forEach { free($0) } }
-
         let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
         defer { argv.compactMap(\.self).forEach { free($0) } }
+        let workingDirectoryPath = workingDirectory.flatMap { strdup($0) }
+        defer { workingDirectoryPath.map { free($0) } }
 
-        // Pre-convert workingDirectory to a C string before fork so the child
-        // doesn't need to invoke Swift's String-to-CString bridge (not fork-safe).
-        let cwdCStr = workingDirectory.map { strdup($0) }
-        defer { cwdCStr.map { free($0) } }
+        // dropLast() skips the NULL terminator each vector deliberately ends with.
+        guard let executablePath = argv[0],
+              !argv.dropLast().contains(nil),
+              !envp.dropLast().contains(nil),
+              workingDirectory == nil || workingDirectoryPath != nil
+        else {
+            return ShellResult(exitCode: 1, stdout: "", stderr: "Could not allocate the command line for \(executable)")
+        }
 
         // Save the terminal's current attributes so we can restore them after.
         var originalTermios = termios()
@@ -226,7 +245,7 @@ struct ShellRunner: ShellRunning {
             // After fork, only async-signal-safe functions are safe. Avoid Swift
             // runtime calls (String interpolation, ARC) — they can deadlock on
             // locks held by other threads in the parent at fork time.
-            if let cwd = cwdCStr {
+            if let cwd = workingDirectoryPath {
                 if chdir(cwd) != 0 {
                     let err = strerror(errno)
                     _ = write(STDERR_FILENO, "chdir failed: ", 14)
@@ -235,8 +254,7 @@ struct ShellRunner: ShellRunning {
                     _exit(126)
                 }
             }
-            // Use argv[0] (already a C string from strdup) instead of the Swift String.
-            execve(argv[0], argv, envp)
+            execve(executablePath, argv, envp)
             let err = strerror(errno)
             _ = write(STDERR_FILENO, "execve failed: ", 15)
             if let err { _ = write(STDERR_FILENO, err, strlen(err)) }
@@ -280,22 +298,35 @@ struct ShellRunner: ShellRunning {
                 break
             }
 
-            // Terminal → PTY (user typing, including password input)
-            if fds[0].revents & Int16(POLLIN) != 0 {
+            let ptyAction = PTYBridge.ptyAction(revents: fds[1].revents)
+            if case .close = ptyAction { break bridgeLoop }
+
+            // Terminal → PTY (user typing, including password input). poll(2) skips negative
+            // fds, so a dropped stdin leaves the loop draining the PTY alone.
+            switch PTYBridge.stdinAction(revents: fds[0].revents) {
+            case .forward:
                 let n = read(STDIN_FILENO, &buf, buf.count)
+                if n < 0, errno == EINTR { break }
                 if n <= 0 {
-                    // stdin EOF — stop monitoring, let PTY drain remaining output
                     fds[0].fd = -1
                 } else {
                     writeAll(fd: ptyFD, buf: buf, count: n)
                 }
+            case .drop:
+                fds[0].fd = -1
+            case .idle:
+                break
             }
 
             // PTY → Terminal (command output, prompts, progress bars)
-            if fds[1].revents & Int16(POLLIN | POLLHUP) != 0 {
+            switch ptyAction {
+            case .read:
                 let n = read(ptyFD, &buf, buf.count)
+                if n < 0, errno == EINTR { continue }
                 if n <= 0 { break bridgeLoop } // Child closed the PTY
                 writeAll(fd: STDOUT_FILENO, buf: buf, count: n)
+            case .close, .idle:
+                break
             }
         }
 

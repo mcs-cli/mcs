@@ -187,13 +187,17 @@ struct PackUpdater {
 
         if !newItems.isEmpty {
             output.warn("\(entry.displayName) has new or modified scripts:")
-            guard trustManager.promptForTrust(
-                manifest: manifest,
-                packPath: packPath,
-                items: newItems
-            ) else {
-                return .trustDeclined
+            let trusted: Bool
+            do {
+                trusted = try trustManager.promptForTrust(
+                    manifest: manifest,
+                    packPath: packPath,
+                    items: newItems
+                )
+            } catch {
+                return .internalError(underlying: error)
             }
+            guard trusted else { return .trustDeclined }
         }
 
         // Rebuild the map from the analyzed items instead of merging into the old one: merging left

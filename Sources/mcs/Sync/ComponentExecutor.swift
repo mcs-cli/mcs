@@ -15,7 +15,7 @@ struct ComponentExecutor {
         let brew = Homebrew(shell: shell, environment: environment)
         if brew.provides(package) { return true }
         guard brew.isInstalled else {
-            output.warn("Homebrew not found, cannot install \(package)")
+            output.warn(Homebrew.manualInstallAdvice(for: package))
             return false
         }
         let result = brew.install(package)
@@ -155,12 +155,11 @@ struct ComponentExecutor {
                 withIntermediateDirectories: true
             )
 
-            var isDir: ObjCBool = false
-            fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            let sourceIsDirectory = Self.isDirectory(source)
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
-            if isDir.boolValue {
+            if sourceIsDirectory {
                 // Source is a directory — copy all files recursively
                 try fm.createDirectory(at: destURL, withIntermediateDirectories: true)
                 let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
@@ -238,13 +237,12 @@ struct ComponentExecutor {
                 withIntermediateDirectories: true
             )
 
-            var isDir: ObjCBool = false
-            fm.fileExists(atPath: source.path, isDirectory: &isDir)
+            let sourceIsDirectory = Self.isDirectory(source)
             var installedPaths: [String] = []
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
-            if isDir.boolValue {
+            if sourceIsDirectory {
                 try fm.createDirectory(at: destURL, withIntermediateDirectories: true)
                 let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
                 for file in contents {
@@ -322,10 +320,9 @@ struct ComponentExecutor {
         values: [String: String]
     ) throws {
         let fm = FileManager.default
-        var isDir: ObjCBool = false
-        fm.fileExists(atPath: source.path, isDirectory: &isDir)
+        let sourceIsDirectory = Self.isDirectory(source)
 
-        if isDir.boolValue {
+        if sourceIsDirectory {
             try fm.createDirectory(at: destination, withIntermediateDirectories: true)
             let contents = try fm.contentsOfDirectory(at: source, includingPropertiesForKeys: nil)
             for child in contents {
@@ -414,5 +411,10 @@ struct ComponentExecutor {
         }
 
         return false
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 }

@@ -81,7 +81,10 @@ struct ExternalCommandExistsCheck: DoctorCheck {
 
     func fix() -> FixResult {
         guard let fixCommand else {
-            return .notFixable("Run 'mcs sync' to install dependencies")
+            // Nothing here knows which component, if any, provides this command, so both routes are named.
+            return .notFixable(
+                "Run 'mcs sync' if a pack component installs '\(command)'; otherwise install it and make sure it is on PATH"
+            )
         }
         let result = scriptRunner.runCommand(fixCommand)
         if result.succeeded {
@@ -100,6 +103,7 @@ struct ExternalFileExistsCheck: ScopedPathCheck {
     let path: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -127,6 +131,7 @@ struct ExternalDirectoryExistsCheck: ScopedPathCheck {
     let path: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -156,6 +161,7 @@ struct ExternalFileContainsCheck: ScopedPathCheck {
     let pattern: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -187,6 +193,7 @@ struct ExternalFileNotContainsCheck: ScopedPathCheck {
     let pattern: String
     let scope: ExternalDoctorCheckScope
     let projectRoot: URL?
+    var environment: Environment = .init()
 
     func check() -> CheckResult {
         let resolved: String
@@ -477,7 +484,7 @@ enum ExternalDoctorCheckFactory {
         packPath: URL,
         projectRoot: URL?,
         scriptRunner: ScriptRunner,
-        environment: Environment = Environment()
+        environment: Environment
     ) -> any DoctorCheck {
         let section = definition.section ?? "External Pack"
         let scope = definition.scope ?? .global
@@ -512,7 +519,8 @@ enum ExternalDoctorCheckFactory {
                 section: section,
                 path: path,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .directoryExists:
@@ -527,7 +535,8 @@ enum ExternalDoctorCheckFactory {
                 section: section,
                 path: path,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .fileContains:
@@ -545,7 +554,8 @@ enum ExternalDoctorCheckFactory {
                 path: path,
                 pattern: pattern,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .fileNotContains:
@@ -563,7 +573,8 @@ enum ExternalDoctorCheckFactory {
                 path: path,
                 pattern: pattern,
                 scope: scope,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                environment: environment
             )
 
         case .shellScript:
@@ -635,6 +646,7 @@ protocol ScopedPathCheck: DoctorCheck {
     var path: String { get }
     var scope: ExternalDoctorCheckScope { get }
     var projectRoot: URL? { get }
+    var environment: Environment { get }
 }
 
 enum PathResolveResult {
@@ -647,7 +659,7 @@ extension ScopedPathCheck {
     func resolvePath() -> PathResolveResult {
         switch scope {
         case .global:
-            return .resolved(expandTilde(path))
+            return .resolved(environment.expandingTilde(path))
         case .project:
             guard let root = projectRoot else { return .noProjectRoot }
             guard let safe = PathContainment.safePath(relativePath: path, within: root) else {
@@ -740,14 +752,4 @@ extension SettingsReadingCheck {
         }
         return SettingsProbe(match: nil, readErrors: readErrors, anyFileExisted: anyFileExisted)
     }
-}
-
-// MARK: - Helpers
-
-/// Expand `~` at the start of a path to the user's home directory.
-func expandTilde(_ path: String) -> String {
-    if path.hasPrefix("~/") {
-        return NSString(string: path).expandingTildeInPath
-    }
-    return path
 }

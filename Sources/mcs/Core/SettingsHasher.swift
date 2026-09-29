@@ -1,4 +1,4 @@
-import CryptoKit
+import Crypto
 import Foundation
 
 /// Deterministic SHA-256 hashing of pack-contributed settings values.

@@ -39,7 +39,7 @@ struct UpdateCommand: LockedCommand {
         let output = CLIOutput()
         let shell = ShellRunner(environment: env)
 
-        guard ensureClaudeCLI(shell: shell, environment: env, output: output) else {
+        guard ensureClaudeCLI(shell: shell, output: output) else {
             throw ExitCode.failure
         }
 
@@ -53,7 +53,7 @@ struct UpdateCommand: LockedCommand {
             return
         }
 
-        if allProjects, !confirmFanOut(runs: runs, env: env, output: output) {
+        if allProjects, try !confirmFanOut(runs: runs, env: env, output: output) {
             output.info("Update cancelled.")
             return
         }
@@ -173,7 +173,7 @@ struct UpdateCommand: LockedCommand {
         runs: [UpdateScopeResolver.ScopeRun],
         env: Environment,
         output: CLIOutput
-    ) -> Bool {
+    ) throws -> Bool {
         guard !dryRun, output.hasInteractiveStdin else { return true }
 
         let projectPaths = runs.compactMap(\.projectPath)
@@ -202,7 +202,7 @@ struct UpdateCommand: LockedCommand {
         output.plain("  Each pack is re-applied in every listed scope. Local edits to")
         output.plain("  settings.local.json, hooks, or skills in those projects may be overwritten.")
         output.plain("")
-        return output.askYesNo("Proceed?", default: false)
+        return try output.askYesNo("Proceed?", default: false)
     }
 
     private func warnIfProjectScopeMissing(

@@ -25,7 +25,89 @@ struct UpdateChecker {
     static let hookTimeout: Int = 30
     static let hookStatusMessage = "Checking for updates..."
 
-    static let cliUpgradeCommands = ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
+    /// How the installed mcs binary can be upgraded to a newer release.
+    enum CLIUpgrade: Equatable {
+        /// Commands Claude may run on the user's behalf once they agree.
+        case commands([String])
+        /// A command that needs `sudo`, which Claude's shell cannot answer a password prompt for.
+        case runYourself(String)
+        /// No command can be offered; the user downloads the release by hand.
+        case manual(reason: String)
+    }
+
+    static let manualUpgradeHint = "Download the latest release from \(Constants.MCSRepo.releasesURL)."
+
+    /// The upgrade path for this install. macOS upgrades through Homebrew; Linux swaps the release
+    /// tarball's binary in at the path the kernel reports for this process.
+    static func cliUpgrade(toVersion version: String) -> CLIUpgrade {
+        #if canImport(Darwin)
+        .commands(["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"])
+        #else
+        let path: String
+        do {
+            path = try installedBinaryPath()
+        } catch {
+            return .manual(reason: "the installed binary could not be located (\(error.localizedDescription))")
+        }
+        let directory = (path as NSString).deletingLastPathComponent
+        return linuxUpgrade(
+            toVersion: version,
+            binaryPath: path,
+            directoryWritable: FileManager.default.isWritableFile(atPath: directory),
+            arch: releaseArch
+        )
+        #endif
+    }
+
+    /// The tarball swap, as a pure function of its inputs. Every step has to be safe in a shell mcs
+    /// does not own: the version comes from a remote tag and the path from the filesystem, so both
+    /// are validated or quoted; the member is staged beside the binary and run before anything is
+    /// replaced; and the final `mv` is a same-directory rename, atomic while the old binary is mapped.
+    static func linuxUpgrade(
+        toVersion version: String,
+        binaryPath path: String,
+        directoryWritable: Bool,
+        arch: String
+    ) -> CLIUpgrade {
+        guard version.range(of: #"^[0-9]+\.[0-9]+\.[0-9]+$"#, options: .regularExpression) != nil else {
+            return .manual(reason: "release '\(version)' is not a plain version number")
+        }
+        // The kernel appends this once the file behind a running process is replaced or unlinked.
+        guard !path.hasSuffix(" (deleted)") else {
+            return .manual(reason: "the running binary was replaced or removed")
+        }
+        let directory = (path as NSString).deletingLastPathComponent
+        let staged = shellQuoted("\(directory)/.mcs-upgrade")
+        let url = shellQuoted(
+            Constants.MCSRepo.assetURL(tag: version, asset: "mcs-\(version)-linux-\(arch).tar.gz")
+        )
+        let script = "{ curl -fsSL \(url) | tar -xzO mcs > \(staged)"
+            + " && chmod +x \(staged) && \(staged) --version && mv -f \(staged) \(shellQuoted(path)); }"
+            + " || { rm -f \(staged); false; }"
+        // sudo only where the directory demands it, so a user-local install never ends up root-owned.
+        return directoryWritable ? .commands([script]) : .runYourself("sudo sh -c \(shellQuoted(script))")
+    }
+
+    /// `value` as one single-quoted shell word.
+    static func shellQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
+    /// The architecture slug used in the Linux release asset names.
+    static var releaseArch: String {
+        #if arch(arm64)
+        "aarch64"
+        #else
+        "x86_64"
+        #endif
+    }
+
+    /// Where this process's binary lives, read from the kernel rather than `argv[0]`, which a
+    /// caller controls.
+    static func installedBinaryPath() throws -> String {
+        try FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/exe")
+    }
+
     static let manualPackUpdateCommand = "mcs update --all-projects"
     static let hookPackUpdateCommand = "mcs update -a --trust-all"
 
@@ -581,7 +663,9 @@ struct UpdateChecker {
 
         if isHook {
             // Structured JSON for Claude Code SessionStart hook
-            let context = buildContextString(result)
+            let context = buildContextString(
+                result, upgrade: result.cliUpdate.map { cliUpgrade(toVersion: $0.latestVersion) }
+            )
             let hookOutput: [String: Any] = [
                 "hookSpecificOutput": [
                     "hookEventName": Constants.HookEvent.sessionStart.rawValue,
@@ -600,10 +684,15 @@ struct UpdateChecker {
         } else {
             // User-invoked: colored output for terminal readability
             if let cli = result.cliUpdate {
-                output.warn(
-                    "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run '\(cliUpgradeCommands.joined(separator: " && "))' to update."
-                )
+                let how = switch cliUpgrade(toVersion: cli.latestVersion) {
+                case let .commands(commands):
+                    "Run '\(commands.joined(separator: " && "))' to update."
+                case let .runYourself(command):
+                    "Run '\(command)' to update."
+                case let .manual(reason):
+                    "\(manualUpgradeHint) (No upgrade command: \(reason).)"
+                }
+                output.warn("mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). " + how)
             }
             if !result.packUpdates.isEmpty {
                 let noun = result.packUpdates.count == 1 ? "pack update" : "pack updates"
@@ -623,7 +712,8 @@ struct UpdateChecker {
         return true
     }
 
-    static func buildContextString(_ result: CheckResult) -> String {
+    /// `upgrade` is the path for `result.cliUpdate`, resolved by the caller because it reads the host.
+    static func buildContextString(_ result: CheckResult, upgrade: CLIUpgrade?) -> String {
         // `additionalContext` arrives with the user's first message and can't pause it, so holding
         // the request until the user answers relies on AskUserQuestion being the first tool call.
         var lines: [String] = []
@@ -636,7 +726,19 @@ struct UpdateChecker {
             lines.append(
                 "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion))."
             )
-            commands += cliUpgradeCommands
+            switch upgrade {
+            case let .commands(upgradeCommands):
+                commands += upgradeCommands
+            case let .runYourself(command):
+                lines.append(
+                    "  Upgrading needs sudo, which cannot prompt for a password here, so do not run it;"
+                        + " give the user this command to run in their own terminal: \(command)"
+                )
+            case let .manual(reason):
+                lines.append("  There is no upgrade command for this install (\(reason)). \(manualUpgradeHint)")
+            case nil:
+                break
+            }
         }
         let hasPackUpdates = !result.packUpdates.isEmpty
         if hasPackUpdates {
@@ -647,6 +749,10 @@ struct UpdateChecker {
         }
         lines.append("- To stop these notifications, run: mcs config set update-check false")
         lines.append("")
+        guard !commands.isEmpty else {
+            lines.append("There is nothing to run, so do not ask a question; continue with the user's request.")
+            return lines.joined(separator: "\n")
+        }
         lines.append(
             "Then make the AskUserQuestion tool your first tool call: one yes/no question asking whether to"
                 + " apply all of these updates now. If AskUserQuestion is unavailable, ask in plain text and"

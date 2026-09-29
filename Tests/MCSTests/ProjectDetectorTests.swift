@@ -3,6 +3,13 @@ import Foundation
 import Testing
 
 struct ProjectDetectorTests {
+    private func samePath(_ found: URL?, _ expected: URL) -> Bool {
+        // Paths, not URLs: corelibs Foundation keeps a trailing slash on a directory URL from
+        // deletingLastPathComponent() that standardizedFileURL does not strip, so on Linux two URLs
+        // for the same directory compare unequal.
+        found?.standardizedFileURL.path == expected.standardizedFileURL.path
+    }
+
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mcs-projdetect-test-\(UUID().uuidString)")
@@ -24,7 +31,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: sourcesDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: sourcesDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Finds project root via CLAUDE.local.md")
@@ -41,7 +48,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Finds project root via .claude/.mcs-project")
@@ -60,7 +67,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Prefers .git over CLAUDE.local.md at same level")
@@ -78,7 +85,7 @@ struct ProjectDetectorTests {
         )
 
         let root = ProjectDetector.findProjectRoot(from: tmpDir)
-        #expect(root?.standardizedFileURL == tmpDir.standardizedFileURL)
+        #expect(samePath(root, tmpDir))
     }
 }
 

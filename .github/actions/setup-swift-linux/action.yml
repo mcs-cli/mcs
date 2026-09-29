@@ -1,0 +1,99 @@
+name: Set up Swift on Linux
+description: Install a pinned Swift toolchain on an Ubuntu runner via swiftly and put it on PATH.
+
+inputs:
+  swift-version:
+    description: The toolchain version swiftly installs and selects.
+    default: '6.2.0'
+
+runs:
+  using: composite
+  steps:
+    # swiftly installs a toolchain built for this Ubuntu release, so the cache key carries it: one
+    # restored onto another image may not run there.
+    - name: Identify the image
+      id: image
+      shell: bash
+      run: |
+        set -euo pipefail
+        . /etc/os-release
+        echo "release=${ID}-${VERSION_ID}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the Swift toolchain
+      id: toolchain
+      uses: actions/cache@v6
+      with:
+        # swiftly keeps the toolchains and env.sh under the data dir and its selected-version
+        # state under the config dir; a hit needs both or `swift` resolves to nothing.
+        path: |
+          ~/.local/share/swiftly
+          ~/.config/swiftly
+        key: swiftly-${{ steps.image.outputs.release }}-${{ runner.arch }}-${{ inputs.swift-version }}
+
+    - name: Install the toolchain's system dependencies
+      # Not cacheable — these are system packages, and the toolchain needs them on a cache hit too.
+      # The names are Ubuntu-release-specific, so a miss is tolerated here: on a cache miss the
+      # install step below asks swiftly for the authoritative list and retries.
+      shell: bash
+      run: |
+        set -euo pipefail
+        # No `apt-get update` first: it costs more than everything else here, and the runner images
+        # ship a usable index. A package that cannot be resolved falls back to updating once.
+        for pkg in libcurl4-openssl-dev pkg-config python3-lldb-13; do
+          sudo apt-get -y install "$pkg" && continue
+          sudo apt-get update
+          sudo apt-get -y install "$pkg" || echo "::warning::apt could not install $pkg"
+        done
+
+    - name: Install Swift via swiftly
+      if: steps.toolchain.outputs.cache-hit != 'true'
+      # swiftly refuses to install a toolchain until Swift's own system dependencies are present,
+      # and names the missing ones in an `apt-get -y install …` line. Those names differ by Ubuntu
+      # release and architecture, so they are read back from swiftly rather than trusted to the
+      # list above. Unpacked outside the checkout so the tree the caller builds in stays clean.
+      shell: bash
+      env:
+        SWIFT_VERSION: ${{ inputs.swift-version }}
+        # Pinned and checksummed: this binary runs before anything else in the job, so an
+        # unannounced upstream release must not be able to change or break it.
+        SWIFTLY_VERSION: '1.2.0'
+        SWIFTLY_SHA256_X86_64: 0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3
+        SWIFTLY_SHA256_AARCH64: 590d855e03807791f1b84aab77471bf7e31f9e3b22151972526077da296ecf96
+      run: |
+        set -euo pipefail
+        cd "$RUNNER_TEMP"
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) SHA="$SWIFTLY_SHA256_X86_64" ;;
+          aarch64) SHA="$SWIFTLY_SHA256_AARCH64" ;;
+          *) echo "::error::No pinned swiftly checksum for $ARCH"; exit 1 ;;
+        esac
+        TARBALL="swiftly-${SWIFTLY_VERSION}-${ARCH}.tar.gz"
+        curl -fsSL --retry 3 -o "$TARBALL" "https://download.swift.org/swiftly/linux/$TARBALL"
+        echo "$SHA  $TARBALL" | sha256sum -c -
+        tar zxf "$TARBALL"
+        ./swiftly init --quiet-shell-followup --assume-yes --skip-install
+        . "${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+
+        LOG="$RUNNER_TEMP/swiftly-install.log"
+        if ! swiftly install --use "$SWIFT_VERSION" --assume-yes 2>&1 | tee "$LOG"; then
+          PKGS=$(sed -n 's/^apt-get -y install //p' "$LOG" | tr '\n' ' ')
+          test -n "$PKGS" || { echo "::error::swiftly failed without naming missing packages"; exit 1; }
+          echo "Installing the dependencies swiftly asked for: $PKGS"
+          for pkg in $PKGS; do
+            sudo apt-get -y install "$pkg" || echo "::warning::apt could not install $pkg"
+          done
+          swiftly install --use "$SWIFT_VERSION" --assume-yes
+        fi
+
+    - name: Put Swift on PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        # env.sh lives under $XDG_DATA_HOME when that is set; fail loudly rather than silently
+        # continuing without swiftly on PATH if the layout ever moves or a cache hit is partial.
+        ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
+        test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
+        . "$ENV_SH"
+        echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
+        "$SWIFTLY_BIN_DIR/swift" --version

@@ -30,7 +30,7 @@ struct Environment {
     private static let resolvedBrewPath: String? = resolveCommand("brew")
 
     init(home: URL? = nil) {
-        let home = home ?? URL(fileURLWithPath: NSHomeDirectory())
+        let home = home ?? URL(fileURLWithPath: Self.defaultHomeDirectory())
         homeDirectory = home
 
         let claudeDir = home.appendingPathComponent(Constants.FileNames.claudeDirectory)
@@ -52,19 +52,52 @@ struct Environment {
 
         if let resolvedBrew = Self.resolvedBrewPath {
             brewPath = resolvedBrew
-            brewPrefix = URL(fileURLWithPath: resolvedBrew)
-                .resolvingSymlinksInPath()
-                .deletingLastPathComponent().deletingLastPathComponent().path
+            brewPrefix = Self.brewPrefix(forBrewPath: resolvedBrew)
         } else {
-            #if arch(arm64)
-            brewPrefix = "/opt/homebrew"
-            #else
-            brewPrefix = "/usr/local"
-            #endif
+            brewPrefix = Homebrew.defaultPrefix
             brewPath = "\(brewPrefix)/bin/brew"
         }
 
         gitPath = Self.resolvedGitPath
+    }
+
+    /// The Homebrew prefix implied by the path `brew` was found at.
+    ///
+    /// Symlinks are resolved first so a shim elsewhere on PATH (`~/.local/bin/brew` pointing at the
+    /// real install) still yields the prefix formulae link into. The installer itself links
+    /// `$PREFIX/bin/brew -> ../Homebrew/bin/brew` on Linux and Intel macOS, which resolves to the
+    /// repository checkout rather than the prefix — hence the trailing `Homebrew` is stripped.
+    static func brewPrefix(forBrewPath path: String) -> String {
+        var prefix = URL(fileURLWithPath: path)
+            .resolvingSymlinksInPath()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        if prefix.lastPathComponent == "Homebrew" {
+            prefix = prefix.deletingLastPathComponent()
+        }
+        return prefix.path
+    }
+
+    /// The user's home directory, an absolute `$HOME` first: `NSHomeDirectory()` reads the passwd
+    /// entry even when `$HOME` is set, so `HOME=<dir> mcs …` and sandboxed runs would be ignored.
+    static func defaultHomeDirectory(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String {
+        // A relative `$HOME` would resolve against whatever directory mcs was launched from.
+        guard let home = environment["HOME"], home.hasPrefix("/") else {
+            return NSHomeDirectory()
+        }
+        return home
+    }
+
+    /// Expands a leading `~` against `homeDirectory`, not the passwd entry Foundation's
+    /// `expandingTildeInPath` reads — otherwise a `~/…` pack path or doctor check would resolve
+    /// under a different home than `~/.mcs` whenever `$HOME` is overridden.
+    func expandingTilde(_ path: String) -> String {
+        if path == "~" || path == "~/" {
+            return homeDirectory.path
+        }
+        guard path.hasPrefix("~/") else { return path }
+        return homeDirectory.appendingPathComponent(String(path.dropFirst(2))).path
     }
 
     /// Directory where external tech pack checkouts live (`~/.mcs/packs/`).

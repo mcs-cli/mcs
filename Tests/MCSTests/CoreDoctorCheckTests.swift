@@ -46,11 +46,12 @@ struct HookInterpreterCheckTests {
         #expect(!message.contains("mcs sync"))
     }
 
-    @Test("bash, sh and zsh are assumed present and never checked")
+    @Test("bash and sh are assumed present; zsh, absent from most Linux installs, is checked")
     func shellsAreAssumedPresent() {
-        for shell in ["bash", "sh", "zsh"] {
+        for shell in ["bash", "sh"] {
             #expect(!HookInterpreter.isCheckable(binary: shell))
         }
+        #expect(HookInterpreter.isCheckable(binary: "zsh"))
         #expect(HookInterpreter.isCheckable(binary: "node"))
     }
 }
@@ -807,5 +808,30 @@ struct SettingsDriftCheckTests {
             packName: "test"
         )
         #expect(check.section == "Settings")
+    }
+}
+
+struct BrewPackageCheckGuidanceTests {
+    @Test("The fix for a missing package never advertises a command that cannot work")
+    func fixDoesNotPointAtSyncWhenBrewIsAbsent() {
+        let package = "mcs-nonexistent-formula-for-tests"
+        let check = BrewPackageCheck(name: package, section: "Dependencies", package: package)
+        guard case .fail = check.check() else {
+            Issue.record("Expected .fail for a formula nothing provides, got \(check.check())")
+            return
+        }
+
+        guard case let .notFixable(message) = check.fix() else {
+            Issue.record("Installing a package is sync's job, so the fix must be .notFixable")
+            return
+        }
+
+        // Asserted against whichever machine runs this: with brew present `mcs sync` really can
+        // install the package; without it the hint is the manual advice instead.
+        if FileManager.default.fileExists(atPath: Environment().brewPath) {
+            #expect(message.contains("mcs sync"))
+        } else {
+            #expect(message == Homebrew.manualInstallAdvice(for: package))
+        }
     }
 }

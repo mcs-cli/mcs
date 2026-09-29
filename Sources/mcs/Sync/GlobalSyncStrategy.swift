@@ -125,16 +125,20 @@ struct GlobalSyncStrategy: SyncStrategy {
                 }
 
             case let .shellCommand(command, interactive):
-                if interactive {
-                    output.plain("  Running \(component.displayName) (may prompt for your password)...")
-                } else {
+                let usesTerminal = interactive && output.hasInteractiveStdin
+                if !interactive {
                     output.dimmed("  Running \(component.displayName)...")
                 }
-                let result = shell.shell(command, interactive: interactive)
+                announceShellCommand(
+                    component.displayName, interactive: interactive, usesTerminal: usesTerminal, output: output
+                )
+                let result = shell.shell(command, interactive: usesTerminal)
                 if result.succeeded {
                     output.success("  \(component.displayName) installed")
-                } else if interactive {
-                    output.warn("  \(component.displayName) failed (see output above)")
+                } else if usesTerminal {
+                    output.warn("  " + ShellRunner.failureMessage(
+                        name: component.displayName, stderr: result.stderr, ranInTerminal: true
+                    ))
                 } else {
                     output.warn("  \(component.displayName) requires manual installation:")
                     output.plain("    \(command)")
