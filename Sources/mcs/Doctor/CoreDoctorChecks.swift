@@ -40,7 +40,11 @@ struct BrewPackageCheck: DoctorCheck {
     }
 
     func fix() -> FixResult {
-        .notFixable("Run 'mcs sync' to install dependencies")
+        let shell = ShellRunner(environment: environment)
+        guard Homebrew(shell: shell, environment: environment).isInstalled else {
+            return .notFixable(Homebrew.manualInstallAdvice(for: package))
+        }
+        return .notFixable("Run 'mcs sync' to install dependencies")
     }
 }
 

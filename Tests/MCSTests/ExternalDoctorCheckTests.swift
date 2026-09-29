@@ -74,7 +74,7 @@ struct ExternalDoctorCheckTests {
         }
     }
 
-    @Test("Command exists fix returns notFixable when no fix command")
+    @Test("Command exists fix returns notFixable naming the command when no fix command")
     func commandExistsNoFix() {
         let check = ExternalCommandExistsCheck(
             name: "test",
@@ -85,11 +85,11 @@ struct ExternalDoctorCheckTests {
             scriptRunner: makeScriptRunner()
         )
         let result = check.fix()
-        if case .notFixable = result {
-            // expected
-        } else {
+        guard case let .notFixable(message) = result else {
             Issue.record("Expected .notFixable, got \(result)")
+            return
         }
+        #expect(message.contains("'nonexistent'"))
     }
 
     // MARK: - ExternalFileExistsCheck
@@ -114,6 +114,27 @@ struct ExternalDoctorCheckTests {
             // expected
         } else {
             Issue.record("Expected .pass, got \(result)")
+        }
+    }
+
+    @Test("A global-scoped tilde path resolves under the injected home")
+    func fileExistsResolvesTildeAgainstInjectedHome() throws {
+        let home = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "content".write(to: home.appendingPathComponent(".marker"), atomically: true, encoding: .utf8)
+
+        let check = ExternalFileExistsCheck(
+            name: "marker",
+            section: "Files",
+            path: "~/.marker",
+            scope: .global,
+            projectRoot: nil,
+            environment: Environment(home: home)
+        )
+        if case .pass = check.check() {
+            // expected
+        } else {
+            Issue.record("Expected .pass against the injected home, got \(check.check())")
         }
     }
 

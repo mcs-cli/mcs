@@ -17,7 +17,7 @@ struct ComponentExecutor {
         let brew = Homebrew(shell: shell, environment: environment)
         if brew.provides(package) { return true }
         guard brew.isInstalled else {
-            output.warn("Homebrew not found, cannot install \(package)")
+            output.warn(Homebrew.manualInstallAdvice(for: package))
             return false
         }
         let result = brew.install(package)
