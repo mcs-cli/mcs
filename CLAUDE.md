@@ -212,7 +212,7 @@ import Glibc
 - **Important**: `swift test` output does not display in Claude Code's terminal. Redirect to a file and read it: `swift test > .test-output/results.txt 2>&1` then read `.test-output/results.txt`
 - **Integration tests are mandatory for new features** that touch components, settings composition, hook entries, or doctor checks — add cases to `LifecycleIntegrationTests.swift` (sync → doctor lifecycle) or `DoctorRunnerIntegrationTests.swift` (doctor-specific flows)
 - Integration tests use `LifecycleTestBed` for sandbox setup — see existing tests for the pattern
-- **A new command, a new flag that changes a command's contract, or a new manifest key belongs in the `Linux Smoke` workflow too.** It is the only thing that runs whole flows end to end against a real pack, so it is what the compatibility matrix in `docs/linux-support.md` rests on. Add a step (or extend the fixture pack), dispatch the workflow on both runners, and update the matrix row from what you observed. An internal refactor with no user-visible contract change needs none of this. Left undone, the matrix keeps asserting behaviour nobody has run
+- **A new command, a new flag that changes a command's contract, or a new manifest key belongs in `.github/actions/mcs-smoke` too.** It is the only thing that runs whole flows end to end against a real pack, and PR checks run it on both Linux architectures and against the macOS universal binary — so a flow that is not a step there is a flow nothing guards. Add a step or extend the fixture pack; the run is what the compatibility matrix in `docs/linux-support.md` cites, so update the affected row from it. An internal refactor with no user-visible contract change needs none of this
 
 ## Git
 

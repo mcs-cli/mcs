@@ -22,8 +22,10 @@ says how.
 | Other distributions | Any glibc ≥ 2.35 distribution is expected to work. **Nothing is claimed about Fedora, Alpine or NixOS** — they have not been tested. |
 
 CI runs `swift build`, the full test suite and the release build on both Linux architectures for
-every pull request, alongside the two macOS jobs. The `Linux Smoke` workflow (manual dispatch) runs
-whole command flows against a real pack; it is what the matrix below rests on. Lint runs on Linux only: both
+every pull request, alongside the two macOS jobs. It also runs whole command flows against a real
+pack — `.github/actions/mcs-smoke`, on both Linux architectures and against the macOS universal
+binary — which is what the matrix below rests on. The `Linux Smoke` workflow runs the same flows on
+demand, for reproducing a Linux-only failure. Lint runs on Linux only: both
 linters publish static Linux binaries, and the two platforms give the same verdicts, so a second run
 would only add version skew.
 
@@ -101,9 +103,10 @@ quarter more wall-clock time (42s against 34s here).
 ## 4. Compatibility matrix
 
 Legend: `verified` — run on Linux and observed; `verified (with a difference)` — works, but not
-identically to macOS; the Notes column says how. The rows for whole command flows come from the
-`Linux Smoke` workflow, which runs them against a real pack on `ubuntu-22.04` and
-`ubuntu-22.04-arm`; re-dispatch it rather than trusting this table after a behavioural change.
+identically to macOS; the Notes column says how. The rows for whole command flows come from
+`.github/actions/mcs-smoke`, which PR checks run against a real pack on `ubuntu-22.04`,
+`ubuntu-22.04-arm` and macOS, so they are re-verified on every pull request rather than at the
+date of this table.
 
 | Feature | macOS | Linux | Notes |
 |---|---|---|---|
