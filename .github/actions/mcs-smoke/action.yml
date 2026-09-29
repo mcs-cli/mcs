@@ -9,25 +9,29 @@ inputs:
 runs:
   using: composite
   steps:
-    # A stand-in for the Claude Code CLI: every command below calls ensureClaudeCLI, which refuses
-    # to run without it, and nothing here asserts on what Claude itself does.
-    - name: Stub the claude CLI
+    # Every later step runs with HOME inside the job's temp dir, so the flows can never touch the
+    # runner's real ~/.mcs or ~/.claude — and mcs honouring $HOME is itself under test.
+    - name: Sandbox HOME and stub the claude CLI
       shell: bash
       run: |
-        set -euo pipefail
-        mkdir -p "$HOME/.local/bin"
-        printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/bin/claude"
-        chmod +x "$HOME/.local/bin/claude"
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        SANDBOX="$RUNNER_TEMP/home"
+        mkdir -p "$SANDBOX/.local/bin"
+        # A stand-in for the Claude Code CLI: every command calls ensureClaudeCLI, which refuses to
+        # run without it, and nothing here asserts on what Claude itself does.
+        printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/.local/bin/claude"
+        chmod +x "$SANDBOX/.local/bin/claude"
+        echo "$SANDBOX/.local/bin" >> "$GITHUB_PATH"
+        echo "HOME=$SANDBOX" >> "$GITHUB_ENV"
+        echo "MCS=${{ inputs.mcs }}" >> "$GITHUB_ENV"
 
     # A local pack exercises the same manifest, trust and artifact paths as a git pack without
-    # making the smoke run depend on a network fetch.
+    # making the smoke run depend on a network fetch. It lives under ~ so both `pack add` and
+    # mcs.yaml reach it through mcs's own tilde expansion.
     - name: Create a fixture pack
       shell: bash
       run: |
-        set -euo pipefail
-        mkdir -p "$RUNNER_TEMP/fixture-pack/skills/greet" "$RUNNER_TEMP/project"
-        cat > "$RUNNER_TEMP/fixture-pack/techpack.yaml" <<'PACK'
+        mkdir -p "$HOME/fixture-pack/skills/greet" "$RUNNER_TEMP/project"
+        cat > "$HOME/fixture-pack/techpack.yaml" <<'PACK'
         schemaVersion: 1
         identifier: smoke
         displayName: Smoke Pack
@@ -48,93 +52,85 @@ runs:
             displayName: git
             description: A formula whose name is also its command, so the PATH probe satisfies it
             brew: git
+          - id: asks-for-input
+            displayName: Asks for input
+            description: Off a terminal its prompt must see end of input rather than hang
+            type: configuration
+            shell: read answer || touch "$HOME/interactive-saw-eof"
+            shellInteractive: true
         PACK
-        cat > "$RUNNER_TEMP/fixture-pack/skills/greet/SKILL.md" <<'SKILL'
+        cat > "$HOME/fixture-pack/skills/greet/SKILL.md" <<'SKILL'
         ---
         name: greet
         description: Says __GREETING__
         ---
         Says __GREETING__.
         SKILL
-        cat > "$RUNNER_TEMP/project/mcs.yaml" <<BOOT
+        cat > "$RUNNER_TEMP/project/mcs.yaml" <<'BOOT'
         schemaVersion: 1
         packs:
-          - source: $RUNNER_TEMP/fixture-pack
+          - source: ~/fixture-pack
             values:
               GREETING: hei
         BOOT
 
-    - name: mcs pack add (local), pack list --json, pack validate
+    - name: mcs pack add (tilde path), pack list --json, pack validate
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
-        "$MCS" pack add "$RUNNER_TEMP/fixture-pack"
+        # Quoted so the shell leaves the ~ for mcs to expand against $HOME. The shell component
+        # makes the pack ask for trust, and `pack add` has no --trust-all, so the answer is piped.
+        printf 'y\n' | "$MCS" pack add '~/fixture-pack'
         "$MCS" pack list --json
         "$MCS" pack validate smoke
+        test -f "$HOME/.mcs/registry.yaml"
 
+    # Bounded, so a regression to the PTY hang fails the job instead of running out its clock.
+    # perl rather than timeout(1), which macOS does not ship.
     - name: mcs bootstrap --trust-all
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         git init -q .
-        "$MCS" bootstrap --trust-all
+        perl -e 'alarm shift; exec @ARGV' 300 "$MCS" bootstrap --trust-all
         # The seeded value has to reach the installed artifact, not just the prompt store.
-        test -f .claude/skills/greet/SKILL.md
         grep -q hei .claude/skills/greet/SKILL.md
+        test -f "$HOME/interactive-saw-eof"
 
     - name: mcs sync --pack --prune --yes
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" sync --pack smoke --prune --yes
+        test -f .claude/skills/greet/SKILL.md
 
     - name: mcs doctor and doctor --fix
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" doctor
         "$MCS" doctor --fix --yes
 
     - name: mcs update --trust-all and check-updates
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" update --project --trust-all
         "$MCS" check-updates --json
 
-    # No TTY here, so every prompt has to resolve from the stored prior or a declared default
-    # rather than blocking on stdin.
+    # The one step that pins stdin to /dev/null explicitly: every prompt has to resolve from the
+    # stored prior or a declared default rather than blocking on stdin.
     - name: Non-interactive prompt resolution
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" sync --all < /dev/null
+        grep -q hei .claude/skills/greet/SKILL.md
 
     - name: mcs export and cleanup
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" export "$RUNNER_TEMP/exported" --identifier exported --non-interactive
         test -f "$RUNNER_TEMP/exported/techpack.yaml"
         "$MCS" cleanup --force
@@ -142,8 +138,6 @@ runs:
     - name: mcs pack remove
       shell: bash
       working-directory: ${{ runner.temp }}/project
-      env:
-        MCS: ${{ inputs.mcs }}
       run: |
-        set -euo pipefail
         "$MCS" pack remove smoke --force
+        test ! -e .claude/skills/greet/SKILL.md

@@ -3,12 +3,22 @@ description: Install a pinned Swift toolchain on an Ubuntu runner via swiftly an
 
 inputs:
   swift-version:
-    description: The toolchain version swiftly installs and selects (for example 6.2.0).
-    required: true
+    description: The toolchain version swiftly installs and selects.
+    default: '6.2.0'
 
 runs:
   using: composite
   steps:
+    # swiftly installs a toolchain built for this Ubuntu release, so the cache key carries it: one
+    # restored onto another image may not run there.
+    - name: Identify the image
+      id: image
+      shell: bash
+      run: |
+        set -euo pipefail
+        . /etc/os-release
+        echo "release=${ID}-${VERSION_ID}" >> "$GITHUB_OUTPUT"
+
     - name: Restore the Swift toolchain
       id: toolchain
       uses: actions/cache@v6
@@ -18,7 +28,7 @@ runs:
         path: |
           ~/.local/share/swiftly
           ~/.config/swiftly
-        key: swiftly-${{ runner.os }}-${{ runner.arch }}-${{ inputs.swift-version }}
+        key: swiftly-${{ steps.image.outputs.release }}-${{ runner.arch }}-${{ inputs.swift-version }}
 
     - name: Install the toolchain's system dependencies
       # Not cacheable — these are system packages, and the toolchain needs them on a cache hit too.
@@ -44,11 +54,24 @@ runs:
       shell: bash
       env:
         SWIFT_VERSION: ${{ inputs.swift-version }}
+        # Pinned and checksummed: this binary runs before anything else in the job, so an
+        # unannounced upstream release must not be able to change or break it.
+        SWIFTLY_VERSION: '1.2.0'
+        SWIFTLY_SHA256_X86_64: 0b26b568811404374c7d7f07276b6aad4145db5d1893a45f307de6a94ca8d9c3
+        SWIFTLY_SHA256_AARCH64: 590d855e03807791f1b84aab77471bf7e31f9e3b22151972526077da296ecf96
       run: |
         set -euo pipefail
         cd "$RUNNER_TEMP"
-        curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
-        tar zxf "swiftly-$(uname -m).tar.gz"
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) SHA="$SWIFTLY_SHA256_X86_64" ;;
+          aarch64) SHA="$SWIFTLY_SHA256_AARCH64" ;;
+          *) echo "::error::No pinned swiftly checksum for $ARCH"; exit 1 ;;
+        esac
+        TARBALL="swiftly-${SWIFTLY_VERSION}-${ARCH}.tar.gz"
+        curl -fsSL --retry 3 -o "$TARBALL" "https://download.swift.org/swiftly/linux/$TARBALL"
+        echo "$SHA  $TARBALL" | sha256sum -c -
+        tar zxf "$TARBALL"
         ./swiftly init --quiet-shell-followup --assume-yes --skip-install
         . "${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
 
