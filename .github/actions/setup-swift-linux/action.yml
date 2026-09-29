@@ -9,19 +9,19 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install the toolchain's system dependencies
-      # swiftly refuses to install a toolchain until Swift's documented Ubuntu packages are
-      # present; libcurl4-openssl-dev is the one ubuntu-latest lacks.
-      shell: bash
-      run: sudo apt-get update && sudo apt-get install -y libcurl4-openssl-dev
-
     - name: Install Swift via swiftly
+      # swiftly refuses to install a toolchain until Swift's own system dependencies are present,
+      # and names the missing ones in an `apt-get -y install …` line. Those names differ by Ubuntu
+      # release and architecture — 22.04 wants pkg-config and python3-lldb-13 where 24.04 does not —
+      # so they are read back from swiftly rather than hardcoded into a list that goes stale.
       # Unpacked outside the checkout so the tree the caller builds and tests in stays clean.
       shell: bash
       env:
         SWIFT_VERSION: ${{ inputs.swift-version }}
       run: |
+        set -euo pipefail
         cd "$RUNNER_TEMP"
+        sudo apt-get update
         curl -O "https://download.swift.org/swiftly/linux/swiftly-$(uname -m).tar.gz"
         tar zxf "swiftly-$(uname -m).tar.gz"
         ./swiftly init --quiet-shell-followup --assume-yes --skip-install
@@ -30,5 +30,15 @@ runs:
         ENV_SH="${XDG_DATA_HOME:-$HOME/.local/share}/swiftly/env.sh"
         test -f "$ENV_SH" || { echo "::error::swiftly env.sh not found at $ENV_SH"; exit 1; }
         . "$ENV_SH"
-        swiftly install --use "$SWIFT_VERSION" --assume-yes
+
+        LOG="$RUNNER_TEMP/swiftly-install.log"
+        if ! swiftly install --use "$SWIFT_VERSION" --assume-yes 2>&1 | tee "$LOG"; then
+          PKGS=$(sed -n 's/^apt-get -y install //p' "$LOG" | tr '\n' ' ')
+          test -n "$PKGS" || { echo "::error::swiftly failed without naming missing packages"; exit 1; }
+          echo "Installing the dependencies swiftly asked for: $PKGS"
+          for pkg in $PKGS; do
+            sudo apt-get -y install "$pkg" || echo "::warning::apt could not install $pkg"
+          done
+          swiftly install --use "$SWIFT_VERSION" --assume-yes
+        fi
         echo "$SWIFTLY_BIN_DIR" >> "$GITHUB_PATH"
