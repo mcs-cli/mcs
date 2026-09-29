@@ -54,7 +54,7 @@ struct PromptExecutor {
         case .input:
             executeInput(prompt: prompt, priorValue: priorValue)
         case .select:
-            executeSelect(prompt: prompt, priorValue: priorValue)
+            try executeSelect(prompt: prompt, priorValue: priorValue)
         case .script:
             try executeScript(prompt: prompt, packPath: packPath, projectPath: projectPath)
         }
@@ -126,7 +126,7 @@ struct PromptExecutor {
             let initialIndex = (priorValue.flatMap { files.firstIndex(of: $0) })
                 ?? (prompt.defaultValue.flatMap { files.firstIndex(of: $0) })
                 ?? 0
-            let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
+            let selected = try output.singleSelect(title: label, items: items, initialIndex: initialIndex)
             return files[selected]
         }
     }
@@ -207,7 +207,7 @@ struct PromptExecutor {
     /// `priorValue` (stored from a previous sync) becomes the pre-selected option when
     /// it matches an option value; otherwise the stored value is ignored (caller should
     /// have already purged invalid select priors upstream).
-    private func executeSelect(prompt: PromptDefinition, priorValue: String?) -> String {
+    private func executeSelect(prompt: PromptDefinition, priorValue: String?) throws -> String {
         guard let options = prompt.options, !options.isEmpty else {
             return priorValue ?? prompt.defaultValue ?? ""
         }
@@ -217,7 +217,7 @@ struct PromptExecutor {
         }
         let label = prompt.label ?? "Select value for \(prompt.key)"
         let initialIndex = PromptOption.index(of: priorValue, in: options, fallback: prompt.defaultValue)
-        let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
+        let selected = try output.singleSelect(title: label, items: items, initialIndex: initialIndex)
         return options[selected].value
     }
 

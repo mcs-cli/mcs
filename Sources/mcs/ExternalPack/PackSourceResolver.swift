@@ -35,7 +35,7 @@ struct PackSourceResolver {
     /// character to exclude path-like inputs such as `../foo` or `./bar`.
     static let shorthandPattern = #"^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.-]*$"#
 
-    var environment: Environment = .init()
+    let environment: Environment
 
     func resolve(_ input: String) throws -> PackSource {
         guard !input.hasPrefix("-") else {

@@ -106,16 +106,15 @@ struct ProjectSyncStrategy: SyncStrategy {
                 break
 
             case let .shellCommand(command, interactive):
-                if interactive {
-                    output.plain("  Running \(component.displayName) (may prompt for your password)...")
-                }
-                let result = shell.shell(command, interactive: interactive)
+                let usesTerminal = interactive && output.hasInteractiveStdin
+                announceShellCommand(
+                    component.displayName, interactive: interactive, usesTerminal: usesTerminal, output: output
+                )
+                let result = shell.shell(command, interactive: usesTerminal)
                 if !result.succeeded {
-                    if interactive {
-                        output.warn("  " + ShellRunner.interactiveFailureMessage(name: component.displayName, stderr: result.stderr))
-                    } else {
-                        output.warn("  \(component.displayName) failed: \(String(result.stderr.prefix(200)))")
-                    }
+                    output.warn("  " + ShellRunner.failureMessage(
+                        name: component.displayName, stderr: result.stderr, ranInTerminal: usesTerminal
+                    ))
                 }
 
             case .settingsMerge:

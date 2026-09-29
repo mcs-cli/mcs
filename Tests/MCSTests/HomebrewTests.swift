@@ -19,17 +19,11 @@ struct HomebrewTests {
 
     @Test("allPrefixes lists this platform's Homebrew locations")
     func allPrefixesPerPlatform() {
+        let home = URL(fileURLWithPath: "/tmp/mcs-home")
         #if canImport(Darwin)
-        #expect(Homebrew.allPrefixes == ["/opt/homebrew", "/usr/local"])
+        #expect(Homebrew.allPrefixes(home: home) == ["/opt/homebrew", "/usr/local"])
         #else
-        // Asserted by shape, not by re-evaluating the source's own expression: `allPrefixes` is
-        // static and reads the process home, so a literal home cannot be injected here — that
-        // contract is pinned in EnvironmentTests instead.
-        let prefixes = Homebrew.allPrefixes
-        #expect(prefixes.count == 2)
-        #expect(prefixes[0] == "/home/linuxbrew/.linuxbrew")
-        #expect(prefixes[1].hasSuffix("/.linuxbrew"))
-        #expect(prefixes[1] != prefixes[0], "the single-user prefix is the user's home, not the shared one")
+        #expect(Homebrew.allPrefixes(home: home) == ["/home/linuxbrew/.linuxbrew", "/tmp/mcs-home/.linuxbrew"])
         #endif
     }
 

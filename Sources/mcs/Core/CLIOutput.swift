@@ -26,6 +26,15 @@ final class WarningCounter: Sendable {
     }
 }
 
+/// Thrown by a raw-mode picker whose input closed before it was answered. That picker only runs
+/// when stdin was a terminal, so this is a hangup rather than an unattended run, and no default is
+/// safe to assume for every caller.
+struct InputClosedError: Error, LocalizedError {
+    var errorDescription: String? {
+        "Input closed before the prompt was answered."
+    }
+}
+
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
     let colorsEnabled: Bool
@@ -40,11 +49,14 @@ struct CLIOutput {
     /// Optional tally that `warn(_:)` increments. `nil` for most callers; set by
     /// callers (e.g. `DoctorRunner`) that need to count emitted warnings.
     let warningCounter: WarningCounter?
+    /// The descriptor the raw-mode pickers read keys from.
+    let input: Int32
 
     init(
         colorsEnabled: Bool? = nil,
         warningCounter: WarningCounter? = nil,
-        interactiveStdin: Bool? = nil
+        interactiveStdin: Bool? = nil,
+        input: Int32 = STDIN_FILENO
     ) {
         if let explicit = colorsEnabled {
             self.colorsEnabled = explicit
@@ -55,6 +67,7 @@ struct CLIOutput {
         isInteractiveTerminal = hasInteractiveStdin && isatty(STDOUT_FILENO) != 0
         style = ANSIStyle(enabled: self.colorsEnabled)
         self.warningCounter = warningCounter
+        self.input = input
     }
 
     // MARK: - ANSI Codes (delegate to `style`)
@@ -236,9 +249,9 @@ struct CLIOutput {
 
     /// Ask a yes/no question. Returns true for yes, false for no.
     /// Uses arrow-key navigation on TTY, falls back to text input otherwise.
-    func askYesNo(_ prompt: String, default defaultValue: Bool = true) -> Bool {
+    func askYesNo(_ prompt: String, default defaultValue: Bool = true) throws -> Bool {
         if isInteractiveTerminal {
-            return interactiveYesNo(prompt, default: defaultValue)
+            return try interactiveYesNo(prompt, default: defaultValue)
         }
         return fallbackYesNo(prompt, default: defaultValue)
     }
@@ -264,20 +277,14 @@ struct CLIOutput {
         }
     }
 
-    private func interactiveYesNo(_ prompt: String, default defaultValue: Bool) -> Bool {
-        withRawTerminal {
+    func interactiveYesNo(_ prompt: String, default defaultValue: Bool) throws -> Bool {
+        try withRawTerminal {
             var selected = defaultValue
 
             renderYesNo(prompt: prompt, selected: selected)
 
             while true {
-                // Unlike the text fallback, this path only runs when stdin *was* a terminal, so
-                // end of input here is a hangup, not an unattended run — and the default may be
-                // the destructive answer. No is safe at every call site.
-                guard let byte = readByte() else {
-                    reportInputClosed()
-                    return false
-                }
+                let byte = try nextKey()
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm
@@ -378,9 +385,9 @@ struct CLIOutput {
     /// Multi-select checklist with arrow key navigation.
     /// Use arrow keys to move, space to toggle, Enter to confirm.
     /// Falls back to number-based input when not a TTY.
-    func multiSelect(groups: inout [SelectableGroup]) -> Set<Int> {
+    func multiSelect(groups: inout [SelectableGroup]) throws -> Set<Int> {
         if isInteractiveTerminal {
-            return interactiveMultiSelect(groups: &groups)
+            return try interactiveMultiSelect(groups: &groups)
         }
         return fallbackMultiSelect(groups: &groups)
     }
@@ -397,31 +404,28 @@ struct CLIOutput {
         title: String,
         items: [(name: String, description: String)],
         initialIndex: Int = 0
-    ) -> Int {
+    ) throws -> Int {
         guard !items.isEmpty else { return 0 }
         let seed = max(0, min(initialIndex, items.count - 1))
 
         if isInteractiveTerminal {
-            return interactiveSingleSelect(title: title, items: items, initialIndex: seed)
+            return try interactiveSingleSelect(title: title, items: items, initialIndex: seed)
         }
         return fallbackSingleSelect(title: title, items: items, initialIndex: seed)
     }
 
-    private func interactiveSingleSelect(
+    func interactiveSingleSelect(
         title: String,
         items: [(name: String, description: String)],
         initialIndex: Int
-    ) -> Int {
-        withRawTerminal {
+    ) throws -> Int {
+        try withRawTerminal {
             var cursor = initialIndex
 
             renderSingleSelectList(title: title, items: items, cursor: cursor)
 
             while true {
-                guard let byte = readByte() else {
-                    reportInputClosed()
-                    return cursor
-                }
+                let byte = try nextKey()
 
                 switch byte {
                 case 0x0A, 0x0D, 0x20: // Enter or Space — confirm selection
@@ -536,7 +540,7 @@ struct CLIOutput {
 
     // MARK: - Interactive Multi-Select (raw terminal)
 
-    private func interactiveMultiSelect(groups: inout [SelectableGroup]) -> Set<Int> {
+    func interactiveMultiSelect(groups: inout [SelectableGroup]) throws -> Set<Int> {
         var flatItems: [(groupIndex: Int, itemIndex: Int)] = []
         for gi in groups.indices {
             for ii in groups[gi].items.indices {
@@ -548,16 +552,13 @@ struct CLIOutput {
             return collectSelected(from: groups)
         }
 
-        return withRawTerminal {
+        return try withRawTerminal {
             var cursor = 0
 
             renderInteractiveList(groups: groups, cursor: cursor)
 
             while true {
-                guard let byte = readByte() else {
-                    reportInputClosed()
-                    return collectSelected(from: groups)
-                }
+                let byte = try nextKey()
 
                 switch byte {
                 case 0x0A, 0x0D: // Enter
@@ -701,24 +702,25 @@ struct CLIOutput {
         write(output)
     }
 
-    /// Leaves a line in scrollback saying why the prompt ended without a key — the pickers return
-    /// a value either way, and without this the transcript shows only the question.
-    private func reportInputClosed() {
-        write("\n")
-        warn("Input closed before the prompt was answered.")
+    /// The next key byte, or `InputClosedError` once input has ended. The pickers loop until they
+    /// recognise a key, so an end of input they could not tell apart from a key would spin forever.
+    private func nextKey() throws -> UInt8 {
+        guard let byte = readByte() else {
+            write("\n")
+            throw InputClosedError()
+        }
+        return byte
     }
 
-    /// One byte from `fd`, or `nil` at end of input.
-    ///
-    /// Optional because the pickers below loop until they recognise a key: on EOF or a read error
-    /// no key will ever arrive, and a zero byte matches no case, so returning one would spin at
-    /// 100% CPU until the process is killed. Reachable whenever stdin closes under a raw-mode
-    /// prompt — a hung-up terminal in a `nohup`/`setsid` wrapper that ignores SIGHUP, for instance.
-    /// The descriptor is a parameter so the EOF path can be driven from a pipe under test.
-    func readByte(from fd: Int32 = STDIN_FILENO) -> UInt8? {
+    /// One byte from `input`, or `nil` at end of input or on a read error.
+    func readByte() -> UInt8? {
         var byte: UInt8 = 0
-        guard read(fd, &byte, 1) > 0 else { return nil }
-        return byte
+        while true {
+            let count = read(input, &byte, 1)
+            if count > 0 { return byte }
+            if count < 0, errno == EINTR { continue }
+            return nil
+        }
     }
 
     /// Reads a CSI arrow key escape sequence after the initial 0x1B byte.
@@ -730,17 +732,20 @@ struct CLIOutput {
 
     /// Enters raw terminal mode (no echo, no canonical processing, hidden cursor),
     /// runs the body closure, then restores the terminal on return.
-    private func withRawTerminal<T>(_ body: () -> T) -> T {
+    ///
+    /// When the attributes cannot be read there is nothing to restore — writing back a zeroed
+    /// `termios` would leave the user's shell without echo or signals — so the body runs as is.
+    private func withRawTerminal<T>(_ body: () throws -> T) rethrows -> T {
         var original = termios()
-        tcgetattr(STDIN_FILENO, &original)
+        guard tcgetattr(input, &original) == 0 else { return try body() }
         var raw = TerminalAttributes.rawMode(from: original)
-        tcsetattr(STDIN_FILENO, TCSANOW, &raw)
+        tcsetattr(input, TCSANOW, &raw)
         write("\u{1B}[?25l")
         defer {
             write("\u{1B}[?25h")
-            tcsetattr(STDIN_FILENO, TCSANOW, &original)
+            tcsetattr(input, TCSANOW, &original)
         }
-        return body()
+        return try body()
     }
 
     // MARK: - Fallback Multi-Select (non-TTY)

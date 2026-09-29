@@ -19,14 +19,14 @@ struct PTYBridgeTests {
     }
 
     @Test(
-        "The child side reads through a hangup and closes only on a bad descriptor",
+        "The child side drains what is readable and closes only once nothing is left",
         arguments: [
             (Int16(POLLIN), PTYBridge.PTYAction.read),
             (Int16(POLLIN | POLLHUP), .read),
             (Int16(POLLHUP), .read),
             (Int16(POLLERR), .close),
             (Int16(POLLNVAL), .close),
-            (Int16(POLLIN | POLLERR), .close),
+            (Int16(POLLIN | POLLERR), .read),
             (Int16(0), .idle),
         ]
     )
@@ -34,14 +34,22 @@ struct PTYBridgeTests {
         #expect(PTYBridge.ptyAction(revents: revents) == expected)
     }
 
-    @Test("A /dev/null stdin, which macOS reports as POLLNVAL, is dropped rather than polled forever")
-    func devNullStdinIsDropped() {
+    @Test("A /dev/null stdin is never left idle, so the bridge cannot poll it forever")
+    func devNullStdinIsNotPolledForever() {
         let fd = open("/dev/null", O_RDONLY)
         #expect(fd >= 0)
         defer { close(fd) }
 
         var fds = [pollfd(fd: fd, events: Int16(POLLIN), revents: 0)]
         #expect(poll(&fds, 1, 0) == 1)
-        #expect(PTYBridge.stdinAction(revents: fds[0].revents) != .idle)
+        #if canImport(Darwin)
+        // macOS reports POLLNVAL for /dev/null, with nothing to read.
+        #expect(PTYBridge.stdinAction(revents: fds[0].revents) == .drop)
+        #else
+        // Linux reports it readable; the bridge's read then returns 0 and drops the descriptor.
+        #expect(PTYBridge.stdinAction(revents: fds[0].revents) == .forward)
+        var byte: UInt8 = 0
+        #expect(read(fd, &byte, 1) == 0)
+        #endif
     }
 }

@@ -7,6 +7,8 @@ import Foundation
 /// 1. `buildManifest()` — constructs a typed `ExternalPackManifest` (compile-time coupling to schema)
 /// 2. `renderYAML()` — serializes the typed model to shorthand YAML with presentational formatting
 struct ManifestBuilder {
+    let environment: Environment
+
     struct Metadata {
         let identifier: String
         let displayName: String
@@ -111,7 +113,7 @@ struct ManifestBuilder {
             let id = "mcp-\(sanitizeID(server.name))"
 
             // Detect brew dependency hint via Homebrew symlink resolution
-            if let command = server.command, let formula = Homebrew.detectFormula(for: command) {
+            if let command = server.command, let formula = Homebrew.detectFormula(for: command, environment: environment) {
                 brewHints[id] = formula
             }
 

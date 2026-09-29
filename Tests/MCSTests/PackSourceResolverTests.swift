@@ -14,31 +14,31 @@ struct PackSourceResolverTests {
 
     @Test("HTTPS URL returns gitURL")
     func httpsURL() throws {
-        let result = try PackSourceResolver().resolve("https://github.com/user/repo.git")
+        let result = try PackSourceResolver(environment: Environment()).resolve("https://github.com/user/repo.git")
         #expect(result == .gitURL("https://github.com/user/repo.git"))
     }
 
     @Test("git@ URL returns gitURL")
     func gitAtURL() throws {
-        let result = try PackSourceResolver().resolve("git@github.com:user/repo.git")
+        let result = try PackSourceResolver(environment: Environment()).resolve("git@github.com:user/repo.git")
         #expect(result == .gitURL("git@github.com:user/repo.git"))
     }
 
     @Test("ssh:// URL returns gitURL")
     func sshURL() throws {
-        let result = try PackSourceResolver().resolve("ssh://git@github.com/user/repo")
+        let result = try PackSourceResolver(environment: Environment()).resolve("ssh://git@github.com/user/repo")
         #expect(result == .gitURL("ssh://git@github.com/user/repo"))
     }
 
     @Test("git:// URL returns gitURL")
     func gitProtocolURL() throws {
-        let result = try PackSourceResolver().resolve("git://github.com/user/repo.git")
+        let result = try PackSourceResolver(environment: Environment()).resolve("git://github.com/user/repo.git")
         #expect(result == .gitURL("git://github.com/user/repo.git"))
     }
 
     @Test("http:// URL returns gitURL")
     func httpURL() throws {
-        let result = try PackSourceResolver().resolve("http://example.com/user/repo.git")
+        let result = try PackSourceResolver(environment: Environment()).resolve("http://example.com/user/repo.git")
         #expect(result == .gitURL("http://example.com/user/repo.git"))
     }
 
@@ -46,19 +46,19 @@ struct PackSourceResolverTests {
 
     @Test("user/repo expands to GitHub URL")
     func githubShorthand() throws {
-        let result = try PackSourceResolver().resolve("user/repo")
+        let result = try PackSourceResolver(environment: Environment()).resolve("user/repo")
         #expect(result == .gitURL("https://github.com/user/repo.git"))
     }
 
     @Test("user/repo.git deduplicates .git suffix")
     func githubShorthandDotGit() throws {
-        let result = try PackSourceResolver().resolve("user/repo.git")
+        let result = try PackSourceResolver(environment: Environment()).resolve("user/repo.git")
         #expect(result == .gitURL("https://github.com/user/repo.git"))
     }
 
     @Test("Shorthand with dots and hyphens expands correctly")
     func githubShorthandSpecialChars() throws {
-        let result = try PackSourceResolver().resolve("my-org/my.pack")
+        let result = try PackSourceResolver(environment: Environment()).resolve("my-org/my.pack")
         #expect(result == .gitURL("https://github.com/my-org/my.pack.git"))
     }
 
@@ -66,14 +66,14 @@ struct PackSourceResolverTests {
     func threeComponents() throws {
         // three/levels/deep doesn't match shorthand regex, treated as path
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("three/levels/deep")
+            try PackSourceResolver(environment: Environment()).resolve("three/levels/deep")
         }
     }
 
     @Test("Single component is not shorthand")
     func singleComponent() throws {
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("justarepo")
+            try PackSourceResolver(environment: Environment()).resolve("justarepo")
         }
     }
 
@@ -83,14 +83,14 @@ struct PackSourceResolverTests {
     func dotDotSlash() throws {
         // Should NOT match the shorthand regex (starts with .)
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("../nonexistent")
+            try PackSourceResolver(environment: Environment()).resolve("../nonexistent")
         }
     }
 
     @Test("./foo is not treated as shorthand")
     func dotSlash() throws {
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("./nonexistent")
+            try PackSourceResolver(environment: Environment()).resolve("./nonexistent")
         }
     }
 
@@ -101,7 +101,7 @@ struct PackSourceResolverTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let result = try PackSourceResolver().resolve(tmpDir.path)
+        let result = try PackSourceResolver(environment: Environment()).resolve(tmpDir.path)
         guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
@@ -130,7 +130,7 @@ struct PackSourceResolverTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let result = try PackSourceResolver().resolve("file://\(tmpDir.path)")
+        let result = try PackSourceResolver(environment: Environment()).resolve("file://\(tmpDir.path)")
         guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
@@ -143,7 +143,7 @@ struct PackSourceResolverTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let result = try PackSourceResolver().resolve("file://localhost\(tmpDir.path)")
+        let result = try PackSourceResolver(environment: Environment()).resolve("file://localhost\(tmpDir.path)")
         guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
@@ -160,14 +160,14 @@ struct PackSourceResolverTests {
         try "content".write(to: file, atomically: true, encoding: .utf8)
 
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve(file.path)
+            try PackSourceResolver(environment: Environment()).resolve(file.path)
         }
     }
 
     @Test("Nonexistent absolute path throws pathNotFound")
     func nonexistentAbsolutePath() throws {
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("/nonexistent/path/to/pack")
+            try PackSourceResolver(environment: Environment()).resolve("/nonexistent/path/to/pack")
         }
     }
 
@@ -188,7 +188,7 @@ struct PackSourceResolverTests {
         #expect(FileManager.default.changeCurrentDirectoryPath(tmpDir.path))
         defer { #expect(FileManager.default.changeCurrentDirectoryPath(originalDir)) }
 
-        let result = try PackSourceResolver().resolve("org/pack")
+        let result = try PackSourceResolver(environment: Environment()).resolve("org/pack")
         guard case let .localPath(url) = result else {
             Issue.record("Expected .localPath, got \(result)")
             return
@@ -201,14 +201,14 @@ struct PackSourceResolverTests {
     @Test("Input starting with dash is rejected")
     func dashInjection() throws {
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("-malicious")
+            try PackSourceResolver(environment: Environment()).resolve("-malicious")
         }
     }
 
     @Test("Input starting with --flag is rejected")
     func flagInjection() throws {
         #expect(throws: PackSourceError.self) {
-            try PackSourceResolver().resolve("--upload-pack=evil")
+            try PackSourceResolver(environment: Environment()).resolve("--upload-pack=evil")
         }
     }
 }

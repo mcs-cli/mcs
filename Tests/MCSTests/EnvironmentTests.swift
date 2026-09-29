@@ -118,6 +118,7 @@ struct EnvironmentTests {
     func defaultHomeDirectoryFallsBackToPasswd() {
         #expect(Environment.defaultHomeDirectory(environment: [:]) == NSHomeDirectory())
         #expect(Environment.defaultHomeDirectory(environment: ["HOME": ""]) == NSHomeDirectory())
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": "relative/home"]) == NSHomeDirectory())
     }
 
     @Test("Environment derives every path from the resolved home")
@@ -140,6 +141,7 @@ struct EnvironmentTests {
         let env = Environment(home: URL(fileURLWithPath: "/sandbox/home"))
 
         #expect(env.expandingTilde("~") == "/sandbox/home")
+        #expect(env.expandingTilde("~/") == "/sandbox/home")
         #expect(env.expandingTilde("~/packs/ios") == "/sandbox/home/packs/ios")
         #expect(env.expandingTilde("/abs/path") == "/abs/path")
         #expect(env.expandingTilde("relative/~/x") == "relative/~/x")
@@ -199,11 +201,11 @@ struct EnvironmentTests {
     @Test("The fallback prefix is the platform's own default")
     func defaultBrewPrefixPerPlatform() {
         #if canImport(Darwin) && arch(arm64)
-        #expect(Environment.defaultBrewPrefix == "/opt/homebrew")
+        #expect(Homebrew.defaultPrefix == "/opt/homebrew")
         #elseif canImport(Darwin)
-        #expect(Environment.defaultBrewPrefix == "/usr/local")
+        #expect(Homebrew.defaultPrefix == "/usr/local")
         #else
-        #expect(Environment.defaultBrewPrefix == "/home/linuxbrew/.linuxbrew")
+        #expect(Homebrew.defaultPrefix == "/home/linuxbrew/.linuxbrew")
         #endif
     }
 

@@ -329,7 +329,7 @@ struct DoctorRunner {
 
         // Phase 2: Confirm and execute pending fixes (after summary)
         if fixMode {
-            executePendingFixes()
+            try executePendingFixes()
             summary.remainingIssues = failCount - fixedCount
             if fixedCount > 0 {
                 output.plain("")
@@ -681,7 +681,7 @@ struct DoctorRunner {
 
     /// Phase 2: Show a summary of pending fixes with their actual commands,
     /// prompt for confirmation, then execute.
-    private mutating func executePendingFixes() {
+    private mutating func executePendingFixes() throws {
         let ownFixes = pendingFixes.map(\.check).filter { $0.fixCommandPreview != nil }
         let (resyncs, hintOnly) = planResyncs(pendingFixes.filter { $0.check.fixCommandPreview == nil })
 
@@ -713,7 +713,7 @@ struct DoctorRunner {
         let count = ownFixes.count + resyncs.count
         let fixLabel = count == 1 ? "fix" : "fixes"
         if !skipConfirmation {
-            guard output.askYesNo("Apply \(count) \(fixLabel)?", default: false) else {
+            guard try output.askYesNo("Apply \(count) \(fixLabel)?", default: false) else {
                 output.dimmed("  Skipped all fixes.")
                 return
             }
@@ -725,7 +725,7 @@ struct DoctorRunner {
         }
         guard !resyncs.isEmpty else { return }
         // An injected CLI stands in for the real binary; only the real one needs installing.
-        if claudeCLI == nil, !ensureClaudeCLI(shell: shell, environment: environment, output: output) {
+        if claudeCLI == nil, try !ensureClaudeCLI(shell: shell, environment: environment, output: output) {
             for check in resyncs.flatMap(\.checks) {
                 docFixFailed(check.name, "re-sync needs the Claude Code CLI")
             }

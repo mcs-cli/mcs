@@ -14,8 +14,8 @@ func ensureClaudeCLI(
     environment: Environment,
     output: CLIOutput,
     brewInstalled: Bool? = nil,
-    confirmInstall: (() -> Bool)? = nil
-) -> Bool {
+    confirmInstall: (() throws -> Bool)? = nil
+) throws -> Bool {
     if shell.commandExists(Constants.CLI.claudeCommand) {
         return true
     }
@@ -30,8 +30,8 @@ func ensureClaudeCLI(
         return false
     }
 
-    let confirm = confirmInstall ?? { output.askYesNo("Install Claude Code via Homebrew?", default: true) }
-    guard confirm() else {
+    let confirm = confirmInstall ?? { try output.askYesNo("Install Claude Code via Homebrew?", default: true) }
+    guard try confirm() else {
         printManualClaudeInstallInstructions(output)
         return false
     }

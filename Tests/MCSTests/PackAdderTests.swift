@@ -45,7 +45,7 @@ struct PackAdderPolicyTests {
             makeRegistryEntry(identifier: "foo", sourceURL: "https://example.com/original.git"),
         ])
 
-        let proceed = adder.resolveDuplicate(
+        let proceed = try adder.resolveDuplicate(
             manifest: makeManifest(identifier: "foo"),
             sourceURL: "https://example.com/replacement.git",
             registryData: registry,
@@ -65,7 +65,7 @@ struct PackAdderPolicyTests {
             makeRegistryEntry(identifier: "foo", sourceURL: "https://example.com/foo.git"),
         ])
 
-        let proceed = adder.resolveDuplicate(
+        let proceed = try adder.resolveDuplicate(
             manifest: makeManifest(identifier: "foo"),
             sourceURL: "https://example.com/foo.git",
             registryData: registry,
@@ -83,13 +83,13 @@ struct PackAdderPolicyTests {
         let adder = PackAdder(ctx: ctx)
         let registry = PackRegistryFile.RegistryData(packs: [])
 
-        #expect(adder.resolveDuplicate(
+        #expect(try adder.resolveDuplicate(
             manifest: makeManifest(identifier: "foo"),
             sourceURL: "https://example.com/foo.git",
             registryData: registry,
             policy: .autoAccept
         ))
-        #expect(adder.resolveDuplicate(
+        #expect(try adder.resolveDuplicate(
             manifest: makeManifest(identifier: "foo"),
             sourceURL: "https://example.com/foo.git",
             registryData: registry,
@@ -104,7 +104,7 @@ struct PackAdderPolicyTests {
 
         let ctx = makeContext(home: home)
         let adder = PackAdder(ctx: ctx)
-        #expect(adder.acceptCollisions(policy: .autoAccept))
+        #expect(try adder.acceptCollisions(policy: .autoAccept))
     }
 }
 

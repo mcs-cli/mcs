@@ -149,7 +149,7 @@ struct PackTrustManager {
         manifest: ExternalPackManifest,
         packPath _: URL,
         items: [TrustableItem]
-    ) -> Bool {
+    ) throws -> Bool {
         if items.isEmpty {
             return true
         }
@@ -237,7 +237,7 @@ struct PackTrustManager {
         }
 
         output.plain("")
-        return output.askYesNo("Trust this pack?", default: false)
+        return try output.askYesNo("Trust this pack?", default: false)
     }
 
     /// Heads the auto-trust block. The registry keeps the approved hashes either way, so what
