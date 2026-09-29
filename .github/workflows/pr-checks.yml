@@ -17,14 +17,35 @@ env:
 jobs:
   lint:
     name: Lint
-    runs-on: macos-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
 
       - name: Install linters
+        # Both projects publish fully static Linux binaries, so linting needs no Swift toolchain.
+        # SwiftLint's archive carries a dynamically linked `swiftlint` next to `swiftlint-static`;
+        # only the static one runs without the Swift runtime installed. Tracking the newest release
+        # rather than a pin keeps the macOS behaviour this job replaces, where brew always upgraded.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew install swiftformat swiftlint || true
-          brew upgrade swiftformat swiftlint || true
+          mkdir -p "$RUNNER_TEMP/linters"
+          cd "$RUNNER_TEMP/linters"
+          gh release download --repo realm/SwiftLint --pattern swiftlint_linux_amd64.zip
+          gh release download --repo nicklockwood/SwiftFormat --pattern swiftformat_linux.zip
+          unzip -q swiftlint_linux_amd64.zip -d swiftlint
+          unzip -q swiftformat_linux.zip -d swiftformat
+          install -m 0755 swiftlint/swiftlint-static swiftlint-bin
+          install -m 0755 swiftformat/swiftformat_linux swiftformat
+          mv swiftlint-bin swiftlint
+          echo "$RUNNER_TEMP/linters" >> "$GITHUB_PATH"
+
+      # Recorded because the job tracks the newest release: a verdict that changed without a source
+      # change is explained by the version that produced it.
+      - name: Linter versions
+        run: |
+          swiftformat --version
+          swiftlint --version
 
       - name: SwiftFormat
         run: swiftformat --lint --strict .
