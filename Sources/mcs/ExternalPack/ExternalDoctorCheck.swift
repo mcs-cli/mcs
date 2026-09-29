@@ -486,7 +486,7 @@ enum ExternalDoctorCheckFactory {
         packPath: URL,
         projectRoot: URL?,
         scriptRunner: ScriptRunner,
-        environment: Environment = Environment()
+        environment: Environment
     ) -> any DoctorCheck {
         let section = definition.section ?? "External Pack"
         let scope = definition.scope ?? .global

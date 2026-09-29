@@ -1213,13 +1213,14 @@ struct UpdateCheckerContextStringTests {
         identifier: "ios", displayName: "iOS", localSHA: "aaa", remoteSHA: "bbb"
     )
 
-    @Test("CLI-only update offers brew commands without --trust-all, doctor or cleanup")
+    private let brew = UpdateChecker.CLIUpgrade.commands(["brew update", "brew upgrade mcs-cli/tap/mcs"])
+
+    @Test("CLI-only update offers the upgrade commands without --trust-all, doctor or cleanup")
     func cliOnly() {
         let context = UpdateChecker.buildContextString(
-            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
+            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate), upgrade: brew
         )
-        let upgrade = UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0")
-        #expect(context.contains("On yes, run: \(upgrade.joined(separator: " && "))\n"))
+        #expect(context.contains("On yes, run: brew update && brew upgrade mcs-cli/tap/mcs\n"))
         #expect(context.contains("AskUserQuestion"))
         #expect(context.contains("mcs config set update-check false"))
         #expect(!context.contains("--trust-all"))
@@ -1231,54 +1232,147 @@ struct UpdateCheckerContextStringTests {
     @Test("Pack-only update warns about --trust-all and gates cleanup on doctor")
     func packsOnly() throws {
         let context = UpdateChecker.buildContextString(
-            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil)
+            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil), upgrade: nil
         )
         #expect(context.contains("On yes, run: \(UpdateChecker.hookPackUpdateCommand)\n"))
         #expect(context.contains("without review"))
         #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
-        for command in UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0") {
-            #expect(!context.contains(command))
-        }
+        #expect(!context.contains("brew upgrade"))
         let doctor = try #require(context.range(of: "'mcs doctor'"))
         let cleanup = try #require(context.range(of: "mcs cleanup -af"))
         #expect(doctor.lowerBound < cleanup.lowerBound)
         #expect(context.contains("mcs doctor --fix --yes"))
     }
 
-    @Test("The upgrade command matches how this platform ships mcs")
-    func upgradeCommandShapePerPlatform() throws {
-        let commands = UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0")
-        #if canImport(Darwin)
-        #expect(commands == ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"])
-        #else
-        let path = try #require(UpdateChecker.installedBinaryPath)
-        let command = try #require(commands.first)
-        #expect(commands.count == 1)
-        #expect(command.contains("mcs-2.0.0-linux-\(UpdateChecker.releaseArch).tar.gz"))
-        // Staged, verified, then renamed — nothing is ever written over the live binary.
-        #expect(command.contains("--version &&"))
-        #expect(command.hasSuffix(path))
-        #endif
-    }
-
-    @Test("Nothing to run means no question is asked")
-    func noCommandsSkipTheAsk() {
+    @Test("A sudo upgrade is handed to the user, never offered for Claude to run")
+    func sudoUpgradeIsTheUsersToRun() {
         let context = UpdateChecker.buildContextString(
-            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: nil)
+            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate),
+            upgrade: .runYourself("sudo sh -c 'swap'")
         )
+        #expect(context.contains("sudo sh -c 'swap'"))
         #expect(!context.contains("On yes, run:"))
         #expect(!context.contains("AskUserQuestion"))
+    }
+
+    @Test("With no upgrade command the reason and the releases page are given, and nothing is asked")
+    func manualUpgradeSkipsTheAsk() {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate),
+            upgrade: .manual(reason: "no /proc")
+        )
+        #expect(context.contains("no /proc"))
+        #expect(context.contains(Constants.MCSRepo.releasesURL))
+        #expect(!context.contains("On yes, run:"))
+        #expect(!context.contains("AskUserQuestion"))
+    }
+
+    @Test("macOS upgrades through Homebrew")
+    func upgradePathPerPlatform() {
+        let upgrade = UpdateChecker.cliUpgrade(toVersion: "2.0.0")
+        #if canImport(Darwin)
+        #expect(upgrade == .commands(["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]))
+        #else
+        // Either path is legitimate depending on where the test binary lives; neither is brew.
+        switch upgrade {
+        case let .commands(commands):
+            #expect(commands.count == 1)
+            #expect(commands[0].contains("mcs-2.0.0-linux-\(UpdateChecker.releaseArch).tar.gz"))
+        case let .runYourself(command):
+            #expect(command.hasPrefix("sudo sh -c "))
+        case .manual:
+            Issue.record("/proc/self/exe is readable on Linux, so a command is expected")
+        }
+        #endif
     }
 
     @Test("CLI upgrade chains before the pack update and the request resumes last")
     func cliBeforePacks() {
         let context = UpdateChecker.buildContextString(
-            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: cliUpdate)
+            UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: cliUpdate), upgrade: brew
         )
-        let chain = (UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0") + [UpdateChecker.hookPackUpdateCommand])
-            .joined(separator: " && ")
+        let chain = "brew update && brew upgrade mcs-cli/tap/mcs && \(UpdateChecker.hookPackUpdateCommand)"
         #expect(context.contains("On yes, run: \(chain)\n"))
         #expect(context.hasSuffix("continue with the user's original request."))
+    }
+}
+
+// MARK: - Linux Upgrade Command Tests
+
+struct LinuxUpgradeCommandTests {
+    private func command(path: String, version: String = "2.0.0", writable: Bool = true) -> UpdateChecker.CLIUpgrade {
+        UpdateChecker.linuxUpgrade(toVersion: version, binaryPath: path, directoryWritable: writable, arch: "x86_64")
+    }
+
+    /// `sh -n` parses without running, so a quoting mistake fails here instead of in a user's shell.
+    private func shellParses(_ script: String) throws -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-n", "-c", script]
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
+    @Test("The binary is staged beside the target, verified, then renamed over it", arguments: [
+        "/usr/local/bin/mcs", "/home/a b/.local/bin/mcs", "/home/o'brien/bin/mcs",
+    ])
+    func stagedVerifiedRenamed(path: String) throws {
+        guard case let .commands(commands) = command(path: path) else {
+            Issue.record("a writable directory needs no sudo")
+            return
+        }
+        let script = try #require(commands.first)
+        let directory = (path as NSString).deletingLastPathComponent
+        #expect(script.contains(UpdateChecker.shellQuoted("\(directory)/.mcs-upgrade")))
+        #expect(script.contains("--version && mv -f"))
+        #expect(script.contains("mv -f \(UpdateChecker.shellQuoted("\(directory)/.mcs-upgrade")) \(UpdateChecker.shellQuoted(path))"))
+        #expect(script.contains("mcs-2.0.0-linux-x86_64.tar.gz"))
+        #expect(script.contains("rm -f"))
+        #expect(try shellParses(script))
+    }
+
+    @Test("An unwritable directory yields a sudo command the user runs, which still parses", arguments: [
+        "/usr/local/bin/mcs", "/opt/o'brien tools/mcs",
+    ])
+    func sudoForm(path: String) throws {
+        guard case let .runYourself(sudo) = command(path: path, writable: false) else {
+            Issue.record("an unwritable directory needs sudo")
+            return
+        }
+        #expect(sudo.hasPrefix("sudo sh -c '"))
+        #expect(try shellParses(String(sudo.dropFirst("sudo ".count))))
+    }
+
+    @Test("A tag that is not a plain version never reaches a shell", arguments: [
+        "2.0.0-rc1", "2.0.0-$(touch x)", "2.0.0;rm", "v2.0.0", "2.0",
+    ])
+    func rejectsNonPlainVersions(version: String) {
+        guard case .manual = command(path: "/usr/local/bin/mcs", version: version) else {
+            Issue.record("'\(version)' must not produce a command")
+            return
+        }
+    }
+
+    @Test("A replaced or unlinked running binary gets no command")
+    func rejectsDeletedTarget() {
+        guard case .manual = command(path: "/usr/local/bin/mcs (deleted)") else {
+            Issue.record("the kernel's deleted marker is not a path to write to")
+            return
+        }
+    }
+
+    @Test("shellQuoted round-trips through the shell", arguments: ["plain", "a b", "o'brien", "$(x)`y`"])
+    func shellQuotedRoundTrips(value: String) throws {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "printf %s \(UpdateChecker.shellQuoted(value))"]
+        process.standardOutput = pipe
+        try process.run()
+        process.waitUntilExit()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        #expect(String(decoding: data, as: UTF8.self) == value)
     }
 }
 

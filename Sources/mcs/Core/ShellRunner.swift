@@ -77,12 +77,11 @@ extension ShellRunning {
 
 /// Runs shell commands and captures output.
 struct ShellRunner: ShellRunning {
-    /// The warning for a failed interactive command. The child's own output already went to the
-    /// terminal, so the result's `stderr` is empty unless the bridge itself failed before `exec` —
-    /// `forkpty` refused, a C string could not be allocated — and then it is the only record of
-    /// why, so it is what gets printed.
-    static func interactiveFailureMessage(name: String, stderr: String) -> String {
-        stderr.isEmpty ? "\(name) failed (see output above)" : "\(name) failed: \(stderr)"
+    /// The warning for a failed shell component. A command that ran in a terminal already printed
+    /// its own output, so its `stderr` is empty unless the PTY bridge itself failed before `exec`.
+    static func failureMessage(name: String, stderr: String, ranInTerminal: Bool) -> String {
+        if !stderr.isEmpty { return "\(name) failed: \(stderr.prefix(200))" }
+        return ranInTerminal ? "\(name) failed (see output above)" : "\(name) failed"
     }
 
     let environment: Environment
@@ -324,13 +323,14 @@ struct ShellRunner: ShellRunning {
             }
 
             let ptyAction = PTYBridge.ptyAction(revents: fds[1].revents)
-            if ptyAction == .close { break bridgeLoop }
+            if case .close = ptyAction { break bridgeLoop }
 
             // Terminal → PTY (user typing, including password input). poll(2) skips negative
             // fds, so a dropped stdin leaves the loop draining the PTY alone.
             switch PTYBridge.stdinAction(revents: fds[0].revents) {
             case .forward:
                 let n = read(STDIN_FILENO, &buf, buf.count)
+                if n < 0, errno == EINTR { break }
                 if n <= 0 {
                     fds[0].fd = -1
                 } else {
@@ -343,10 +343,14 @@ struct ShellRunner: ShellRunning {
             }
 
             // PTY → Terminal (command output, prompts, progress bars)
-            if ptyAction == .read {
+            switch ptyAction {
+            case .read:
                 let n = read(ptyFD, &buf, buf.count)
+                if n < 0, errno == EINTR { continue }
                 if n <= 0 { break bridgeLoop } // Child closed the PTY
                 writeAll(fd: STDOUT_FILENO, buf: buf, count: n)
+            case .close, .idle:
+                break
             }
         }
 

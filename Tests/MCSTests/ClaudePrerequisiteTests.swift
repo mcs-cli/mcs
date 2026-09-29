@@ -8,22 +8,22 @@ struct ClaudePrerequisiteTests {
     }
 
     @Test("A claude already on PATH is accepted without spawning anything")
-    func acceptsInstalledCLI() {
+    func acceptsInstalledCLI() throws {
         let shell = MockShellRunner()
         shell.commandExistsResult = true
 
-        #expect(ensureClaudeCLI(shell: shell, environment: shell.environment, output: silentOutput()))
+        #expect(try ensureClaudeCLI(shell: shell, environment: shell.environment, output: silentOutput()))
         #expect(shell.commandExistsCalls.contains(Constants.CLI.claudeCommand))
         #expect(shell.runCalls.isEmpty)
     }
 
     @Test("A missing claude without brew is reported and nothing is installed")
-    func missingCLIWithoutHomebrew() {
+    func missingCLIWithoutHomebrew() throws {
         let shell = MockShellRunner()
         shell.commandExistsResult = false
 
         // The same on both platforms: on Linux `claude-code` is a cask Linuxbrew does not have.
-        #expect(!ensureClaudeCLI(
+        #expect(try !ensureClaudeCLI(
             shell: shell, environment: shell.environment, output: silentOutput(),
             brewInstalled: false, confirmInstall: { Issue.record("no prompt without brew"); return true }
         ))
@@ -32,11 +32,11 @@ struct ClaudePrerequisiteTests {
 
     #if canImport(Darwin)
     @Test("Declining the Homebrew offer installs nothing")
-    func declinedHomebrewInstall() {
+    func declinedHomebrewInstall() throws {
         let shell = MockShellRunner()
         shell.commandExistsResult = false
 
-        #expect(!ensureClaudeCLI(
+        #expect(try !ensureClaudeCLI(
             shell: shell, environment: shell.environment, output: silentOutput(),
             brewInstalled: true, confirmInstall: { false }
         ))
@@ -44,13 +44,13 @@ struct ClaudePrerequisiteTests {
     }
 
     @Test("Accepting the Homebrew offer runs brew install, then re-probes for claude")
-    func acceptedHomebrewInstall() {
+    func acceptedHomebrewInstall() throws {
         let shell = MockShellRunner()
         shell.commandExistsResult = false
 
         // The install "succeeds" but claude still is not on PATH, so the outcome is a failure —
         // the assertion that matters is which command was run.
-        #expect(!ensureClaudeCLI(
+        #expect(try !ensureClaudeCLI(
             shell: shell, environment: shell.environment, output: silentOutput(),
             brewInstalled: true, confirmInstall: { true }
         ))
@@ -59,11 +59,11 @@ struct ClaudePrerequisiteTests {
     }
     #else
     @Test("Linux never offers the Homebrew cask, even with brew present and a willing user")
-    func linuxNeverOffersHomebrew() {
+    func linuxNeverOffersHomebrew() throws {
         let shell = MockShellRunner()
         shell.commandExistsResult = false
 
-        #expect(!ensureClaudeCLI(
+        #expect(try !ensureClaudeCLI(
             shell: shell, environment: shell.environment, output: silentOutput(),
             brewInstalled: true, confirmInstall: { Issue.record("no prompt on Linux"); return true }
         ))

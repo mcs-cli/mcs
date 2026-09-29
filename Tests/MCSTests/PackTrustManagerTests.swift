@@ -765,7 +765,7 @@ struct PackTrustManagerTests {
         // A hook file plus its interpreter: the prompt is genuinely reached, not skipped
         // by the `items.isEmpty` shortcut.
         #expect(items.count >= 2)
-        #expect(manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: items))
+        #expect(try manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: items))
     }
 
     @Test("policy defaults to .prompt so auto-accept is never implicit")
@@ -787,6 +787,6 @@ struct PackTrustManagerTests {
         """, in: tmpDir)
 
         let manager = PackTrustManager(output: CLIOutput(colorsEnabled: false), policy: .autoAccept)
-        #expect(manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: []))
+        #expect(try manager.promptForTrust(manifest: manifest, packPath: tmpDir, items: []))
     }
 }

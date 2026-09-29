@@ -46,7 +46,7 @@ struct CleanupCommand: LockedCommand {
 
         output.plain("")
 
-        guard force || output.askYesNo("Delete all \(backups.count) backup file(s)?", default: false) else {
+        guard try force || output.askYesNo("Delete all \(backups.count) backup file(s)?", default: false) else {
             output.info("No backups deleted.")
             return
         }

@@ -60,7 +60,7 @@ struct ExportCommand: ParsableCommand {
         let selection: Selection = if nonInteractive {
             selectAll(from: config)
         } else {
-            interactiveSelect(config: config, output: output)
+            try interactiveSelect(config: config, output: output)
         }
 
         // 4. Gather metadata
@@ -76,7 +76,7 @@ struct ExportCommand: ParsableCommand {
         }
 
         // 5. Build manifest
-        let builder = ManifestBuilder()
+        let builder = ManifestBuilder(environment: env)
         let options = ManifestBuilder.BuildOptions(
             selectedMCPServers: selection.mcpServers,
             selectedHookFiles: selection.hookFiles,
@@ -105,7 +105,7 @@ struct ExportCommand: ParsableCommand {
 
             output.plain("")
             output.success("Pack exported successfully!")
-            printPostExportHints(config: config, output: output)
+            printPostExportHints(config: config, environment: env, output: output)
         }
     }
 
@@ -182,7 +182,7 @@ struct ExportCommand: ParsableCommand {
     private func interactiveSelect(
         config: ConfigurationDiscovery.DiscoveredConfiguration,
         output: CLIOutput
-    ) -> Selection {
+    ) throws -> Selection {
         var groups: [SelectableGroup] = []
         var counter = 0
         var mappings: [ItemCategory: [Int: String]] = [:]
@@ -279,7 +279,7 @@ struct ExportCommand: ParsableCommand {
         }
 
         // Run multi-select
-        let selected = output.multiSelect(groups: &groups)
+        let selected = try output.multiSelect(groups: &groups)
 
         func selectedNames(_ category: ItemCategory) -> Set<String> {
             guard let mapping = mappings[category] else { return [] }
@@ -326,6 +326,7 @@ struct ExportCommand: ParsableCommand {
 
     private func printPostExportHints(
         config: ConfigurationDiscovery.DiscoveredConfiguration,
+        environment: Environment,
         output: CLIOutput
     ) {
         let resolvedPath = URL(fileURLWithPath: outputDir).standardizedFileURL.path
@@ -334,7 +335,7 @@ struct ExportCommand: ParsableCommand {
         // Check for MCP servers that might need brew (dynamic symlink resolution)
         let detectedFormulas = Set(config.mcpServers.compactMap { server -> String? in
             guard let command = server.command else { return nil }
-            return Homebrew.detectFormula(for: command)
+            return Homebrew.detectFormula(for: command, environment: environment)
         })
         if !detectedFormulas.isEmpty {
             hints.append("Some MCP servers may need brew packages: \(detectedFormulas.sorted().joined(separator: ", "))")

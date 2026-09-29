@@ -46,11 +46,12 @@ struct HookInterpreterCheckTests {
         #expect(!message.contains("mcs sync"))
     }
 
-    @Test("bash, sh and zsh are assumed present and never checked")
+    @Test("bash and sh are assumed present; zsh, absent from most Linux installs, is checked")
     func shellsAreAssumedPresent() {
-        for shell in ["bash", "sh", "zsh"] {
+        for shell in ["bash", "sh"] {
             #expect(!HookInterpreter.isCheckable(binary: shell))
         }
+        #expect(HookInterpreter.isCheckable(binary: "zsh"))
         #expect(HookInterpreter.isCheckable(binary: "node"))
     }
 }

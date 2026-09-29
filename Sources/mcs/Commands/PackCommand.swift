@@ -172,7 +172,7 @@ struct RemovePack: LockedCommand {
 
         // 4. Confirm
         if !force {
-            guard ctx.output.askYesNo("Remove pack '\(entry.displayName)'?", default: false) else {
+            guard try ctx.output.askYesNo("Remove pack '\(entry.displayName)'?", default: false) else {
                 ctx.output.info("Pack not removed.")
                 return
             }

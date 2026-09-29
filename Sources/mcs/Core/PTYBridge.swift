@@ -27,7 +27,7 @@ enum PTYBridge {
     enum PTYAction: Equatable {
         /// Output is waiting, or the child hung up with output possibly still buffered.
         case read
-        /// The descriptor itself is bad; the command is gone and the bridge ends.
+        /// The descriptor errored or is invalid, with nothing left to read; the bridge ends.
         case close
         case idle
     }
@@ -39,8 +39,9 @@ enum PTYBridge {
     }
 
     static func ptyAction(revents: Int16) -> PTYAction {
-        if revents & Int16(POLLERR | POLLNVAL) != 0 { return .close }
+        if revents & Int16(POLLNVAL) != 0 { return .close }
         if revents & Int16(POLLIN | POLLHUP) != 0 { return .read }
+        if revents & Int16(POLLERR) != 0 { return .close }
         return .idle
     }
 }

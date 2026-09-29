@@ -54,7 +54,7 @@ struct Environment {
             brewPath = resolvedBrew
             brewPrefix = Self.brewPrefix(forBrewPath: resolvedBrew)
         } else {
-            brewPrefix = Self.defaultBrewPrefix
+            brewPrefix = Homebrew.defaultPrefix
             brewPath = "\(brewPrefix)/bin/brew"
         }
 
@@ -87,7 +87,8 @@ struct Environment {
     static func defaultHomeDirectory(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
-        guard let home = environment["HOME"], !home.isEmpty else {
+        // A relative `$HOME` would resolve against whatever directory mcs was launched from.
+        guard let home = environment["HOME"], home.hasPrefix("/") else {
             return NSHomeDirectory()
         }
         return home
@@ -97,23 +98,11 @@ struct Environment {
     /// `expandingTildeInPath` reads — otherwise a `~/…` pack path or doctor check would resolve
     /// under a different home than `~/.mcs` whenever `$HOME` is overridden.
     func expandingTilde(_ path: String) -> String {
-        if path == "~" {
+        if path == "~" || path == "~/" {
             return homeDirectory.path
         }
         guard path.hasPrefix("~/") else { return path }
         return homeDirectory.appendingPathComponent(String(path.dropFirst(2))).path
-    }
-
-    /// Where Homebrew installs itself when no `brew` is on PATH to ask.
-    static var defaultBrewPrefix: String {
-        #if canImport(Darwin) && arch(arm64)
-        "/opt/homebrew"
-        #elseif canImport(Darwin)
-        "/usr/local"
-        #else
-        // Linuxbrew's documented multi-user prefix; unlike macOS it does not vary by architecture.
-        "/home/linuxbrew/.linuxbrew"
-        #endif
     }
 
     /// Directory where external tech pack checkouts live (`~/.mcs/packs/`).

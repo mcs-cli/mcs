@@ -1279,12 +1279,13 @@ struct ShellCommandLifecycleTests {
         #expect(FileManager.default.fileExists(atPath: markerPath))
     }
 
-    @Test("shellCommand with interactive flag really runs under a PTY")
-    func shellCommandInteractiveAccepted() throws {
+    @Test("An interactive shellCommand off a terminal runs without a PTY, so its prompt ends instead of hanging")
+    func shellCommandInteractiveOffTerminalDoesNotHang() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        let markerPath = bed.home.appendingPathComponent("interactive-marker.txt").path
+        // `read` sees EOF only without a PTY: under one, nothing would ever end the child's input.
+        let markerPath = bed.home.appendingPathComponent("eof-marker.txt").path
         let pack = MockTechPack(
             identifier: "interactive-pack",
             displayName: "Interactive Pack",
@@ -1295,15 +1296,12 @@ struct ShellCommandLifecycleTests {
                     description: "Install with interactive flag",
                     type: .configuration,
                     packIdentifier: "interactive-pack",
-                    installAction: .shellCommand(command: "touch '\(markerPath)'", interactive: true)
+                    installAction: .shellCommand(command: "read answer || touch '\(markerPath)'", interactive: true)
                 ),
             ]
         )
         let registry = TechPackRegistry(packs: [pack])
 
-        // Interactive commands go through forkpty() in the real ShellRunner, so the marker file
-        // proves the whole path ran — fork, execve and the terminal/PTY bridge loop — not just
-        // that the component was recorded.
         let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 

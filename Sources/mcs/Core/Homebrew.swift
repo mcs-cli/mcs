@@ -2,13 +2,25 @@ import Foundation
 
 /// Manages Homebrew package installation and service management.
 struct Homebrew {
+    /// Where Homebrew installs itself when no `brew` is on PATH to ask.
+    static var defaultPrefix: String {
+        #if canImport(Darwin) && arch(arm64)
+        "/opt/homebrew"
+        #elseif canImport(Darwin)
+        "/usr/local"
+        #else
+        // Linuxbrew's documented multi-user prefix; unlike macOS it does not vary by architecture.
+        "/home/linuxbrew/.linuxbrew"
+        #endif
+    }
+
     /// Every prefix Homebrew installs itself at on this platform: both macOS architectures, or
     /// Linuxbrew's multi-user and single-user locations.
-    static var allPrefixes: [String] {
+    static func allPrefixes(home: URL) -> [String] {
         #if canImport(Darwin)
         ["/opt/homebrew", "/usr/local"]
         #else
-        ["/home/linuxbrew/.linuxbrew", Environment.defaultHomeDirectory() + "/.linuxbrew"]
+        [defaultPrefix, home.appendingPathComponent(".linuxbrew").path]
         #endif
     }
 
@@ -84,10 +96,10 @@ struct Homebrew {
     /// Uses single-hop symlink reading (`destinationOfSymbolicLink`) instead of full
     /// resolution because some commands chain through multiple symlinks where the final
     /// target leaves the Cellar path (e.g. npx → Cellar/node/.../npx → lib/node_modules/...).
-    static func detectFormula(for command: String) -> String? {
+    static func detectFormula(for command: String, environment: Environment) -> String? {
         let fm = FileManager.default
         let basename = bareName(of: command)
-        for prefix in allPrefixes {
+        for prefix in allPrefixes(home: environment.homeDirectory) {
             let binPath = "\(prefix)/bin/\(basename)"
             guard let dest = try? fm.destinationOfSymbolicLink(atPath: binPath) else { continue }
 
