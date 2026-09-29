@@ -40,8 +40,8 @@ struct CLIOutputTests {
         #expect(CLIOutput(colorsEnabled: false, input: writeEnd).readByte() == nil)
     }
 
-    /// A picker reading from a pipe whose writer has closed: the hangup a raw-mode prompt sees.
     private func outputWithClosedInput() -> (CLIOutput, Int32) {
+        // A pipe whose writer has closed: the hangup a raw-mode prompt sees.
         let (readEnd, writeEnd) = makePipe()
         close(writeEnd)
         return (CLIOutput(colorsEnabled: false, input: readEnd), readEnd)

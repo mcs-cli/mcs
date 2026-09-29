@@ -1304,8 +1304,8 @@ struct LinuxUpgradeCommandTests {
         UpdateChecker.linuxUpgrade(toVersion: version, binaryPath: path, directoryWritable: writable, arch: "x86_64")
     }
 
-    /// `sh -n` parses without running, so a quoting mistake fails here instead of in a user's shell.
     private func shellParses(_ script: String) throws -> Bool {
+        // `sh -n` parses without running, so a quoting mistake fails here instead of in a user's shell.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-n", "-c", script]

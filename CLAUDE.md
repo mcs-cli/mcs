@@ -85,12 +85,12 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `Backup.swift` — timestamped backups for mixed-ownership files (CLAUDE.local.md), backup discovery and deletion
 - `GitignoreManager.swift` — global gitignore management, core entry list
 - `ClaudeIntegration.swift` — `claude mcp add/remove` (with scope support), `claude plugin install/uninstall/list` (scope + working directory, like MCP) and `marketplace add/list`
-- `ClaudePrerequisite.swift` — Claude Code CLI availability check; macOS offers a Homebrew install, Linux prints the native-installer and npm commands
-- `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
+- `ClaudePrerequisite.swift` — Claude Code CLI availability check; when it is missing, prints the native installer (the self-updating install) and never installs it itself
+- `Homebrew.swift` — brew detection, the platform's prefixes (`defaultPrefix`, `allPrefixes(home:)`), package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
 - `FileHasher.swift` — SHA-256 file and directory hashing via swift-crypto's `Crypto`, which re-exports CryptoKit on Darwin (used by `PackTrustManager` and `ComponentExecutor`)
 - `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
-- `Locked.swift` — `NSLock`-backed value box with the `withLock { $0 }` shape of the Darwin-only `OSAllocatedUnfairLock` (`Synchronization.Mutex` is macOS 15+, above the macOS 13 floor)
-- `TerminalAttributes.swift` — termios helpers for the raw-mode picker; `c_cc` is indexed through the platform's own `VMIN`/`VTIME` and flag masks are converted through `tcflag_t`
+- `Locked.swift` — `NSLock`-backed value box; `OSAllocatedUnfairLock` is Darwin-only and `Synchronization.Mutex` needs macOS 15
+- `TerminalAttributes.swift` — termios helpers for the raw-mode pickers; `c_cc` is indexed through the platform's own `VMIN`/`VTIME` and flag masks are converted through `tcflag_t`
 - `PathContainment.swift` — centralized path-boundary checks and relative-path utilities (symlink-safe containment, traversal prevention)
 - `PluginRef.swift` — parsed `name@repo` plugin references; resolves the `name@<marketplace-name>` id Claude Code keys plugins by (`@org/repo` needs a `marketplace list` lookup), plus the `plugin list` / `marketplace list` JSON models
 - `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
@@ -167,8 +167,8 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ## Code Style
 
-SwiftFormat and SwiftLint enforce consistent code style. CI downloads a **pinned** version of each
-as a static Linux binary (`SWIFTLINT_VERSION` / `SWIFTFORMAT_VERSION` in `pr-checks.yml`) and asserts
+SwiftFormat and SwiftLint enforce consistent code style. CI's lint job runs on macOS and downloads a
+**pinned** release of each (`SWIFTLINT_VERSION` / `SWIFTFORMAT_VERSION` in `pr-checks.yml`), asserting
 the binary reports it, so a lint verdict depends on the repo alone — new rules arrive when someone
 bumps the pin. Keep the local install on those versions or CI will disagree with you; a local install
 may also come from a different manager (Mint, for instance) and sit earlier on `PATH`, so
@@ -201,7 +201,7 @@ import Darwin
 import Glibc
 #endif
 ```
-  Platform-dependent **values and control flow** live only in `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift`, `Core/ClaudePrerequisite.swift` and `Core/UpdateChecker.swift` — everything else calls into them. `TerminalAttributes` is on the list without a single `#if`: it owns the termios layout, which differs per platform through `VMIN`/`VTIME`/`tcflag_t` rather than through a branch. `ClaudePrerequisite` and `UpdateChecker` are there because what differs is control flow, not a value: macOS offers a Homebrew install of Claude Code and a `brew upgrade` of mcs itself, and Linux can do neither, so there is no constant to move. The `#if canImport(Darwin) / #elseif canImport(Glibc)` import chain at the top of a file that calls libc directly (`ShellRunner`, `PTYBridge`, `CLIOutput`, `FileLock`, `GlobMatcher`) is not platform knowledge in this sense — it selects the same API from a different module — and is allowed wherever it is needed. SHA-256 comes from swift-crypto's `Crypto` on both platforms; it re-exports CryptoKit on Darwin, so no `#if` is needed to hash. A `#if` is for a value or API that genuinely differs, never to make a diagnostic go away; the same goes for `_ =`. Several Foundation methods are `@discardableResult` on Darwin and not on Linux — use the result, it always means something. A test gated out on one platform is a coverage regression: give the `#else` branch the equivalent assertion. Rationale and the compatibility matrix are in `docs/linux-support.md`
+  Platform-dependent **values and control flow** live only in `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift` and `Core/UpdateChecker.swift` — everything else calls into them. `TerminalAttributes` has no branch beyond its import chain: it owns the termios layout, which differs per platform through `VMIN`/`VTIME`/`tcflag_t`. `UpdateChecker` is there because what differs is control flow, not a value: macOS upgrades mcs through `brew upgrade`, Linux through a staged tarball swap. The `#if canImport(Darwin) / #elseif canImport(Glibc)` import chain at the top of a file that calls libc directly (`ShellRunner`, `PTYBridge`, `CLIOutput`, `FileLock`, `GlobMatcher`, `TerminalAttributes`) is not platform knowledge in this sense — it selects the same API from a different module — and is allowed wherever it is needed. SHA-256 comes from swift-crypto's `Crypto` on both platforms; it re-exports CryptoKit on Darwin, so no `#if` is needed to hash. A `#if` is for a value or API that genuinely differs, never to make a diagnostic go away; the same goes for `_ =`. Several Foundation methods are `@discardableResult` on Darwin and not on Linux — use the result, it always means something. A test gated out on one platform is a coverage regression: give the `#else` branch the equivalent assertion. Rationale and the compatibility matrix are in `docs/linux-support.md`
 - **Comments carry the non-obvious "why", not a narration of the code** — don't restate the line below, don't describe what the code used to do. If the code already says it, delete the comment; if the rationale needs more than a line or two, it belongs in the issue or a memory. State a given rationale once, at the site that owns it, rather than repeating it at every call site
 
 ## Testing

@@ -325,7 +325,7 @@ Infers: `type: configuration`, `installAction: gitignoreEntries`
 | Field | Type | Description |
 |-------|------|-------------|
 | `shell` | `String` | Shell command to execute |
-| `shellInteractive` | `Bool` | When `true`, allocates a PTY so commands like `sudo` can prompt for passwords securely. Default: `false`. Works the same on macOS and Linux — `forkpty` on both — with a 0×0 window size on both |
+| `shellInteractive` | `Bool` | When `true`, allocates a PTY so commands like `sudo` can prompt for passwords securely. Default: `false`. The PTY is allocated only when mcs itself runs in a terminal; otherwise the command runs without one (with a warning), so a prompt sees end of input instead of hanging. Same on macOS and Linux |
 
 **Does not infer `type`** — you must provide `type:` explicitly. This is because a shell command could install anything (a brew package, a skill, a tool).
 
@@ -586,7 +586,7 @@ Most components get free doctor checks from their install action — no need to 
 | `brew: node` | Command on `PATH`, else `brew list` for the package. The `PATH` probe uses the last path component, so `owner/tap/formula` looks for `formula` |
 | `mcp: {command: npx, ...}` | MCP server registered in `~/.claude.json` |
 | `plugin: "name@org"` | Plugin enabled in settings |
-| `hook: {source, dest}` | File exists at destination, plus the interpreter binary resolves (skipped for `bash`/`sh`/`zsh`) |
+| `hook: {source, dest}` | File exists at destination, plus the interpreter binary resolves (skipped for `bash`/`sh`) |
 | `skill: {source, dest}` | Directory exists at destination |
 | `command: {source, dest}` | File exists at destination |
 | `agent: {source, dest}` | File exists at destination |

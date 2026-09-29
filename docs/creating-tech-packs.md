@@ -140,7 +140,7 @@ Need to depend on Homebrew itself? That's a special case — Homebrew can't inst
         command: brew
 ```
 
-If the install script may need `sudo` (e.g. creating symlinks in `/usr/local/bin`), add `shellInteractive: true` to allocate a real terminal so password prompts work correctly:
+If the install script may need `sudo` (e.g. creating symlinks in `/usr/local/bin`), add `shellInteractive: true` to allocate a real terminal so password prompts work correctly. When mcs itself runs without a terminal (CI, a hook, `</dev/null`) the command runs without one, so a password prompt fails instead of waiting forever:
 
 ```yaml
   - id: ollama

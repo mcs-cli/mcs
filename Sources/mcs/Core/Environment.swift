@@ -77,13 +77,8 @@ struct Environment {
         return prefix.path
     }
 
-    /// The user's home directory, `$HOME` first.
-    ///
-    /// Foundation's `NSHomeDirectory()` resolves the passwd entry on Darwin and corelibs alike and
-    /// consults `$HOME` only when there is none, so `HOME=… mcs …` used to be ignored on every
-    /// platform. Preferring a non-empty `$HOME` is what makes containers, `sudo -H`-style launchers
-    /// and test sandboxes work. Takes the environment as a parameter so it can be tested as a pure
-    /// function.
+    /// The user's home directory, an absolute `$HOME` first: `NSHomeDirectory()` reads the passwd
+    /// entry even when `$HOME` is set, so `HOME=<dir> mcs …` and sandboxed runs would be ignored.
     static func defaultHomeDirectory(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String {
