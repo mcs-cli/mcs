@@ -167,10 +167,12 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ## Code Style
 
-SwiftFormat and SwiftLint enforce consistent code style. CI downloads the newest release of each as
-a static Linux binary, so it always lints against the latest rules; a local install may come from a
-different manager (Mint, for instance) and sit earlier on `PATH`, so `brew install` can appear to
-succeed while the old binary keeps answering.
+SwiftFormat and SwiftLint enforce consistent code style. CI downloads a **pinned** version of each
+as a static Linux binary (`SWIFTLINT_VERSION` / `SWIFTFORMAT_VERSION` in `pr-checks.yml`) and asserts
+the binary reports it, so a lint verdict depends on the repo alone — new rules arrive when someone
+bumps the pin. Keep the local install on those versions or CI will disagree with you; a local install
+may also come from a different manager (Mint, for instance) and sit earlier on `PATH`, so
+`brew install` can appear to succeed while the old binary keeps answering.
 If the formatter fails with `error: Unknown rule '<name>'` on every file, that is a stale local
 install rather than a broken config — check `which -a swiftformat` and the version of each copy.
 
