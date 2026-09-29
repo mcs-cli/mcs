@@ -81,9 +81,7 @@ struct ExternalCommandExistsCheck: DoctorCheck {
 
     func fix() -> FixResult {
         guard let fixCommand else {
-            // The pack declares no fix and nothing here knows which component — if any — provides
-            // this command: it may be a brew: package, a shell: installer, or nothing at all. So
-            // the hint names both routes rather than guessing from what Homebrew can do.
+            // Nothing here knows which component, if any, provides this command, so both routes are named.
             return .notFixable(
                 "Run 'mcs sync' if a pack component installs '\(command)'; otherwise install it and make sure it is on PATH"
             )

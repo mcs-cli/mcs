@@ -3304,10 +3304,10 @@ struct BrewPackageDoctorTests {
         #expect(summary.issues == 0)
     }
 
-    /// A `brew:` component whose command is on PATH needs no Homebrew at all — what makes `brew:`
-    /// usable on Linux. The package name is one no machine has, so the mocked PATH hit decides it.
     @Test("A brew package satisfied on PATH spawns no brew subprocess")
     func pathSatisfiedBrewPackageSpawnsNoSubprocess() throws {
+        // What makes `brew:` usable on Linux: a command on PATH needs no Homebrew at all. The package
+        // name is one no machine has, so the mocked PATH hit decides it.
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 

@@ -3,10 +3,10 @@ import Foundation
 import Testing
 
 struct ProjectDetectorTests {
-    /// Compared as paths, not URLs: corelibs Foundation flags a directory URL produced by
-    /// deletingLastPathComponent() with a trailing slash that standardizedFileURL does not strip,
-    /// so two URLs for the same directory are unequal on Linux.
     private func samePath(_ found: URL?, _ expected: URL) -> Bool {
+        // Paths, not URLs: corelibs Foundation keeps a trailing slash on a directory URL from
+        // deletingLastPathComponent() that standardizedFileURL does not strip, so on Linux two URLs
+        // for the same directory compare unequal.
         found?.standardizedFileURL.path == expected.standardizedFileURL.path
     }
 

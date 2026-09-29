@@ -9,10 +9,9 @@ import Glibc
 ///
 /// Two facts drive the shapes below. `poll(2)` reports `POLLHUP`, `POLLERR` and `POLLNVAL`
 /// whether or not they were requested, so a descriptor that keeps reporting one of them without
-/// `POLLIN` makes `poll` return immediately, forever, unless the loop stops watching it — macOS
-/// returns `POLLNVAL` for a `/dev/null` stdin, which is what a hook or `mcs sync --all </dev/null`
-/// hands a `shellInteractive` component. And a hung-up pipe can still carry buffered bytes, so
-/// readable data is always drained before the descriptor is dropped.
+/// `POLLIN` makes `poll` return immediately, forever, unless the loop stops watching it (macOS
+/// reports `POLLNVAL` for a `/dev/null` stdin). And a hung-up descriptor can still carry buffered
+/// bytes, so readable data is always drained before a descriptor is dropped or the bridge ends.
 enum PTYBridge {
     /// What to do with the user's terminal this iteration.
     enum StdinAction {

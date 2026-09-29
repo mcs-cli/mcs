@@ -75,11 +75,9 @@ struct Homebrew {
         shell.run(environment.brewPath, arguments: ["uninstall", name])
     }
 
-    /// What to tell the user about `package` when Homebrew is not installed.
-    ///
-    /// With no `brew` there is nothing `mcs sync` can do, so the advice must not point back at it
-    /// — that loop has no exit. On Linux, Homebrew is the unusual case: the package almost
-    /// certainly comes from the distribution's own package manager, so that is what is named.
+    /// What to tell the user about `package` when Homebrew is not installed. It names a step outside
+    /// mcs first, because advice that only says to re-run `mcs sync` would loop. On Linux the package
+    /// almost certainly comes from the distribution, so that is what is named.
     static func manualInstallAdvice(for package: String) -> String {
         #if canImport(Darwin)
         "Homebrew not found — install it from https://brew.sh, then re-run 'mcs sync' to get \(package)"

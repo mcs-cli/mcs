@@ -1,12 +1,8 @@
 import Foundation
 
-/// A mutable value guarded by a lock, with the `withLock { $0 }` shape of `OSAllocatedUnfairLock`,
-/// which is Darwin-only. `Synchronization.Mutex` would be the modern answer but is macOS 15+, above
-/// this package's macOS 13 deployment target.
-///
-/// `@unchecked Sendable` is the point of the type rather than a way to quiet the checker: the
-/// invariant — every access to `value` happens under `lock` — is real and cannot be expressed to
-/// the compiler.
+/// A mutable value guarded by a lock. `OSAllocatedUnfairLock` is Darwin-only and
+/// `Synchronization.Mutex` needs macOS 15, above the macOS 13 floor. `@unchecked` because every
+/// access to `value` goes through `lock`, which the compiler cannot verify.
 final class Locked<Value: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var value: Value

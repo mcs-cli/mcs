@@ -21,13 +21,11 @@ says how.
 | Tested on | Ubuntu 24.04 (development); the `ubuntu-22.04` and `ubuntu-22.04-arm` GitHub runners in CI. |
 | Other distributions | Any glibc ≥ 2.35 distribution is expected to work. **Nothing is claimed about Fedora, Alpine or NixOS** — they have not been tested. |
 
-CI runs `swift build`, the full test suite and the release build on both Linux architectures for
-every pull request, alongside the two macOS jobs. It also runs whole command flows against a real
-pack — `.github/actions/mcs-smoke`, on both Linux architectures and against the macOS universal
-binary — which is what the matrix below rests on. The `Linux Smoke` workflow runs the same flows on
-demand, for reproducing a Linux-only failure. Lint runs on Linux only: both
-linters publish static Linux binaries, and the two platforms give the same verdicts, so a second run
-would only add version skew.
+CI runs the full test suite and the release build on both Linux architectures for every pull
+request, alongside the macOS jobs. It also runs whole command flows against a real pack —
+`.github/actions/mcs-smoke`, on both Linux architectures and against the macOS universal binary.
+Lint runs on macOS only: SwiftLint's static Linux binary cannot load SourceKit and silently skips
+every rule that needs it.
 
 ## 2. Prerequisites
 
@@ -49,7 +47,7 @@ on a machine where Claude Code is genuinely installed:
 |---|---|
 | `mcs sync` | **exits 1 and does nothing** — "Claude Code CLI not found", then the install instructions |
 | `mcs update` | **exits 1 and does nothing** — same message |
-| `mcs doctor` | exits 0, reporting everything as missing |
+| `mcs doctor` † | exits 0, reporting everything as missing |
 
 So the two commands that change anything refuse to run and tell the user to install software they
 already have. See ADR D8 for why this is documented rather than worked around.
@@ -71,8 +69,8 @@ mcs --version
 ```
 
 There is no Homebrew formula for Linux: the tap publishes the macOS universal binary only.
-`mcs check-updates` therefore tells Linux users to download the latest release rather than to run
-`brew upgrade`.
+`mcs check-updates` therefore offers a staged tarball swap instead of `brew upgrade` (ADR D12), and
+points at the releases page when it cannot build one.
 
 ### Build from source
 
@@ -93,57 +91,51 @@ mkdir -p .test-output && swift test > .test-output/results.txt 2>&1
 
 **Do not run the suite as root.** `UpdateCheckerTests.registryWriteFailureContract` makes a
 directory read-only and asserts that a write into it fails; root ignores directory permissions, so
-that one test fails under `sudo` or in a root container. This is why the CI job runs on the
-`ubuntu-latest` runner rather than in a `swift:*` container image.
+that one test fails under `sudo` or in a root container. This is why the CI jobs run on the
+`ubuntu-22.04` runners rather than in a `swift:*` container image.
 
-**Run it with `--no-parallel` on Linux.** CI does, for the reason in the known limitations below;
-without it roughly one full run in four fails with a spurious `ETXTBSY`. Serial costs about a
-quarter more wall-clock time (42s against 34s here).
+**Run it with `--no-parallel` on Linux**, as CI does; the reason is under known limitations.
 
 ## 4. Compatibility matrix
 
 Legend: `verified` — run on Linux and observed; `verified (with a difference)` — works, but not
-identically to macOS; the Notes column says how. The rows for whole command flows come from
-`.github/actions/mcs-smoke`, which PR checks run against a real pack on `ubuntu-22.04`,
-`ubuntu-22.04-arm` and macOS, so they are re-verified on every pull request rather than at the
-date of this table.
+identically to macOS; the Notes column says how. Rows marked † are re-run on every pull request by
+`.github/actions/mcs-smoke`, against a real pack on `ubuntu-22.04`, `ubuntu-22.04-arm` and macOS. The
+others were run by hand on Ubuntu 24.04 when the port landed.
 
 | Feature | macOS | Linux | Notes |
 |---|---|---|---|
 | `mcs sync` (project) | supported | verified | `mcs sync --pack linux-probe` in a git project: components installed, `settings.local.json` composed, `CLAUDE.local.md` generated, `.mcs-project` written. |
 | `mcs sync --global` | supported | verified | `mcs sync --global --pack git-probe`: artifacts under `~/.claude/`, `settings.json` composed, `global-state.json` written. |
-| Raw-mode pickers | supported | verified | Driven under a real PTY: `↓` moved the cursor, `Space` toggled, `Enter` applied; in-place redraw and cursor hide/show correct. A hangup mid-prompt answers No and warns rather than spinning. |
+| Raw-mode pickers | supported | verified | Driven under a real PTY: `↓` moved the cursor, `Space` toggled, `Enter` applied; in-place redraw and cursor hide/show correct. A hangup mid-prompt throws, so the command exits non-zero instead of acting on an unconfirmed choice. |
 | Non-TTY fallback picker | supported | verified | stdin a PTY, stdout a pipe: numeric toggle + `Enter`, colours disabled. |
-| `shell:` components | supported | verified | `shell: touch <path>` created the marker. |
-| `shellInteractive: true` (PTY/sudo) | supported | verified | `forkpty` path ran the command; marker file created, with stdin from `/dev/null` and under a real controlling terminal. Also asserted by `LifecycleIntegrationTests`. The PTY is allocated with a default 0×0 window size on both platforms. |
-| `brew:` components | supported | verified (with a difference) | Same predicate on both platforms. Without Linuxbrew a `brew:` component is satisfied only when the formula name is also the command name — `brew: node` passes with `node` on PATH, `brew: ripgrep` does not because the command is `rg`. Doctor then reports it missing, and `--fix` names the system package manager instead of pointing back at `mcs sync`. Installing a formula still needs Linuxbrew. |
+| `shell:` components † | supported | verified | `shell: touch <path>` created the marker. |
+| `shellInteractive: true` (PTY/sudo) † | supported | verified | Under a real terminal the `forkpty` path ran the command. Off a terminal (stdin `/dev/null`, CI) it runs without a PTY, so a prompt sees end of input instead of hanging; smoke asserts this under a time limit. The PTY is allocated with a default 0×0 window size on both platforms. |
+| `brew:` components † | supported | verified (with a difference) | Same predicate on both platforms. Without Linuxbrew a `brew:` component is satisfied only when the formula name is also the command name — `brew: node` passes with `node` on PATH, `brew: ripgrep` does not because the command is `rg`. Doctor then reports it missing, and `--fix` names the system package manager instead of pointing back at `mcs sync`. Installing a formula still needs Linuxbrew. |
 | `mcp:` (`claude mcp add`) | supported | verified | `demo-server` registered via `claude mcp add -s local`; `claude mcp list` shows it; removal deregisters it. |
 | `plugin:` | supported | verified | `hookify@claude-code-plugins` installed through `claude plugin install`; `claude plugin list` shows it enabled. |
-| `hook:` / `command:` / `skill:` / `agent:` copies | supported | verified | All four installed; hooks namespaced under `<pack-id>/`; interpreter inferred (`bash` for `.sh`, `python3` for `.py`). |
+| `hook:` / `command:` / `skill:` / `agent:` copies † | supported | verified | All four installed; hooks namespaced under `<pack-id>/`; interpreter inferred (`bash` for `.sh`, `python3` for `.py`). |
 | `settingsFile:` | supported | verified | Deep-merged into `settings.local.json` with `__GREETING__` substituted. |
 | `gitignore:` | supported | verified | Entry added to `~/.config/git/ignore`; reference counting kept it when one of two scopes was removed. |
-| `mcs update` | supported | verified | `mcs update --project --trust-all` re-fetched the pack and re-applied the scope. |
-| `mcs doctor` | supported | verified | 20 checks across every section; `✓`/`⚠` rendering correct. |
-| `mcs doctor --fix` | supported | verified | Deleting `.claude` from the global gitignore then `doctor --fix` re-added it (`GitignoreCheck.fix`). |
+| `mcs update` / `--trust-all` † | supported | verified | `mcs update --project --trust-all` re-applied the scope with no trust prompt; a git pack was re-fetched by hand. |
+| `mcs doctor` † | supported | verified | 20 checks across every section; `✓`/`⚠` rendering correct. |
+| `mcs doctor --fix` / `--yes` † | supported | verified | Deleting `.claude` from the global gitignore then `doctor --fix` re-added it (`GitignoreCheck.fix`); with `--yes` the re-sync path ran without prompting and is idempotent. |
 | `mcs pack add` (git) | supported | verified | `mcs pack add git://…/gitprobe` cloned, prompted for trust, registered. |
-| `mcs pack add` (local) | supported | verified | `mcs pack add <dir>` registered in place with `commitSHA: local`. |
-| `mcs pack remove` / `list` / `update` / `validate` | supported | verified | `remove` unconfigured every affected scope; `update` reported "already up to date"; `validate` produced the python3 heuristic warning. |
+| `mcs pack add` (local) † | supported | verified | `mcs pack add '~/fixture-pack'` expanded the tilde against `$HOME` and registered the pack in place with `commitSHA: local`. |
+| `mcs pack remove` / `list` / `update` / `validate` † | supported | verified | `remove` unconfigured every affected scope; `update` reported "already up to date"; `validate` produced the python3 heuristic warning. |
 | Pack trust hashing | supported | verified | Trust prompt shown on add for both a local and a git pack; re-validated on `pack update` (SHA-256 now from swift-crypto). |
-| `mcs export` (incl. brew formula hints) | supported | verified (with a difference) | Exported `techpack.yaml`, hooks, skill, command, agent, settings and template from a live project. The brew formula hints are empty without Linuxbrew — `detectFormula` reads symlinks under the Linuxbrew prefixes. |
-| `mcs cleanup` | supported | verified | Found and deleted a `CLAUDE.local.md.backup.*` file, with and without `--force`. |
-| `mcs check-updates` + SessionStart hook | supported | verified (with a difference) | `check-updates`, `--json` and `--hook` all run; `mcs config set update-check true` registered `mcs check-updates --hook` in `~/.claude/settings.json` and the cooldown file was written. The upgrade command differs: `brew upgrade` on macOS, a staged tarball swap on Linux — see ADR D12. |
-| `mcs bootstrap` | supported | verified | `mcs.yaml` with a seeded `values:` entry: the pack installed and the skill body carried the seeded value, with "Reusing 1 previously configured value(s)". |
-| `mcs bootstrap --trust-all` | supported | verified | Ran with no TTY; the pack's executable content was approved without a prompt. |
-| `mcs sync --pack --prune --yes` | supported | verified | Made the named pack the exact set and skipped the removal confirmation. |
-| `mcs doctor --fix --yes` (re-sync) | supported | verified | `6 passed  0 warnings  0 issues` before and after, so the re-sync path is idempotent. |
-| `mcs update --trust-all` | supported | verified | `mcs update --project --trust-all` re-applied the scope with no trust prompt. |
-| `mcs pack list --json` | supported | verified | Machine-readable output including `isLocal` and the `local` commit sentinel. |
-| Non-interactive prompt resolution | supported | verified | `mcs sync --all < /dev/null` resolved every key from the stored prior instead of blocking on stdin. |
+| `mcs export` (incl. brew formula hints) † | supported | verified (with a difference) | Exported `techpack.yaml`, hooks, skill, command, agent, settings and template from a live project. The brew formula hints are empty without Linuxbrew — `detectFormula` reads symlinks under the Linuxbrew prefixes. |
+| `mcs cleanup` † | supported | verified | Found and deleted a `CLAUDE.local.md.backup.*` file, with and without `--force`. |
+| `mcs check-updates` + SessionStart hook † | supported | verified (with a difference) | `check-updates`, `--json` and `--hook` all run; `mcs config set update-check true` registered `mcs check-updates --hook` in `~/.claude/settings.json` and the cooldown file was written. The upgrade command differs: `brew upgrade` on macOS, a staged tarball swap on Linux — see ADR D12. |
+| `mcs bootstrap` / `--trust-all` † | supported | verified | `mcs.yaml` with a `~/…` source and a seeded `values:` entry: with no TTY the pack's executable content was approved without a prompt, and the skill body carried the seeded value. |
+| `mcs sync --pack --prune --yes` † | supported | verified | Made the named pack the exact set and skipped the removal confirmation. |
+| `mcs pack list --json` † | supported | verified | Machine-readable output including `isLocal` and the `local` commit sentinel. |
+| Non-interactive prompt resolution † | supported | verified | `mcs sync --all < /dev/null` resolved every key from the stored prior instead of blocking on stdin. |
 | `mcs config` | supported | verified | `list` / `get` / `set` against `~/.mcs/config.yaml`. |
-| `$HOME` override | supported (behavior change) | verified | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, on both platforms — including a `~` typed in a pack path or a pack's doctor `path:`. Previously `$HOME` was ignored everywhere (ADR D11). |
+| `$HOME` override † | supported (behavior change) | verified | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, on both platforms — including a `~` typed in a pack path or a pack's doctor `path:`. A relative `$HOME` is ignored. The smoke run executes entirely under a sandboxed `$HOME` (ADR D11). |
 | File lock (`flock`) | supported | verified | Two concurrent syncs: the second exited 1 with "Another mcs process is running". |
 | Terminal colours / width | supported | verified | ANSI colour and the wrapped/re-rendered picker observed under a PTY; colours suppressed when stdout is a pipe. |
-| Claude Code prerequisite | supported | verified (with a difference) | With `claude` off PATH, Linux prints the native-installer and npm commands and returns false. macOS still offers the Homebrew install; `claude-code` is a cask and Linuxbrew has no casks. |
+| Claude Code prerequisite | supported | verified | With `claude` off PATH, mcs prints the native installer and the setup guide and returns false. It never installs Claude Code, on either platform (ADR D7). |
 | Release artifact | `.tar.gz` (universal) | verified (with a difference) | `swift build -c release --static-swift-stdlib` produces one ~95 MB binary per architecture; each tarball holds exactly one file and `./mcs --version` prints the version. `ldd` still shows `libstdc++.so.6`, `libgcc_s.so.1`, `libm`, `libc` and `ld-linux`. |
 
 ## 5. Decisions (ADR entries)
@@ -169,7 +161,7 @@ On Apple platforms swift-crypto compiles its API surface down to nothing and re-
 `import Crypto` *is* CryptoKit there: same implementation, bit-identical digests for the hashes
 persisted in `.mcs-project`. Its manifest gates `CCryptoBoringSSL` and friends on non-Darwin
 platforms, so the 13 MB C library is not compiled on macOS either. What (a) buys over (b) is that
-four files lose a conditional-import block and the platform rule loses a clause.
+three files lose a conditional-import block and the platform rule loses a clause.
 
 **Why not (c)/(d).** Hand-rolled crypto is a maintenance liability even for a hash; shelling out
 costs a process per file and makes `FileHasher` untestable offline.
@@ -197,20 +189,17 @@ lines. **Why not (c):** `Mutex` is macOS 15+, and this package's floor is macOS 
 drop macOS 13 and 14 users for a lock. **Why not (e):** `ScriptRunner` reads its flag synchronously
 after `waitUntilExit()`; an actor forces `await` into a synchronous path.
 
-**Consequences.** `NSLock` is marginally slower than an unfair lock. Both sites are cold. The
-`@unchecked Sendable` on `Locked` is the type's purpose rather than a way to quiet the checker: the
-invariant — every access happens under the lock — is real and cannot be expressed to the compiler,
-and the doc comment says so at the one site that owns it.
+**Consequences.** `NSLock` is marginally slower than an unfair lock. Both sites are cold.
 
 ### D3 — Platform imports are an explicit `#if canImport` chain, per file
 
-**Context.** Five files call libc directly. On macOS they got those symbols from Foundation's Darwin
+**Context.** Six files call libc directly. On macOS they got those symbols from Foundation's Darwin
 re-export or an outright `import Darwin`.
 
 **Options considered.** (a) A chain in each file. (b) A `Platform.swift` with `@_exported import`.
 (c) A C shim target.
 
-**Decision: (a)**, verbatim in each of the five files:
+**Decision: (a)**, verbatim in each of them:
 
 ```swift
 #if canImport(Darwin)
@@ -255,7 +244,7 @@ Swift runtime after `fork()`, where only async-signal-safe calls are legal, so e
 child needs is allocated and checked in the parent. If a future toolchain drops `pty.h` the build fails
 immediately and the C shim remains a ~15-line fallback.
 
-### D5 — termios: index `c_cc` through `VMIN`/`VTIME`, widen masks through `tcflag_t`
+### D5 — termios: index `c_cc` through `VMIN`/`VTIME`, convert masks through `tcflag_t`
 
 **Context.** The raw-mode picker set `raw.c_cc.16` and `raw.c_cc.17` with `// VMIN` / `// VTIME`
 comments, and masked with `~UInt(ICANON | ECHO)`. Both are Darwin facts: `tcflag_t` is `UInt` there
@@ -269,8 +258,7 @@ platform's own constant.
 **Decision: (b).** (a) is a `#if` hiding a real difference behind two magic numbers; indexing by
 `VMIN` has no second place to get wrong. `withUnsafeMutableBytes` + `bindMemory(to: cc_t.self)` is
 sound — `c_cc` is already a tuple of `cc_t` — and nothing in Foundation or the stdlib does it for
-you. `TerminalAttributesTests` asserts the same things on both platforms without needing a TTY,
-which is why the read accessor exists; its doc comment says so, so it is not deleted as dead code.
+you. `TerminalAttributesTests` asserts the same things on both platforms without needing a TTY.
 
 ### D6 — `TIOCGWINSZ` widens to `UInt`
 
@@ -296,8 +284,9 @@ users have no Homebrew at all.
    at the real install with `$PREFIX/bin` off PATH — by reporting the shim's directory as the prefix.
    Resolve-then-strip handles arm64, Intel, Linuxbrew and shims alike. `brewPrefix` feeds only
    `pathWithBrew`; formula detection walks `Homebrew.allPrefixes`.
-2. **The fallback prefix and `allPrefixes` are platform-aware.** Linux gets
-   `/home/linuxbrew/.linuxbrew` and `~/.linuxbrew`. No `brew --prefix` subprocess is spawned.
+2. **`Homebrew.defaultPrefix` and `allPrefixes(home:)` are platform-aware.** Linux gets
+   `/home/linuxbrew/.linuxbrew` and `~/.linuxbrew`, under the injected home. No `brew --prefix`
+   subprocess is spawned.
 3. **`Homebrew.provides` does not change.** It probes PATH under the name with any tap qualifier
    stripped, then asks `brew list`. **The consequence, stated plainly: on Linux without Linuxbrew a
    `brew:` component is satisfied only when the formula name is also the command name.** `brew: node`
@@ -306,12 +295,13 @@ users have no Homebrew at all.
    heuristics would trade a clear rule for a list that is always incomplete.
 4. **The messages say what actually works.** When Homebrew is absent, telling the user to run
    `mcs sync` is a loop with no exit: sync prints "Homebrew not found" and sends them back to doctor.
-   `ComponentExecutor` (install and uninstall) and `BrewPackageCheck.fix()` now name the package and
+   `ComponentExecutor`'s install path and `BrewPackageCheck.fix()` name the package and
    the system package manager. The command-exists check drops its `mcs sync` hint entirely, because
    nothing there knows which component — if any — would install that command.
-5. **`ensureClaudeCLI` never offers Homebrew on Linux.** `claude-code` is a Homebrew *cask*, and
-   Linuxbrew has no casks, so the offer would have failed on exactly the machines that have brew.
-   Linux prints the native-installer and npm commands and returns `false`.
+5. **`ensureClaudeCLI` never installs Claude Code, on either platform.** It prints the native
+   installer, the one install that keeps itself updated, and the setup guide. Homebrew, npm, apt and
+   dnf installs don't update themselves, and running the native installer means piping a remote
+   script into a shell, which is the user's call.
 
 **Rejected.** Auto-installing Linuxbrew (a package manager installing a package manager, unprompted)
 and auto-installing Claude Code via `curl | bash` or npm (a trust decision mcs cannot make for the
@@ -334,19 +324,13 @@ check would then print a permanently-passing line in every `mcs doctor` run on *
 touching doctor mandates an integration test. Three files and a test, for a condition that does not
 occur on the platforms mcs ships for.
 
-**Consequences.** The failure mode is documented in section 2 rather than detected, and it is worse
-than "reports an empty machine": `mcs sync` and `mcs update` refuse to run and blame a missing Claude
-Code CLI that is in fact installed. That is a bad failure, and it is why the decision is documented
-prominently rather than left implicit — but it does not change the arithmetic, because the doctor
-check considered in (c) would not have helped either. `mcs doctor` is the one command that still
-completes, so a user who runs it sees a `✗ which` line; a user who runs `sync` gets the misleading
-error and never reaches doctor. Detecting it where it actually bites means a check in `sync`'s
-prerequisite path, which is a different change from the one (c) proposed.
+**Consequences.** The failure mode is documented in section 2 rather than detected. (c) would not
+have helped: `sync` fails on the Claude Code prerequisite before any doctor check could run, so
+detecting it where it bites means a check in `sync`'s prerequisite path, a different change.
 
 ### D9 — No Subprocess 1.0, no tools-version bump, macOS 13 floor stays
 
-swift-tools-version 6.0 already supports `.product(…, condition: .when(platforms:))`, and
-swift-crypto is tools-version 5.9 / macOS 10.15, so nothing forces a bump. Adopting Subprocess 1.0
+swift-crypto is tools-version 5.9 / macOS 10.15, so nothing forces a tools-version bump. Adopting Subprocess 1.0
 would rewrite `ShellRunner`, `ScriptRunner`, `PackFetcher`, `ClaudeIntegration` and `UpdateChecker`
 against an async API, push `async` through `ParsableCommand.run()`, and require re-verifying the PTY
 story — a rewrite of the process layer in the middle of a port, for no benefit to this goal. The
@@ -362,36 +346,39 @@ is updated once. The tap formula keeps pointing at the macOS tarball; Linux ship
 assets, because Linuxbrew is not how a Linux user is expected to install mcs.
 **Consequence: the release is now all-or-nothing across platforms** — a Linux build or test failure
 blocks the macOS tarball, the GitHub release and the tap update, which could not happen before. That
-is the intended trade (a half-published release is worse than a late one), and it is why `test-linux`
-runs before `build-linux` rather than after the release is cut.
+is the intended trade (a half-published release is worse than a late one), and it is why every test
+leg runs before any build leg rather than after the release is cut.
+
+**Recovery.** `auto-release.yml` pushes the tag before `release.yml` runs, and update checks read
+tags, not releases. So while a release is building, and indefinitely if a leg fails, every install
+sees a version whose assets do not exist yet: the Linux upgrade command fails its download and
+removes its staged file, and `brew upgrade` finds nothing. Re-run the failed jobs
+(`gh run rerun <run-id> --failed`); the next nightly release comes only when `Sources/` changes.
 
 ### D11 — The home directory comes from `$HOME`, falling back to the passwd entry
 
 **Context.** Every path mcs owns hangs off one home directory. Foundation's `NSHomeDirectory()`
 resolves the passwd entry first on Darwin and corelibs alike, and consults `$HOME` only when there
 is no passwd entry (`CFFIXED_USER_HOME`, when set, replaces both). So on *every* platform a
-`HOME=… mcs …` invocation — what a container, a CI runner and `sudo -H` all set up — silently wrote
+`HOME=<dir> mcs …` invocation, a `sudo` that keeps `HOME`, or a test sandbox silently wrote
 to the real user's `~/.claude`, `~/.mcs` and global gitignore. Verified on macOS with a compiled
 probe: `HOME=/tmp/x` still returned the passwd home.
 
-**Options considered.** (a) Leave it and document it. (b) Prefer a non-empty `$HOME`, falling back
+**Options considered.** (a) Leave it and document it. (b) Prefer an absolute `$HOME`, falling back
 to `NSHomeDirectory()`. (c) Also route the two tilde-expansion sites through the same home.
 
 **Decision: (b) and (c).** This is a deliberate behavior change on macOS as much as on Linux: an
 invocation whose `$HOME` differs from the passwd home — `sudo` with `env_keep`, a launchd agent, a
-sandboxed test — now reads and writes under `$HOME`. `Environment.defaultHomeDirectory(environment:)`
-takes the environment as a parameter so it can be tested as a pure function — swift-testing runs in
-parallel, so a test that called `setenv` would leak into every other test in flight.
-`Homebrew.allPrefixes` uses the same helper, so the single-user Linuxbrew prefix cannot drift from
-it. The two places that expand a tilde a *user* typed — a path given to `mcs pack add`, and a pack's
+sandboxed test — now reads and writes under `$HOME`. `Homebrew.allPrefixes(home:)` takes the
+injected home, so the single-user Linuxbrew prefix cannot drift from it. The two places that expand a tilde a *user* typed — a path given to `mcs pack add`, and a pack's
 doctor `path:` — go through `Environment.expandingTilde(_:)` rather than Foundation's
 `expandingTildeInPath`, so `~/pack` and `~/.mcs` can never name different homes.
 
-**Consequences.** `HOME=<dir> mcs …` is now a working sandbox for the whole binary. A `$HOME` that
-points at a missing directory is not validated; `mcs sync --global` creates the tree, `mcs doctor`
-reports everything under it as missing with the path shown. `~user/…` is not expanded — neither
-site ever accepted it.
-
+**Consequences.** `HOME=<dir> mcs …` is now a working sandbox for the whole binary; the smoke run
+relies on it. A relative `$HOME` is ignored. One that points at a missing directory is not validated:
+`mcs sync --global` creates the tree, and `mcs doctor` reports everything under it as missing with
+the path shown. Only `~` and `~/…` are expanded. `mcs pack add ~user/…` used to work through
+Foundation's expansion and now resolves as a relative path.
 
 ### D12 — The Linux upgrade command is a staged, verified tarball swap
 
@@ -403,23 +390,27 @@ there is no package manager to delegate to, and a CLI-only update would otherwis
 **Options considered.** (a) Emit no command and describe the tarball in prose. (b) Emit a command
 built from the binary's own path. (c) Suppress CLI update checks on Linux entirely.
 
-**Decision: (b).** `UpdateChecker.cliUpgradeCommands(toVersion:)` reads `/proc/self/exe` — the
-kernel's answer, not `argv[0]`, which a caller controls — and builds one command that downloads the
-tagged asset for `releaseArch`, writes the tarball member to a *sibling* temp file, runs `--version`
-on it, and only then `mv`s it over the target. The rename is same-directory, so it is atomic and
-legal while the old binary is still mapped. `sudo sh -c` wraps it only when the directory is not
-writable, which keeps the binary's ownership in the common case.
+**Decision: (b).** `UpdateChecker.cliUpgrade(toVersion:)` reads `/proc/self/exe` — the kernel's
+answer, not `argv[0]`, which a caller controls — and `linuxUpgrade(…)`, a pure function, builds one
+command that downloads the tagged asset for `releaseArch`, writes the tarball member to a *sibling*
+temp file, runs `--version` on it, and only then `mv`s it over the target. The rename is
+same-directory, so it is atomic and legal while the old binary is still mapped. A failed step removes
+the staged file. The version comes from a remote tag, so only a plain `X.Y.Z` produces a command, and
+every path is single-quoted. When the directory is not writable the command is wrapped in
+`sudo sh -c` and handed to the user to run in a terminal, since Claude's shell has no TTY for a
+password prompt; otherwise no sudo is used, so a user-local install never ends up root-owned.
 
 **Why not (a).** Claude is the one running these commands; handing it prose where every other update
 is a command makes the CLI update the odd one out and easy to skip.
 
 **Why not (c).** A Linux user would never learn a new version exists.
 
-**Consequences.** When the path cannot be resolved the function returns `[]`, and the hook then names
-the releases page and asks no question at all — the ask is gated on having something to run. A
-truncated download fails `--version` before anything is replaced. The command is only as correct as
-the asset naming in `release.yml`, so `build-linux` fails the job if the runner's `uname -m` and the
-asset's architecture disagree.
+**Consequences.** When no command can be built — no readable `/proc/self/exe`, a replaced binary, a
+tag that is not a plain version — the result is `.manual(reason:)`: the terminal and the hook name the
+reason and the releases page, and the hook asks no question. A truncated download fails before
+anything is replaced. The command is only as correct as the asset naming in `release.yml`, so the
+release build fails if the runner's `uname -m` and the asset's architecture disagree.
+
 ## 6. Known limitations
 
 - **glibc ≥ 2.35**, because both release binaries are built on Ubuntu 22.04. musl is untested, and
@@ -431,12 +422,8 @@ asset's architecture disagree.
   chain and a musl verification pass.
 - **`/usr/bin/which` is required**, with the "everything reports not found" symptom described in
   section 2.
-- **No Linuxbrew auto-install**, and **no Claude Code auto-install** on Linux.
+- **No Linuxbrew auto-install**, and **no Claude Code auto-install** on either platform (D7).
 - **`brew:` components are name-sensitive** without Linuxbrew — see D7 decision 3.
-- **A `.zsh` hook's missing interpreter is not reported on Linux.** `HookInterpreter` treats `zsh`
-  as always present, which is true on macOS and false on Debian, Ubuntu and Fedora by default. Packs
-  that ship zsh hooks should say so; a per-platform set was not worth a sixth home for platform
-  knowledge.
 - **`mcs export`'s brew formula hints are empty** without Linuxbrew: `detectFormula` reads symlinks
   under the Homebrew prefixes.
 - **The PTY is allocated with a 0×0 window size** — the same on macOS, so full-screen TUIs run inside
@@ -469,18 +456,15 @@ import Glibc
 
 Three rules keep this from spreading:
 
-1. **Platform-dependent values and control flow live in six places only** —
+1. **Platform-dependent values and control flow live in five places only** —
    `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`,
-   `Core/Constants.swift`, `Core/ClaudePrerequisite.swift` and `Core/UpdateChecker.swift`.
-   Everything else calls into them. If a seventh file needs a `#if` around a *value or a branch*,
-   that is a sign it belongs in one of these. `TerminalAttributes` is on the list without holding a
-   single `#if`: it owns the termios layout, which differs through `VMIN`/`VTIME`/`tcflag_t` rather
-   than through a branch. `ClaudePrerequisite` and `UpdateChecker` are on it because what differs
-   there is *control flow*, not a value: macOS can offer a Homebrew install of Claude Code and a
-   `brew upgrade` of mcs itself, Linux can do neither, so there is no constant to move.
-   The import chain above is the one `#if` this rule does not cover: a file that calls libc
-   directly (`ShellRunner`, `PTYBridge`, `CLIOutput`, `FileLock`, `GlobMatcher`, and
-   `FileLockTests`) carries it at the top, per D3. It selects the same API from a different module
+   `Core/Constants.swift` and `Core/UpdateChecker.swift`. Everything else calls into them. If another
+   file needs a `#if` around a *value or a branch*, that is a sign it belongs in one of these.
+   `TerminalAttributes` has no branch beyond its import chain: it owns the termios layout, which
+   differs through `VMIN`/`VTIME`/`tcflag_t`. `UpdateChecker` is there because what differs is
+   *control flow*, not a value: macOS upgrades mcs through `brew upgrade`, Linux through the tarball
+   swap in D12. The import chain above is the one `#if` this rule does not cover: a file that calls
+   libc directly carries it at the top, per D3. It selects the same API from a different module
    and encodes no platform behaviour. SHA-256 needs no `#if` at all — swift-crypto's `Crypto` serves
    both platforms, per D1.
 2. **A `#if` is for a value or API that genuinely differs**, never for making a diagnostic go away.

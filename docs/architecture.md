@@ -32,7 +32,7 @@ The primary command is **`mcs sync`**, which handles both global and per-project
 
 ### Environment (`Core/Environment.swift`)
 
-Central path resolution for all file locations. Detects architecture (arm64/x86_64), resolves the Homebrew path, and locates the user's shell RC file. The Homebrew prefix is platform-dependent — `/opt/homebrew` or `/usr/local` on macOS, `/home/linuxbrew/.linuxbrew` on Linux — and is derived from a `brew` on `PATH` when there is one, resolving symlinks and stripping a trailing `Homebrew` component (see [Linux support, D7](linux-support.md#d7--homebrew-on-linux)). Key paths:
+Central path resolution for all file locations. Detects architecture (arm64/x86_64), resolves the Homebrew path, and locates the user's shell RC file. The Homebrew prefix is derived from a `brew` on `PATH` when there is one, resolving symlinks and stripping a trailing `Homebrew` component, and falls back to `Homebrew.defaultPrefix` otherwise (see [Linux support, D7](linux-support.md#d7--homebrew-on-linux)). Key paths:
 
 - `~/.claude/` — Claude Code configuration directory
 - `~/.claude/settings.json` — user settings (global)
@@ -97,11 +97,11 @@ Written by `mcs sync` after convergence.
 
 ### Locked (`Core/Locked.swift`)
 
-A value guarded by an `NSLock`, with the `withLock { $0 }` shape of `OSAllocatedUnfairLock`, which is Darwin-only. Used by `WarningCounter` and by `ScriptRunner`'s timeout flag. `Synchronization.Mutex` would be the modern answer but is macOS 15+, above this package's deployment target.
+A value guarded by an `NSLock`, used by `WarningCounter` and by `ScriptRunner`'s timeout flag. See [Linux support, D2](linux-support.md#d2--lockedvalue-replaces-osallocatedunfairlock) for why it is not `OSAllocatedUnfairLock` or `Synchronization.Mutex`.
 
 ### TerminalAttributes (`Core/TerminalAttributes.swift`)
 
-termios helpers for the raw-mode picker. `c_cc` is a fixed-size tuple whose length and element order are platform-defined and `tcflag_t` differs in width, so the control-character index comes from the platform's own `VMIN`/`VTIME` and every flag mask is widened through `tcflag_t`.
+termios helpers for the raw-mode pickers. `c_cc` is a fixed-size tuple whose length and element order are platform-defined and `tcflag_t` differs in type, so the control-character index comes from the platform's own `VMIN`/`VTIME` and every flag mask is converted through `tcflag_t`.
 
 ### Backup (`Core/Backup.swift`)
 
@@ -383,7 +383,7 @@ The codebase uses Swift 6's strict concurrency. All core types conform to `Senda
 
 ## Platform Support
 
-`mcs` builds for macOS 13+ and for Linux (glibc, x86_64 and aarch64). Platform-dependent knowledge is confined to `Core/TerminalAttributes.swift`, `Core/Environment.swift`, `Core/Homebrew.swift`, `Core/Constants.swift`, `Core/ClaudePrerequisite.swift` and `Core/UpdateChecker.swift`; everything else calls into them. `swift-crypto` supplies SHA-256 on both platforms — it re-exports CryptoKit on Darwin, so no conditional import is needed. See [Linux support](linux-support.md) for the compatibility matrix, the decisions behind each platform branch, and the rules for adding a new one.
+`mcs` builds for macOS 13+ and for Linux (glibc, x86_64 and aarch64). Which files may hold platform-dependent code, and how to add a new platform branch, is in [Linux support, section 7](linux-support.md#7-how-to-add-a-platform-specific-path); the rest of that document covers the compatibility matrix and the decisions behind each branch.
 
 ---
 
