@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 /// Higher-level wrapper around `ShellRunner` for executing scripts from external packs.
 /// Adds pack-specific concerns: path containment validation, standard environment
@@ -187,7 +186,7 @@ struct ScriptRunner {
 
         // Best-effort killer — see `exceededTimeout` for why the verdict does not rely on it.
         let start = ProcessInfo.processInfo.systemUptime
-        let killerFired = OSAllocatedUnfairLock(initialState: false)
+        let killerFired = Locked(false)
         let workItem = DispatchWorkItem { [process] in
             if process.isRunning {
                 killerFired.withLock { $0 = true }
