@@ -3,10 +3,6 @@ name: Linux Smoke
 # Manual only: this is the Linux acceptance check behind docs/linux-support.md's compatibility
 # matrix. It exercises whole command flows against a real pack, which the unit suite cannot.
 on:
-  # TEMPORARY, reverted before merge: workflow_dispatch only reaches workflows that already exist on
-  # the default branch, so this is the one way to exercise the job while it is still only on a branch.
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       runner:
@@ -27,13 +23,8 @@ env:
 
 jobs:
   smoke:
-    name: Smoke (${{ matrix.runner }})
-    # `inputs.runner` is empty on a pull_request event, so the matrix falls back to both runners.
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        runner: ${{ inputs.runner && fromJSON(format('["{0}"]', inputs.runner)) || fromJSON('["ubuntu-22.04","ubuntu-22.04-arm"]') }}
+    name: Smoke (${{ inputs.runner }})
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v7
 
