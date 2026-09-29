@@ -247,7 +247,7 @@ jobs:
           TAG_NAME: ${{ github.ref_name }}
         run: |
           # sha256sum, not shasum: identical "<hash>  <file>" output and present on every runner.
-          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum -- *.tar.gz > SHA256SUMS
           cat SHA256SUMS
           echo "TARBALL=mcs-${TAG_NAME}-macos-universal.tar.gz" >> "$GITHUB_ENV"
 
@@ -261,7 +261,7 @@ jobs:
             --repo "${{ github.repository }}" \
             --verify-tag \
             --notes "${NOTES}" \
-            *.tar.gz SHA256SUMS
+            ./*.tar.gz SHA256SUMS
 
       - name: Update Homebrew tap
         env:

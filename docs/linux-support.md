@@ -23,8 +23,9 @@ says how.
 
 CI runs `swift build`, the full test suite and the release build on both Linux architectures for
 every pull request, alongside the two macOS jobs. The `Linux Smoke` workflow (manual dispatch) runs
-whole command flows against a real pack; it is what the matrix below rests on. Lint runs on macOS only: SwiftFormat and SwiftLint give the same verdicts on both, so a
-second run would only add version skew.
+whole command flows against a real pack; it is what the matrix below rests on. Lint runs on Linux only: both
+linters publish static Linux binaries, and the two platforms give the same verdicts, so a second run
+would only add version skew.
 
 ## 2. Prerequisites
 
