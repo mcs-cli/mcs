@@ -160,6 +160,14 @@ enum Constants {
 
         /// The Homebrew formula name for mcs.
         static let brewFormula = "mcs-cli/tap/mcs"
+
+        /// Where the release tarballs are published.
+        static let releasesURL = "https://github.com/mcs-cli/mcs/releases/latest"
+
+        /// The download URL of one asset attached to a tagged release.
+        static func assetURL(tag: String, asset: String) -> String {
+            "https://github.com/mcs-cli/mcs/releases/download/\(tag)/\(asset)"
+        }
     }
 
     // MARK: - Plugins

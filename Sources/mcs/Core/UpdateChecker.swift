@@ -25,7 +25,52 @@ struct UpdateChecker {
     static let hookTimeout: Int = 30
     static let hookStatusMessage = "Checking for updates..."
 
-    static let cliUpgradeCommands = ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
+    /// Commands that upgrade the mcs binary in place, or `[]` when this install offers no upgrade
+    /// path mcs can hand over — the caller then points at the releases page instead.
+    ///
+    /// Claude runs these after asking the user, so the Linux form has to be safe in a shell it does
+    /// not own: the tarball member goes to a sibling temp file rather than over the live binary,
+    /// its `--version` runs before anything is replaced, and the final `mv` is a same-directory
+    /// rename, which is atomic and legal while the old binary is still mapped.
+    static func cliUpgradeCommands(toVersion version: String) -> [String] {
+        #if canImport(Darwin)
+        ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
+        #else
+        guard let path = installedBinaryPath else { return [] }
+        let directory = (path as NSString).deletingLastPathComponent
+        let staged = "\(directory)/.mcs-upgrade"
+        let url = Constants.MCSRepo.assetURL(tag: version, asset: "mcs-\(version)-linux-\(releaseArch).tar.gz")
+        let script = "curl -fsSL \(url) | tar -xzO mcs > \(staged)"
+            + " && chmod +x \(staged) && \(staged) --version && mv -f \(staged) \(path)"
+        // Writing as the user keeps the binary's ownership; sudo only where the directory forbids it.
+        return FileManager.default.isWritableFile(atPath: directory) ? [script] : ["sudo sh -c '\(script)'"]
+        #endif
+    }
+
+    /// The architecture slug used in the Linux release asset names.
+    static var releaseArch: String {
+        #if arch(arm64)
+        "aarch64"
+        #else
+        "x86_64"
+        #endif
+    }
+
+    /// Where this process's binary lives, read from the kernel rather than `argv[0]`, which a
+    /// caller controls. Darwin has no equivalent that is worth trusting here, and does not need
+    /// one: Homebrew owns the upgrade there.
+    static var installedBinaryPath: String? {
+        #if canImport(Darwin)
+        nil
+        #else
+        do {
+            return try FileManager.default.destinationOfSymbolicLink(atPath: "/proc/self/exe")
+        } catch {
+            return nil
+        }
+        #endif
+    }
+
     static let manualPackUpdateCommand = "mcs update --all-projects"
     static let hookPackUpdateCommand = "mcs update -a --trust-all"
 
@@ -600,10 +645,11 @@ struct UpdateChecker {
         } else {
             // User-invoked: colored output for terminal readability
             if let cli = result.cliUpdate {
-                output.warn(
-                    "mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). "
-                        + "Run '\(cliUpgradeCommands.joined(separator: " && "))' to update."
-                )
+                let commands = cliUpgradeCommands(toVersion: cli.latestVersion)
+                let how = commands.isEmpty
+                    ? "Download the latest release from \(Constants.MCSRepo.releasesURL)."
+                    : "Run '\(commands.joined(separator: " && "))' to update."
+                output.warn("mcs \(cli.latestVersion) available (current: \(cli.currentVersion)). " + how)
             }
             if !result.packUpdates.isEmpty {
                 let noun = result.packUpdates.count == 1 ? "pack update" : "pack updates"
@@ -636,7 +682,14 @@ struct UpdateChecker {
             lines.append(
                 "- New mcs version \(cli.latestVersion) is available (installed: \(cli.currentVersion))."
             )
-            commands += cliUpgradeCommands
+            let upgrade = cliUpgradeCommands(toVersion: cli.latestVersion)
+            if upgrade.isEmpty {
+                lines.append(
+                    "  There is no upgrade command for this install; it has to be downloaded from"
+                        + " \(Constants.MCSRepo.releasesURL)."
+                )
+            }
+            commands += upgrade
         }
         let hasPackUpdates = !result.packUpdates.isEmpty
         if hasPackUpdates {
@@ -647,6 +700,10 @@ struct UpdateChecker {
         }
         lines.append("- To stop these notifications, run: mcs config set update-check false")
         lines.append("")
+        guard !commands.isEmpty else {
+            lines.append("There is nothing to run, so do not ask a question; continue with the user's request.")
+            return lines.joined(separator: "\n")
+        }
         lines.append(
             "Then make the AskUserQuestion tool your first tool call: one yes/no question asking whether to"
                 + " apply all of these updates now. If AskUserQuestion is unavailable, ask in plain text and"
