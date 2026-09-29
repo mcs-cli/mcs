@@ -13,6 +13,10 @@ concurrency:
 env:
   # Keep in sync with release.yml, which pins the same toolchain for the release build.
   SWIFT_VERSION: '6.2.0'
+  # Pinned so a lint verdict is a function of the repo: a new rule lands when this is bumped,
+  # not when upstream tags a release mid-review.
+  SWIFTLINT_VERSION: '0.65.1'
+  SWIFTFORMAT_VERSION: '0.63.0'
 
 jobs:
   lint:
@@ -24,27 +28,26 @@ jobs:
       - name: Install linters
         # Both projects publish fully static Linux binaries, so linting needs no Swift toolchain.
         # SwiftLint's archive carries a dynamically linked `swiftlint` next to `swiftlint-static`;
-        # only the static one runs without the Swift runtime installed. Tracking the newest release
-        # rather than a pin keeps the macOS behaviour this job replaces, where brew always upgraded.
+        # only the static one runs without the Swift runtime installed.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/linters/bin"
           cd "$RUNNER_TEMP/linters"
-          gh release download --repo realm/SwiftLint --pattern swiftlint_linux_amd64.zip
-          gh release download --repo nicklockwood/SwiftFormat --pattern swiftformat_linux.zip
+          gh release download "$SWIFTLINT_VERSION" --repo realm/SwiftLint --pattern swiftlint_linux_amd64.zip
+          gh release download "$SWIFTFORMAT_VERSION" --repo nicklockwood/SwiftFormat --pattern swiftformat_linux.zip
           unzip -q swiftlint_linux_amd64.zip -d swiftlint-zip
           unzip -q swiftformat_linux.zip -d swiftformat-zip
           install -m 0755 swiftlint-zip/swiftlint-static bin/swiftlint
           install -m 0755 swiftformat-zip/swiftformat_linux bin/swiftformat
           echo "$RUNNER_TEMP/linters/bin" >> "$GITHUB_PATH"
 
-      # Recorded because the job tracks the newest release: a verdict that changed without a source
-      # change is explained by the version that produced it.
-      - name: Linter versions
+      # Asserted, not just printed: a pin that silently resolved to something else would make every
+      # later verdict untrustworthy.
+      - name: Verify linter versions
         run: |
-          swiftformat --version
-          swiftlint --version
+          swiftformat --version | grep -qx "$SWIFTFORMAT_VERSION"
+          swiftlint --version | grep -qx "$SWIFTLINT_VERSION"
 
       - name: SwiftFormat
         run: swiftformat --lint --strict .
