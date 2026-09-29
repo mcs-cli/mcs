@@ -63,14 +63,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Dependency *sources* only, and the key is deliberately platform-independent: these are git
+      # clones with no absolute paths, so every macOS and Linux job shares one entry. Compiled
+      # output is not cached — it is not portable across runner or toolchain, and a cold build of
+      # the whole graph costs seconds next to running the suite.
       - uses: actions/cache@v6
         with:
           path: |
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ matrix.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ matrix.os }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Resolve packages
         run: swift package resolve
@@ -103,8 +107,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ matrix.runner }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ matrix.runner }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Swift version
         run: swift --version
@@ -138,8 +142,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Resolve packages
         run: swift package resolve

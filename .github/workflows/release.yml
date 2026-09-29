@@ -74,8 +74,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Resolve packages
         run: swift package resolve
@@ -93,8 +93,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Test
         run: swift test
@@ -120,8 +120,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ matrix.runner }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ matrix.runner }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       # --no-parallel for the reason in docs/linux-support.md: corelibs Foundation leaks write
       # descriptors into concurrently forked children, surfacing as a spurious ETXTBSY.
@@ -141,8 +141,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Build universal binary
         run: |
@@ -197,8 +197,8 @@ jobs:
             .build/checkouts
             .build/repositories
             .build/workspace-state.json
-          key: spm-${{ matrix.runner }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ matrix.runner }}-
+          key: spm-${{ hashFiles('Package.swift') }}
+          restore-keys: spm-
 
       - name: Build release binary
         run: |
