@@ -29,16 +29,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p "$RUNNER_TEMP/linters"
+          mkdir -p "$RUNNER_TEMP/linters/bin"
           cd "$RUNNER_TEMP/linters"
           gh release download --repo realm/SwiftLint --pattern swiftlint_linux_amd64.zip
           gh release download --repo nicklockwood/SwiftFormat --pattern swiftformat_linux.zip
-          unzip -q swiftlint_linux_amd64.zip -d swiftlint
-          unzip -q swiftformat_linux.zip -d swiftformat
-          install -m 0755 swiftlint/swiftlint-static swiftlint-bin
-          install -m 0755 swiftformat/swiftformat_linux swiftformat
-          mv swiftlint-bin swiftlint
-          echo "$RUNNER_TEMP/linters" >> "$GITHUB_PATH"
+          unzip -q swiftlint_linux_amd64.zip -d swiftlint-zip
+          unzip -q swiftformat_linux.zip -d swiftformat-zip
+          install -m 0755 swiftlint-zip/swiftlint-static bin/swiftlint
+          install -m 0755 swiftformat-zip/swiftformat_linux bin/swiftformat
+          echo "$RUNNER_TEMP/linters/bin" >> "$GITHUB_PATH"
 
       # Recorded because the job tracks the newest release: a verdict that changed without a source
       # change is explained by the version that produced it.
