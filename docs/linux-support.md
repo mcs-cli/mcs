@@ -100,7 +100,10 @@ quarter more wall-clock time (42s against 34s here).
 
 ## 4. Compatibility matrix
 
-Legend: `verified` — run on Linux and observed; `verified (with a difference)` — works, but not identically to macOS; the Notes column says how.
+Legend: `verified` — run on Linux and observed; `verified (with a difference)` — works, but not
+identically to macOS; the Notes column says how. The rows for whole command flows come from the
+`Linux Smoke` workflow, which runs them against a real pack on `ubuntu-22.04` and
+`ubuntu-22.04-arm`; re-dispatch it rather than trusting this table after a behavioural change.
 
 | Feature | macOS | Linux | Notes |
 |---|---|---|---|
@@ -126,6 +129,13 @@ Legend: `verified` — run on Linux and observed; `verified (with a difference)`
 | `mcs export` (incl. brew formula hints) | supported | verified (with a difference) | Exported `techpack.yaml`, hooks, skill, command, agent, settings and template from a live project. The brew formula hints are empty without Linuxbrew — `detectFormula` reads symlinks under the Linuxbrew prefixes. |
 | `mcs cleanup` | supported | verified | Found and deleted a `CLAUDE.local.md.backup.*` file, with and without `--force`. |
 | `mcs check-updates` + SessionStart hook | supported | verified (with a difference) | `check-updates`, `--json` and `--hook` all run; `mcs config set update-check true` registered `mcs check-updates --hook` in `~/.claude/settings.json` and the cooldown file was written. The upgrade command differs: `brew upgrade` on macOS, a staged tarball swap on Linux — see ADR D12. |
+| `mcs bootstrap` | supported | verified | `mcs.yaml` with a seeded `values:` entry: the pack installed and the skill body carried the seeded value, with "Reusing 1 previously configured value(s)". |
+| `mcs bootstrap --trust-all` | supported | verified | Ran with no TTY; the pack's executable content was approved without a prompt. |
+| `mcs sync --pack --prune --yes` | supported | verified | Made the named pack the exact set and skipped the removal confirmation. |
+| `mcs doctor --fix --yes` (re-sync) | supported | verified | `6 passed  0 warnings  0 issues` before and after, so the re-sync path is idempotent. |
+| `mcs update --trust-all` | supported | verified | `mcs update --project --trust-all` re-applied the scope with no trust prompt. |
+| `mcs pack list --json` | supported | verified | Machine-readable output including `isLocal` and the `local` commit sentinel. |
+| Non-interactive prompt resolution | supported | verified | `mcs sync --all < /dev/null` resolved every key from the stored prior instead of blocking on stdin. |
 | `mcs config` | supported | verified | `list` / `get` / `set` against `~/.mcs/config.yaml`. |
 | `$HOME` override | supported (behavior change) | verified | `mcs` resolves its home from `$HOME`, falling back to the passwd entry, on both platforms — including a `~` typed in a pack path or a pack's doctor `path:`. Previously `$HOME` was ignored everywhere (ADR D11). |
 | File lock (`flock`) | supported | verified | Two concurrent syncs: the second exited 1 with "Another mcs process is running". |
