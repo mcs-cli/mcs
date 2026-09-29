@@ -17,6 +17,17 @@ struct HomebrewTests {
 
     // MARK: - allPrefixes
 
+    @Test("The fallback prefix is the platform's own default")
+    func defaultPrefixPerPlatform() {
+        #if canImport(Darwin) && arch(arm64)
+        #expect(Homebrew.defaultPrefix == "/opt/homebrew")
+        #elseif canImport(Darwin)
+        #expect(Homebrew.defaultPrefix == "/usr/local")
+        #else
+        #expect(Homebrew.defaultPrefix == "/home/linuxbrew/.linuxbrew")
+        #endif
+    }
+
     @Test("allPrefixes lists this platform's Homebrew locations")
     func allPrefixesPerPlatform() {
         let home = URL(fileURLWithPath: "/tmp/mcs-home")

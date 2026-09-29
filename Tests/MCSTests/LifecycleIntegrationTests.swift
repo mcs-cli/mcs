@@ -23,13 +23,12 @@ private struct LifecycleTestBed {
 
     func makeConfigurator(
         registry: TechPackRegistry = TechPackRegistry(),
-        warningCounter: WarningCounter? = nil,
-        shell: (any ShellRunning)? = nil
+        warningCounter: WarningCounter? = nil
     ) -> Configurator {
         Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
-            shell: shell ?? ShellRunner(environment: env),
+            shell: ShellRunner(environment: env),
             registry: registry,
             strategy: ProjectSyncStrategy(projectPath: project, environment: env),
             claudeCLI: mockCLI
@@ -3306,11 +3305,8 @@ struct BrewPackageDoctorTests {
         #expect(summary.issues == 0)
     }
 
-    /// The Linux happy path in one assertion: a `brew:` component whose command is on PATH is
-    /// satisfied without Homebrew existing at all, which is what makes `brew:` usable on a machine
-    /// that has no brew. Global scope, because that is where `configure` installs brew packages
-    /// inline. The package name is deliberately one no machine has, so the mocked PATH hit — not
-    /// the real machine — is what decides the outcome.
+    /// A `brew:` component whose command is on PATH needs no Homebrew at all — what makes `brew:`
+    /// usable on Linux. The package name is one no machine has, so the mocked PATH hit decides it.
     @Test("A brew package satisfied on PATH spawns no brew subprocess")
     func pathSatisfiedBrewPackageSpawnsNoSubprocess() throws {
         let bed = try LifecycleTestBed()
