@@ -48,6 +48,7 @@ Only check items that apply to this PR. Delete irrelevant ones.
 - [ ] Any `fix()` implementation does cleanup/migration only — never installs or registers resources
 - [ ] State migrations are guarded by `isNeeded()` to stay idempotent with `mcs sync`
 - [ ] Integration tests updated for new features (`LifecycleIntegrationTests` or `DoctorRunnerIntegrationTests`)
+- [ ] `Linux Smoke` updated and re-dispatched if a command, flag contract, or manifest key changed, and the matrix row in `docs/linux-support.md` updated from the run
 - [ ] New file write/copy/delete paths use `PathContainment.safePath()` and handle the `nil` (escape) case
 - [ ] Docs updated if behavior changed (`CLAUDE.md`, `docs/`, `techpack.yaml` schema in `ExternalPackManifest.swift`)
 
