@@ -1218,7 +1218,8 @@ struct UpdateCheckerContextStringTests {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
         )
-        #expect(context.contains("On yes, run: \(UpdateChecker.cliUpgradeCommands.joined(separator: " && "))\n"))
+        let upgrade = UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0")
+        #expect(context.contains("On yes, run: \(upgrade.joined(separator: " && "))\n"))
         #expect(context.contains("AskUserQuestion"))
         #expect(context.contains("mcs config set update-check false"))
         #expect(!context.contains("--trust-all"))
@@ -1235,11 +1236,38 @@ struct UpdateCheckerContextStringTests {
         #expect(context.contains("On yes, run: \(UpdateChecker.hookPackUpdateCommand)\n"))
         #expect(context.contains("without review"))
         #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
-        #expect(!context.contains(UpdateChecker.cliUpgradeCommands[1]))
+        for command in UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0") {
+            #expect(!context.contains(command))
+        }
         let doctor = try #require(context.range(of: "'mcs doctor'"))
         let cleanup = try #require(context.range(of: "mcs cleanup -af"))
         #expect(doctor.lowerBound < cleanup.lowerBound)
         #expect(context.contains("mcs doctor --fix --yes"))
+    }
+
+    @Test("The upgrade command matches how this platform ships mcs")
+    func upgradeCommandShapePerPlatform() throws {
+        let commands = UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0")
+        #if canImport(Darwin)
+        #expect(commands == ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"])
+        #else
+        let path = try #require(UpdateChecker.installedBinaryPath)
+        let command = try #require(commands.first)
+        #expect(commands.count == 1)
+        #expect(command.contains("mcs-2.0.0-linux-\(UpdateChecker.releaseArch).tar.gz"))
+        // Staged, verified, then renamed — nothing is ever written over the live binary.
+        #expect(command.contains("--version &&"))
+        #expect(command.hasSuffix(path))
+        #endif
+    }
+
+    @Test("Nothing to run means no question is asked")
+    func noCommandsSkipTheAsk() {
+        let context = UpdateChecker.buildContextString(
+            UpdateChecker.CheckResult(packUpdates: [], cliUpdate: nil)
+        )
+        #expect(!context.contains("On yes, run:"))
+        #expect(!context.contains("AskUserQuestion"))
     }
 
     @Test("CLI upgrade chains before the pack update and the request resumes last")
@@ -1247,7 +1275,7 @@ struct UpdateCheckerContextStringTests {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: cliUpdate)
         )
-        let chain = (UpdateChecker.cliUpgradeCommands + [UpdateChecker.hookPackUpdateCommand])
+        let chain = (UpdateChecker.cliUpgradeCommands(toVersion: "2.0.0") + [UpdateChecker.hookPackUpdateCommand])
             .joined(separator: " && ")
         #expect(context.contains("On yes, run: \(chain)\n"))
         #expect(context.hasSuffix("continue with the user's original request."))
