@@ -3,6 +3,13 @@ import Foundation
 import Testing
 
 struct ProjectDetectorTests {
+    /// Compared as paths, not URLs: corelibs Foundation flags a directory URL produced by
+    /// deletingLastPathComponent() with a trailing slash that standardizedFileURL does not strip,
+    /// so two URLs for the same directory are unequal on Linux.
+    private func samePath(_ found: URL?, _ expected: URL) -> Bool {
+        found?.standardizedFileURL.path == expected.standardizedFileURL.path
+    }
+
     private func makeTmpDir() throws -> URL {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("mcs-projdetect-test-\(UUID().uuidString)")
@@ -24,11 +31,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: sourcesDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: sourcesDir)
-        // Compared as paths, not URLs: corelibs Foundation flags a directory URL produced by
-        // deletingLastPathComponent() with a trailing slash that standardizedFileURL does not
-        // strip, so two URLs for the same directory are unequal on Linux. The product compares
-        // paths for the same reason (PathContainment, Environment.isInsideClaudeHome).
-        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Finds project root via CLAUDE.local.md")
@@ -45,7 +48,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Finds project root via .claude/.mcs-project")
@@ -64,7 +67,7 @@ struct ProjectDetectorTests {
         try FileManager.default.createDirectory(at: subDir, withIntermediateDirectories: true)
 
         let root = ProjectDetector.findProjectRoot(from: subDir)
-        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
+        #expect(samePath(root, tmpDir))
     }
 
     @Test("Prefers .git over CLAUDE.local.md at same level")
@@ -82,7 +85,7 @@ struct ProjectDetectorTests {
         )
 
         let root = ProjectDetector.findProjectRoot(from: tmpDir)
-        #expect(root?.standardizedFileURL.path == tmpDir.standardizedFileURL.path)
+        #expect(samePath(root, tmpDir))
     }
 }
 

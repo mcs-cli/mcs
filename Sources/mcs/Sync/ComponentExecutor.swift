@@ -155,8 +155,7 @@ struct ComponentExecutor {
                 withIntermediateDirectories: true
             )
 
-            var isDir: ObjCBool = false
-            let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
+            let sourceIsDirectory = Self.isDirectory(source)
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
 
@@ -238,8 +237,7 @@ struct ComponentExecutor {
                 withIntermediateDirectories: true
             )
 
-            var isDir: ObjCBool = false
-            let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
+            let sourceIsDirectory = Self.isDirectory(source)
             var installedPaths: [String] = []
             var shippedFiles: [String] = []
             var installedHashes: [String: String] = [:]
@@ -322,8 +320,7 @@ struct ComponentExecutor {
         values: [String: String]
     ) throws {
         let fm = FileManager.default
-        var isDir: ObjCBool = false
-        let sourceIsDirectory = fm.fileExists(atPath: source.path, isDirectory: &isDir) && isDir.boolValue
+        let sourceIsDirectory = Self.isDirectory(source)
 
         if sourceIsDirectory {
             try fm.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -414,5 +411,10 @@ struct ComponentExecutor {
         }
 
         return false
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 }

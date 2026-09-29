@@ -206,50 +206,26 @@ struct ShellRunner: ShellRunning {
         environment env: [String: String],
         workingDirectory: String?
     ) -> ShellResult {
-        // Prepare environment and argv as C strings for execve().
+        // After fork() only async-signal-safe calls are legal, so every C string the child needs is
+        // allocated and checked here, in the parent: a NULL mid-vector would silently truncate it at
+        // execve. Glibc imports `execve`/`chdir` with non-optional parameters, hence the unwrap.
         let envp: [UnsafeMutablePointer<CChar>?] = env.map { key, value in
             strdup("\(key)=\(value)")
         } + [nil]
         defer { envp.compactMap(\.self).forEach { free($0) } }
-
-        // After fork() only async-signal-safe calls are legal, so the child has no way to report
-        // an allocation failure, and a force-unwrap there would trap through the Swift runtime.
-        // Every C string the child needs is therefore allocated and checked here, in the parent —
-        // a nil in the middle of argv or envp would otherwise truncate the vector at execve, which
-        // stops at the first NULL. (Glibc marks the `execve`/`chdir` parameters `__nonnull`, so
-        // Swift imports them non-optional there and rejects the `Optional` Darwin's unannotated
-        // signatures accept.)
-        guard let executablePath = strdup(executable) else {
-            return ShellResult(
-                exitCode: 1, stdout: "", stderr: "Could not allocate the command path for \(executable)"
-            )
-        }
-        let argv: [UnsafeMutablePointer<CChar>?] = [executablePath] + arguments.map { strdup($0) } + [nil]
-        defer { argv.compactMap(\.self).forEach { free($0) } } // frees executablePath too — it is argv[0]
+        let argv: [UnsafeMutablePointer<CChar>?] = ([executable] + arguments).map { strdup($0) } + [nil]
+        defer { argv.compactMap(\.self).forEach { free($0) } }
+        let workingDirectoryPath = workingDirectory.flatMap { strdup($0) }
+        defer { workingDirectoryPath.map { free($0) } }
 
         // dropLast() skips the NULL terminator each vector deliberately ends with.
-        guard !argv.dropLast().contains(where: { $0 == nil }),
-              !envp.dropLast().contains(where: { $0 == nil })
+        guard let executablePath = argv[0],
+              !argv.dropLast().contains(nil),
+              !envp.dropLast().contains(nil),
+              workingDirectory == nil || workingDirectoryPath != nil
         else {
-            return ShellResult(
-                exitCode: 1, stdout: "", stderr: "Could not allocate the command line for \(executable)"
-            )
+            return ShellResult(exitCode: 1, stdout: "", stderr: "Could not allocate the command line for \(executable)")
         }
-
-        // Pre-convert workingDirectory to a C string before fork so the child
-        // doesn't need to invoke Swift's String-to-CString bridge (not fork-safe).
-        let workingDirectoryPath: UnsafeMutablePointer<CChar>?
-        if let workingDirectory {
-            guard let copy = strdup(workingDirectory) else {
-                return ShellResult(
-                    exitCode: 1, stdout: "", stderr: "Could not allocate the working directory path"
-                )
-            }
-            workingDirectoryPath = copy
-        } else {
-            workingDirectoryPath = nil
-        }
-        defer { workingDirectoryPath.map { free($0) } }
 
         // Save the terminal's current attributes so we can restore them after.
         var originalTermios = termios()

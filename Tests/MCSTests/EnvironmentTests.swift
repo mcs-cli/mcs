@@ -121,16 +121,6 @@ struct EnvironmentTests {
         #expect(Environment.defaultHomeDirectory(environment: ["HOME": "relative/home"]) == NSHomeDirectory())
     }
 
-    @Test("Environment derives every path from the resolved home")
-    func environmentUsesResolvedHome() {
-        let home = Environment.defaultHomeDirectory(environment: ["HOME": "/sandbox/home"])
-        let env = Environment(home: URL(fileURLWithPath: home))
-
-        #expect(env.homeDirectory.path == "/sandbox/home")
-        #expect(env.claudeDirectory.path == "/sandbox/home/.claude")
-        #expect(env.mcsDirectory.path == "/sandbox/home/.mcs")
-    }
-
     @Test("The default initializer wires the resolved home through")
     func defaultInitUsesDefaultHomeDirectory() {
         #expect(Environment().homeDirectory.path == Environment.defaultHomeDirectory())
@@ -196,36 +186,5 @@ struct EnvironmentTests {
     @Test("brewPrefix handles a real file at $PREFIX/bin/brew (arm64 macOS shape)")
     func brewPrefixForRealFile() {
         #expect(Environment.brewPrefix(forBrewPath: "/opt/homebrew/bin/brew") == "/opt/homebrew")
-    }
-
-    @Test("The fallback prefix is the platform's own default")
-    func defaultBrewPrefixPerPlatform() {
-        #if canImport(Darwin) && arch(arm64)
-        #expect(Homebrew.defaultPrefix == "/opt/homebrew")
-        #elseif canImport(Darwin)
-        #expect(Homebrew.defaultPrefix == "/usr/local")
-        #else
-        #expect(Homebrew.defaultPrefix == "/home/linuxbrew/.linuxbrew")
-        #endif
-    }
-
-    @Test("pathWithBrew prepends the prefix bin directory exactly once")
-    func pathWithBrewPrependsOnce() throws {
-        let home = try makeTmpHome()
-        defer { try? FileManager.default.removeItem(at: home) }
-        let env = Environment(home: home)
-
-        let brewBin = "\(env.brewPrefix)/bin"
-        let currentPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
-        let path = env.pathWithBrew
-
-        // Asserted against the ambient PATH rather than a fixed shape: a developer whose profile
-        // is sourced twice genuinely has the brew bin in there more than once, and that is not a
-        // failure of this code.
-        if currentPath.contains(brewBin) {
-            #expect(path == currentPath, "an already-present brew bin must not be prepended again")
-        } else {
-            #expect(path.hasPrefix("\(brewBin):"))
-        }
     }
 }

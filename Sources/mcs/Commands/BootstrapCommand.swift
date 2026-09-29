@@ -34,7 +34,7 @@ struct BootstrapCommand: LockedCommand {
         // Dry-run must not trigger the Homebrew install prompt for Claude Code — that
         // would violate the no-changes contract on a preview.
         if !dryRun {
-            guard try ensureClaudeCLI(shell: ctx.shell, environment: ctx.env, output: ctx.output) else {
+            guard ensureClaudeCLI(shell: ctx.shell, output: ctx.output) else {
                 throw ExitCode.failure
             }
         }

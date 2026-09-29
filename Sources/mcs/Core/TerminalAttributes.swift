@@ -4,7 +4,7 @@ import Darwin
 import Glibc
 #endif
 
-/// termios helpers shared by the raw-mode picker.
+/// termios helpers for the raw-mode pickers.
 ///
 /// `c_cc` imports as a fixed-size tuple whose length and element order are platform-defined
 /// (`NCCS` is 20 on Darwin and 32 on Glibc; `VMIN` is index 16 on Darwin and 6 on Glibc), so the
@@ -12,15 +12,7 @@ import Glibc
 /// differs — `UInt` on Darwin, `UInt32` on Glibc — so every flag mask is converted through
 /// `tcflag_t(...)`.
 enum TerminalAttributes {
-    /// Reads one control character. Exists for `TerminalAttributesTests`: asserting raw mode
-    /// without a TTY is the only way to cover this on both platforms.
-    static func controlCharacter(_ attributes: termios, _ index: Int32) -> cc_t {
-        withUnsafeBytes(of: attributes.c_cc) { raw in
-            raw.bindMemory(to: cc_t.self)[Int(index)]
-        }
-    }
-
-    static func setControlCharacter(_ attributes: inout termios, _ index: Int32, to value: cc_t) {
+    private static func setControlCharacter(_ attributes: inout termios, _ index: Int32, to value: cc_t) {
         withUnsafeMutableBytes(of: &attributes.c_cc) { raw in
             raw.bindMemory(to: cc_t.self)[Int(index)] = value
         }

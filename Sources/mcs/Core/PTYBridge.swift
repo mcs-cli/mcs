@@ -15,7 +15,7 @@ import Glibc
 /// readable data is always drained before the descriptor is dropped.
 enum PTYBridge {
     /// What to do with the user's terminal this iteration.
-    enum StdinAction: Equatable {
+    enum StdinAction {
         /// Bytes are waiting; forward them to the child.
         case forward
         /// Nothing to read and nothing coming; stop polling the descriptor.
@@ -24,7 +24,7 @@ enum PTYBridge {
     }
 
     /// What to do with the child's PTY this iteration.
-    enum PTYAction: Equatable {
+    enum PTYAction {
         /// Output is waiting, or the child hung up with output possibly still buffered.
         case read
         /// The descriptor errored or is invalid, with nothing left to read; the bridge ends.

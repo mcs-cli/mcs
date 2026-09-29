@@ -57,7 +57,7 @@ struct SyncCommand: LockedCommand {
         let output = CLIOutput()
         let shell = ShellRunner(environment: env)
 
-        guard try ensureClaudeCLI(shell: shell, environment: env, output: output) else {
+        guard ensureClaudeCLI(shell: shell, output: output) else {
             throw ExitCode.failure
         }
 

@@ -725,7 +725,7 @@ struct DoctorRunner {
         }
         guard !resyncs.isEmpty else { return }
         // An injected CLI stands in for the real binary; only the real one needs installing.
-        if claudeCLI == nil, try !ensureClaudeCLI(shell: shell, environment: environment, output: output) {
+        if claudeCLI == nil, !ensureClaudeCLI(shell: shell, output: output) {
             for check in resyncs.flatMap(\.checks) {
                 docFixFailed(check.name, "re-sync needs the Claude Code CLI")
             }

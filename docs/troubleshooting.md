@@ -47,17 +47,12 @@ If you manage Node.js through nvm or similar, make sure it's available in your P
 
 **Symptom**: MCP servers and plugins can't be registered.
 
-**Fix on macOS**:
-```bash
-brew install claude-code
-```
-
-**Fix on Linux**: `claude-code` is a Homebrew cask, and Linuxbrew has no casks, so mcs does not offer a brew install there. Use the native installer or npm:
+**Fix**: install it with the native installer, the one install that keeps itself updated. mcs prints this command but never runs it for you:
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
-# or
-npm install -g @anthropic-ai/claude-code
 ```
+
+Homebrew, npm, apt and dnf also work, but they don't update themselves. See the [Claude Code setup guide](https://code.claude.com/docs/en/setup).
 
 Verify:
 ```bash
