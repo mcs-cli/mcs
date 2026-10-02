@@ -164,6 +164,15 @@ enum Constants {
 
     // MARK: - Plugins
 
+    /// Claude Code plugin install scopes.
+    enum PluginScope {
+        /// Enabled only in the project the install ran in (`settings.local.json` there).
+        static let local = "local"
+
+        /// Enabled in every project (`~/.claude/settings.json`).
+        static let user = "user"
+    }
+
     enum Plugins {
         /// The official Anthropic plugin marketplace identifier.
         static let officialMarketplace = "claude-plugins-official"

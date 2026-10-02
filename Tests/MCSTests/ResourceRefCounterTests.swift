@@ -37,18 +37,6 @@ private func brewComponent(id: String, pack: String, package: String) -> Compone
     )
 }
 
-/// Creates a ComponentDefinition with a plugin install action.
-private func pluginComponent(id: String, pack: String, pluginName: String) -> ComponentDefinition {
-    ComponentDefinition(
-        id: id,
-        displayName: pluginName,
-        description: "Plugin: \(pluginName)",
-        type: .plugin,
-        packIdentifier: pack,
-        installAction: .plugin(name: pluginName)
-    )
-}
-
 /// Creates a ComponentDefinition with a gitignore-entries install action.
 private func gitignoreComponent(id: String, pack: String, entries: [String]) -> ComponentDefinition {
     ComponentDefinition(
@@ -158,62 +146,6 @@ struct ResourceRefCounterTests {
     }
 
     // MARK: - Plugin needed by two projects → keep
-
-    @Test("Plugin needed by another project is kept")
-    func pluginTwoProjects() throws {
-        let home = try makeTmpHome()
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let env = Environment(home: home)
-
-        // Create two real project directories
-        let projectA = home.appendingPathComponent("project-a")
-        let projectB = home.appendingPathComponent("project-b")
-        try FileManager.default.createDirectory(at: projectA, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: projectB, withIntermediateDirectories: true)
-
-        // Both projects use pack-x which declares the plugin
-        try writeProjectState(projectRoot: projectA, packs: ["pack-x"])
-        try writeProjectState(projectRoot: projectB, packs: ["pack-x"])
-
-        // Empty global state (no global packs)
-        try writeGlobalState(home: home, packs: [])
-
-        // Index tracks both projects
-        try writeIndex(home: home, entries: [
-            (projectA.path, ["pack-x"]),
-            (projectB.path, ["pack-x"]),
-        ])
-
-        let registry = TechPackRegistry(packs: [
-            StubTechPack(
-                identifier: "pack-x",
-                displayName: "Pack X",
-                description: "Test",
-                components: [
-                    pluginComponent(
-                        id: "x.plugin", pack: "pack-x",
-                        pluginName: "anthropics/claude-plugins-official/pr-review-toolkit"
-                    ),
-                ]
-            ),
-        ])
-
-        let counter = ResourceRefCounter(
-            environment: env,
-            output: CLIOutput(),
-            registry: registry
-        )
-
-        // Removing from project-a — project-b still needs it
-        let result = counter.isStillNeeded(
-            .plugin("anthropics/claude-plugins-official/pr-review-toolkit"),
-            excludingScope: projectA.path,
-            excludingPack: "pack-x"
-        )
-
-        #expect(result, "Should be kept — project-b still uses pack-x which declares the plugin")
-    }
 
     // MARK: - Same pack in global + project → both counted
 
@@ -519,62 +451,6 @@ struct ResourceRefCounterTests {
     }
 
     // MARK: - Plugin bare name matching
-
-    @Test("Plugin matching works across different full-name formats")
-    func pluginBareNameMatching() throws {
-        let home = try makeTmpHome()
-        defer { try? FileManager.default.removeItem(at: home) }
-
-        let env = Environment(home: home)
-
-        // Global state: pack-a owns bare name, pack-b owns @ format
-        // PluginRef uses @ as separator: "name@repo/path"
-        try writeGlobalState(home: home, packs: [
-            ("pack-a", PackArtifactRecord(plugins: ["pr-review-toolkit"])),
-            ("pack-b", PackArtifactRecord(plugins: ["pr-review-toolkit@anthropics/claude-plugins-official"])),
-        ])
-
-        try writeIndex(home: home, entries: [
-            (ProjectIndex.globalSentinel, ["pack-a", "pack-b"]),
-        ])
-
-        let registry = TechPackRegistry(packs: [
-            StubTechPack(
-                identifier: "pack-a",
-                displayName: "Pack A",
-                description: "Test",
-                components: [
-                    pluginComponent(id: "a.plugin", pack: "pack-a", pluginName: "pr-review-toolkit"),
-                ]
-            ),
-            StubTechPack(
-                identifier: "pack-b",
-                displayName: "Pack B",
-                description: "Test",
-                components: [
-                    pluginComponent(
-                        id: "b.plugin", pack: "pack-b",
-                        pluginName: "pr-review-toolkit@anthropics/claude-plugins-official"
-                    ),
-                ]
-            ),
-        ])
-
-        let counter = ResourceRefCounter(
-            environment: env,
-            output: CLIOutput(),
-            registry: registry
-        )
-
-        // Removing pack-a — pack-b also has the same plugin (different format)
-        let result = counter.isStillNeeded(
-            .plugin("pr-review-toolkit"),
-            excludingScope: ProjectIndex.globalSentinel,
-            excludingPack: "pack-a"
-        )
-
-        #expect(result, "Should be kept — pack-b has same plugin in different format")
-    }
 
     // MARK: - No other scopes at all → safe to remove
 

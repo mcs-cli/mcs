@@ -227,6 +227,7 @@ struct DoctorRunner {
         }
 
         // Layer 1+2: Derived + supplementary checks from installed components (per scope)
+        let pluginListing = PluginListing(claudeCLI: claudeCLI ?? ClaudeIntegration(shell: ShellRunner(environment: env)))
         for scope in scopes {
             allPackIDs.formUnion(scope.packIDs)
 
@@ -239,7 +240,9 @@ struct DoctorRunner {
             // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
                 for component in pack.components {
-                    if let derived = component.deriveDoctorCheck(projectRoot: scope.effectiveProjectRoot, environment: env) {
+                    if let derived = component.deriveDoctorCheck(
+                        projectRoot: scope.effectiveProjectRoot, environment: env, pluginListing: pluginListing
+                    ) {
                         allChecks.append((check: derived, syncTarget: scope.syncTarget))
                     }
                     allChecks += component.supplementaryChecks(scope.effectiveProjectRoot, env)
