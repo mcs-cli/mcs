@@ -142,9 +142,21 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
         var settings = Settings()
 
-        // Collect top-level keys to prevent Layer 3 re-injection of stale extraJSON keys
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
-        let dropKeys = Set(allPreviousKeys.filter { !$0.contains(".") })
+        let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
+        // Start from what is already there minus what packs owned, as global scope does, so a pack
+        // value merges under the user's (Claude Code writes `permissions` here too) instead of
+        // replacing the whole object.
+        do {
+            var existing = try Settings.load(from: scope.settingsPath)
+            existing.removeKeys(allPreviousKeys)
+            settings.extraJSON = existing.extraJSON
+        } catch {
+            output.warn(
+                "Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)"
+                    + " — its contents will be replaced"
+            )
+        }
 
         let (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
@@ -154,10 +166,12 @@ struct ProjectSyncStrategy: SyncStrategy {
             output: output
         )
 
-        if hasContent {
+        if hasContent || !settings.extraJSON.isEmpty {
             do {
                 try settings.save(to: scope.settingsPath, dropKeys: dropKeys)
-                output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                if hasContent {
+                    output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                }
             } catch {
                 output.error("Could not write \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
                 output.error("Hooks and plugins will not be active. Re-run '\(scope.syncHint)' after fixing the issue.")

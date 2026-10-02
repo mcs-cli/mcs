@@ -478,6 +478,8 @@ struct Configurator {
 
         // Remove auto-derived hook commands and contributed settings keys
         let hasHooksToRemove = !artifacts.hookCommands.isEmpty
+        // Keyed to the record, not its expansion: a legacy key left untouched still has to be
+        // cleared from state, or every later removal warns about it again.
         let hasSettingsToRemove = !artifacts.settingsKeys.isEmpty
         if hasHooksToRemove || hasSettingsToRemove {
             var settings: Settings
@@ -490,6 +492,9 @@ struct Configurator {
                 output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
                 return false
             }
+            let settingsKeys = expandedSettingsKeys(
+                artifacts.settingsKeys, pack: registry.pack(for: packID), packID: packID, onDisk: settings
+            )
             if hasHooksToRemove {
                 let commandsToRemove = Set(artifacts.hookCommands)
                 if var hooks = settings.hooks {
@@ -504,10 +509,10 @@ struct Configurator {
                 }
             }
             if hasSettingsToRemove {
-                settings.removeKeys(artifacts.settingsKeys)
+                settings.removeKeys(settingsKeys)
             }
             do {
-                let dropKeys = Set(artifacts.settingsKeys.filter { !$0.contains(".") })
+                let dropKeys = Settings.topLevelKeys(of: settingsKeys)
                 try settings.save(to: scope.settingsPath, dropKeys: dropKeys)
                 remaining.hookCommands = []
                 remaining.settingsKeys = []
@@ -515,7 +520,7 @@ struct Configurator {
                 for cmd in artifacts.hookCommands {
                     output.dimmed("  Removed hook: \(cmd)")
                 }
-                for key in artifacts.settingsKeys {
+                for key in settingsKeys {
                     output.dimmed("  Removed setting: \(key)")
                 }
             } catch {
@@ -875,11 +880,20 @@ struct Configurator {
         var previousSettingsKeys: [String: [String]] = [:]
         var previousTemplateSections: [String: [String]] = [:]
 
+        // Composition reloads this and reports a parse failure; an unreadable file simply leaves
+        // legacy records unexpanded here.
+        var onDiskSettings = Settings()
+        do {
+            onDiskSettings = try Settings.load(from: scope.settingsPath)
+        } catch {}
+
         for pack in packs {
             let previousArtifacts = state.artifacts(for: pack.identifier)
 
             // Snapshot previous metadata before overwriting (needed by steps 6-7)
-            previousSettingsKeys[pack.identifier] = previousArtifacts?.settingsKeys ?? []
+            previousSettingsKeys[pack.identifier] = expandedSettingsKeys(
+                previousArtifacts?.settingsKeys ?? [], pack: pack, packID: pack.identifier, onDisk: onDiskSettings
+            )
             previousTemplateSections[pack.identifier] = previousArtifacts?.templateSections ?? []
 
             let isNew = additions.contains(pack.identifier)
@@ -1242,6 +1256,15 @@ struct Configurator {
             output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
             return .failed
         }
+    }
+
+    private func expandedSettingsKeys(
+        _ keyPaths: [String], pack: (any TechPack)?, packID: String, onDisk: Settings
+    ) -> [String] {
+        ConfiguratorSupport.expandLegacySettingsKeys(
+            keyPaths, pack: pack, packID: packID, onDisk: onDisk,
+            settingsFileName: scope.settingsPath.lastPathComponent, output: output
+        )
     }
 
     // MARK: - Global Dependencies
