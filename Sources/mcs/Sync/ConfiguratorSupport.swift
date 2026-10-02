@@ -366,7 +366,7 @@ enum ConfiguratorSupport {
         }
 
         // Pass 1: entries derived from component definitions.
-        for (pack, component) in packComponents {
+        for component in packComponents.map(\.component) {
             if let reg = component.hookRegistration,
                let command = component.hookCommand(pathPrefix: hookPathPrefix) {
                 if settings.addHookEntry(
@@ -385,17 +385,6 @@ enum ConfiguratorSupport {
                         output.dimmed("  \(reg.event.rawValue): \(command)")
                     }
                 }
-            }
-
-            if case let .plugin(name) = component.installAction {
-                let ref = PluginRef(name)
-                var plugins = settings.enabledPlugins ?? [:]
-                if plugins[ref.bareName] == nil {
-                    plugins[ref.bareName] = true
-                }
-                settings.enabledPlugins = plugins
-                hasContent = true
-                contributedKeys[pack.identifier, default: []].append("enabledPlugins.\(ref.bareName)")
             }
         }
 
@@ -485,6 +474,29 @@ enum ConfiguratorSupport {
             }
         }
         return expanded
+    }
+
+    /// Install a plugin at `scope` and record it only when this install is what put it there.
+    @discardableResult
+    static func installPlugin(
+        _ name: String,
+        component: ComponentDefinition,
+        scope: String,
+        executor: ComponentExecutor,
+        artifacts: inout PackArtifactRecord,
+        output: CLIOutput
+    ) -> ComponentExecutor.PluginInstallOutcome {
+        let outcome = executor.installPlugin(name, scope: scope)
+        switch outcome {
+        case .installed:
+            artifacts.recordPlugin(name)
+            output.success("  \(component.displayName) installed (scope: \(scope))")
+        case .alreadyInstalled:
+            output.dimmed("  \(component.displayName) already installed, skipping")
+        case .failed:
+            output.warn("  \(component.displayName) failed to install")
+        }
+        return outcome
     }
 
     /// Compute per-pack SHA-256 hashes of contributed settings values from the on-disk file.

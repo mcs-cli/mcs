@@ -183,8 +183,7 @@ extension SyncStrategy {
             return nil
         }
         if !plugins.isEmpty {
-            let suffix = scope.isGlobalScope ? "" : " (global)"
-            output.dimmed("  Plugins:      \(plugins.joined(separator: ", "))\(suffix)")
+            output.dimmed("  Plugins:      \(plugins.joined(separator: ", "))")
         }
 
         let templateSections = pack.templateSectionIdentifiers.map { "+\($0) section" }

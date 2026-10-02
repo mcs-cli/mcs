@@ -13,6 +13,7 @@ struct Configurator {
     var registry: TechPackRegistry
     let strategy: any SyncStrategy
     let claudeCLI: any ClaudeCLI
+    private let pluginListing: PluginListing
 
     init(
         environment: Environment,
@@ -28,6 +29,7 @@ struct Configurator {
         self.registry = registry
         self.strategy = strategy
         self.claudeCLI = claudeCLI ?? ClaudeIntegration(shell: shell)
+        pluginListing = PluginListing(claudeCLI: self.claudeCLI)
     }
 
     private var scope: SyncScope {
@@ -421,7 +423,6 @@ struct Configurator {
         var remaining = artifacts
         var removedServers: Set<MCPServerRef> = []
         var removedBrewPackages: Set<String> = []
-        var removedPlugins: Set<String> = []
 
         // Remove MCS-owned brew packages and plugins (with reference counting)
         let excludeScope = refCountScope ?? scope.scopeIdentifier
@@ -444,19 +445,11 @@ struct Configurator {
         }
         remaining.brewPackages.removeAll { removedBrewPackages.contains($0) }
 
-        for pluginName in artifacts.plugins {
-            let result = removePluginArtifact(
-                pluginName, exec: exec, refCounter: refCounter,
-                excludingScope: excludeScope, excludingPack: packID
-            )
-            switch result {
-            case .removed, .stillNeeded:
-                removedPlugins.insert(pluginName)
-            case .failed:
-                output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — re-run '\(retryHint)' to retry")
-            }
+        let unremovedPlugins = removeOwnedPlugins(artifacts.plugins, of: packID, exec: exec, state: state)
+        for pluginName in unremovedPlugins {
+            output.warn("  Could not remove plugin '\(PluginRef(pluginName).bareName)' — re-run '\(retryHint)' to retry")
         }
-        remaining.plugins.removeAll { removedPlugins.contains($0) }
+        remaining.plugins = remaining.plugins.filter { unremovedPlugins.contains($0) }
 
         // Remove MCP servers
         for server in artifacts.mcpServers
@@ -908,10 +901,12 @@ struct Configurator {
                 shell: shell,
                 output: output
             )
+            recordSharedPluginOwnership(pack, artifacts: &artifacts, state: state)
             reconcileStaleArtifacts(
                 previousArtifacts: previousArtifacts,
                 currentArtifacts: &artifacts,
-                packID: pack.identifier
+                packID: pack.identifier,
+                scopePacks: packs
             )
             state.setArtifacts(artifacts, for: pack.identifier)
             state.recordPack(pack.identifier)
@@ -958,6 +953,20 @@ struct Configurator {
         }
     }
 
+    /// A plugin another pack in this scope already installed counts as this pack's too, so the
+    /// last pack to leave the scope is the one that uninstalls it rather than nobody.
+    private func recordSharedPluginOwnership(
+        _ pack: any TechPack, artifacts: inout PackArtifactRecord, state: ProjectState
+    ) {
+        for component in pack.components {
+            guard case let .plugin(name) = component.installAction, !artifacts.plugins.contains(name) else { continue }
+            let ownedInScope = state.configuredPacks.contains { otherID in
+                otherID != pack.identifier && state.artifacts(for: otherID)?.ownsPlugin(name) == true
+            }
+            if ownedInScope { artifacts.recordPlugin(name) }
+        }
+    }
+
     /// Remove artifacts that were tracked in the previous sync but are absent from the current one.
     ///
     /// After `installArtifacts()` produces a fresh `PackArtifactRecord`, this method diffs it
@@ -970,7 +979,8 @@ struct Configurator {
     private func reconcileStaleArtifacts(
         previousArtifacts: PackArtifactRecord?,
         currentArtifacts: inout PackArtifactRecord,
-        packID: String
+        packID: String,
+        scopePacks: [any TechPack]
     ) {
         guard let previous = previousArtifacts else { return }
 
@@ -1058,14 +1068,9 @@ struct Configurator {
                 }
             }
             for name in stalePlugins {
-                let result = removePluginArtifact(
-                    name, exec: exec, refCounter: refCounter,
-                    excludingScope: scope.scopeIdentifier, excludingPack: packID
-                )
-                switch result {
-                case .removed, .stillNeeded:
-                    break
-                case .failed:
+                let claimants = scopePacks.filter { $0.identifier != packID }
+                    .map { PluginClaimant(packID: $0.identifier, pack: $0, record: nil) }
+                if !removePluginArtifact(name, exec: exec, otherClaimants: claimants) {
                     currentArtifacts.plugins.append(name)
                     output.warn("  Could not remove stale plugin '\(PluginRef(name).bareName)' — will retry on next sync")
                 }
@@ -1193,29 +1198,39 @@ struct Configurator {
         return .failed
     }
 
-    /// Remove a plugin with reference counting.
+    /// Remove a plugin from this scope unless another pack in the same scope still claims it.
     ///
-    /// Logs the "Keeping" message when the plugin is still needed by another scope or pack.
-    /// Callers provide their own success/failure context messages.
+    /// Plugins install per scope (`local` in a project, `user` globally), so only packs sharing the
+    /// scope can share an install; other scopes hold installs of their own.
+    /// Returns the plugins that could not be removed and stay recorded.
+    private func removeOwnedPlugins(
+        _ plugins: [String], of packID: String, exec: ComponentExecutor, state: ProjectState
+    ) -> [String] {
+        let otherClaimants = state.configuredPacks.filter { $0 != packID }.map {
+            PluginClaimant(packID: $0, pack: registry.pack(for: $0), record: state.artifacts(for: $0))
+        }
+        return plugins.filter { !removePluginArtifact($0, exec: exec, otherClaimants: otherClaimants) }
+    }
+
+    private struct PluginClaimant {
+        let packID: String
+        let pack: (any TechPack)?
+        let record: PackArtifactRecord?
+    }
+
+    /// Returns `false` only when an uninstall was attempted and failed; a plugin another pack in
+    /// the scope still claims is kept and counts as handled.
     private func removePluginArtifact(
         _ name: String,
         exec: ComponentExecutor,
-        refCounter: ResourceRefCounter,
-        excludingScope: String,
-        excludingPack: String
-    ) -> RefCountedRemovalResult {
-        if refCounter.isStillNeeded(
-            .plugin(name),
-            excludingScope: excludingScope,
-            excludingPack: excludingPack
-        ) {
-            output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by another scope or pack")
-            return .stillNeeded
+        otherClaimants: [PluginClaimant]
+    ) -> Bool {
+        // Conservative, as in `ResourceRefCounter`: an unloadable pack may still declare it.
+        if let claimant = otherClaimants.first(where: { $0.record?.ownsPlugin(name) == true || $0.pack?.declaresPlugin(name) ?? true }) {
+            output.dimmed("  Keeping plugin '\(PluginRef(name).bareName)' — still needed by \(claimant.packID)")
+            return true
         }
-        if exec.removePlugin(name) {
-            return .removed
-        }
-        return .failed
+        return exec.removePlugin(name, scope: scope.pluginScope)
     }
 
     /// Remove a single gitignore entry with reference counting, absorbing the do/catch.
@@ -1269,22 +1284,14 @@ struct Configurator {
 
     // MARK: - Global Dependencies
 
-    /// Auto-install brew packages and plugins (project scope only).
+    /// Auto-install brew packages (project scope only); plugins install per scope with the pack.
     private func autoInstallGlobalDependencies(_ pack: any TechPack) {
         let exec = makeExecutor()
         for component in pack.components {
-            guard !ComponentExecutor.isAlreadyInstalled(component) else { continue }
-
-            switch component.installAction {
-            case let .brewInstall(package):
-                output.dimmed("  Installing \(component.displayName)...")
-                _ = exec.installBrewPackage(package)
-            case let .plugin(name):
-                output.dimmed("  Installing plugin \(component.displayName)...")
-                _ = exec.installPlugin(name)
-            default:
-                break
-            }
+            guard case let .brewInstall(package) = component.installAction,
+                  !ComponentExecutor.isAlreadyInstalled(component) else { continue }
+            output.dimmed("  Installing \(component.displayName)...")
+            _ = exec.installBrewPackage(package)
         }
     }
 
@@ -1293,7 +1300,7 @@ struct Configurator {
     private func makeExecutor() -> ComponentExecutor {
         ComponentExecutor(
             environment: environment, output: output, shell: shell, claudeCLI: claudeCLI,
-            mcpWorkingDirectory: scope.mcpWorkingDirectory
+            mcpWorkingDirectory: scope.mcpWorkingDirectory, pluginListing: pluginListing
         )
     }
 }
