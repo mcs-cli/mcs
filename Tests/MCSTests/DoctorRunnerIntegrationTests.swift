@@ -10,7 +10,8 @@ private func makeRunner(
     registry: TechPackRegistry = TechPackRegistry(),
     fixMode: Bool = false,
     globalOnly: Bool = false,
-    packFilter: String? = nil
+    packFilter: String? = nil,
+    claudeCLI: MockClaudeCLI = MockClaudeCLI()
 ) -> DoctorRunner {
     DoctorRunner(
         fixMode: fixMode,
@@ -19,7 +20,8 @@ private func makeRunner(
         globalOnly: globalOnly,
         registry: registry,
         environment: Environment(home: home),
-        projectRootOverride: projectRoot
+        projectRootOverride: projectRoot,
+        claudeCLI: claudeCLI
     )
 }
 
@@ -98,47 +100,34 @@ struct DoctorRunnerIntegrationTests {
         #expect(onlyA.issues == all.issues - 1)
     }
 
-    @Test("PluginCheck passes when plugin is enabled in project settings.local.json")
-    func pluginCheckPassesWithProjectSettings() throws {
+    @Test("PluginCheck passes for a plugin installed local to the project")
+    func pluginCheckPassesForLocalInstall() throws {
         let (home, project) = try makeSandboxProject(label: "runner-plugin-project")
         defer { try? FileManager.default.removeItem(at: home) }
 
-        let pluginComponent = ComponentDefinition(
-            id: "test-pack.my-plugin",
-            displayName: "My Plugin",
-            description: "Test plugin",
-            type: .plugin,
-            packIdentifier: "test-pack",
-            installAction: .plugin(name: "my-plugin")
-        )
         let pack = MockTechPack(
             identifier: "test-pack",
             displayName: "Test Pack",
-            components: [pluginComponent]
+            components: [ComponentDefinition(
+                id: "test-pack.my-plugin",
+                displayName: "My Plugin",
+                description: "Test plugin",
+                type: .plugin,
+                packIdentifier: "test-pack",
+                installAction: .plugin(name: "my-plugin@acme")
+            )]
         )
-        let registry = TechPackRegistry(packs: [pack])
-
-        // Write project state
         var state = try ProjectState(projectRoot: project)
         state.recordPack("test-pack")
         try state.save()
 
-        // Write plugin enablement to project-scoped settings.local.json only
-        let claudeDir = project.appendingPathComponent(Constants.FileNames.claudeDirectory)
-        let projectSettings = """
-        {
-          "enabledPlugins": {
-            "my-plugin": true
-          }
-        }
-        """
-        try projectSettings.write(
-            to: claudeDir.appendingPathComponent("settings.local.json"),
-            atomically: true, encoding: .utf8
+        let cli = MockClaudeCLI()
+        cli.installedPlugins = [InstalledPlugin(
+            id: "my-plugin@acme", scope: Constants.PluginScope.local, enabled: true, projectPath: project.path
+        )]
+        var runner = makeRunner(
+            home: home, projectRoot: project, registry: TechPackRegistry(packs: [pack]), claudeCLI: cli
         )
-        // No global settings.json — plugin is only project-scoped
-
-        var runner = makeRunner(home: home, projectRoot: project, registry: registry)
         #expect(try runner.run().issues == 0)
     }
 

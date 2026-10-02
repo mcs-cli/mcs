@@ -1,13 +1,13 @@
 import Foundation
 
-/// Determines whether a global resource (brew package, plugin, or gitignore entry) can be
+/// Determines whether a global resource (brew package or gitignore entry) can be
 /// safely removed by checking all projects and the global scope for references.
 ///
 /// Uses a two-tier check:
 /// 1. Global-state artifact records (ownership) for other globally-configured packs
 /// 2. Project index → `.mcs-project` → pack manifest (declarations) for project-scoped packs
 ///
-/// MCP servers are project-independent (scoped via `-s local`) and never need ref counting.
+/// MCP servers and plugins install per scope, so they never need cross-scope ref counting.
 /// Gitignore entries do: `GitignoreManager` resolves one file for the whole machine, so a
 /// pack installed in two scopes holds two claims on a single physical line.
 struct ResourceRefCounter {
@@ -31,13 +31,11 @@ struct ResourceRefCounter {
 
     enum Resource: Equatable {
         case brewPackage(String)
-        case plugin(String)
         case gitignoreEntry(String)
 
         var displayName: String {
             switch self {
             case let .brewPackage(name): "brew package '\(name)'"
-            case let .plugin(name): "plugin '\(PluginRef(name).bareName)'"
             case let .gitignoreEntry(entry): "gitignore entry '\(entry)'"
             }
         }
@@ -49,7 +47,7 @@ struct ResourceRefCounter {
         /// mcs's own lines: a pack may declare one, but must not be able to remove it.
         var isProtected: Bool {
             switch self {
-            case .brewPackage, .plugin: false
+            case .brewPackage: false
             case let .gitignoreEntry(entry): GitignoreManager.coreEntries.contains(entry)
             }
         }
@@ -126,11 +124,6 @@ struct ResourceRefCounter {
             switch resource {
             case let .brewPackage(name):
                 if artifacts.brewPackages.contains(name) { return true }
-            case let .plugin(name):
-                let refBareName = PluginRef(name).bareName
-                if artifacts.plugins.contains(where: { PluginRef($0).bareName == refBareName }) {
-                    return true
-                }
             case let .gitignoreEntry(entry):
                 if artifacts.gitignoreEntries.contains(entry) { return true }
             }
@@ -202,8 +195,6 @@ struct ResourceRefCounter {
             switch (resource, component.installAction) {
             case let (.brewPackage(name), .brewInstall(pkg)):
                 if pkg == name { return true }
-            case let (.plugin(name), .plugin(pluginName)):
-                if PluginRef(pluginName).bareName == PluginRef(name).bareName { return true }
             // Exact match: `.gitignoreEntries` carries a literal payload that never goes
             // through placeholder substitution, unlike `MCPServerConfig.substituting`.
             case let (.gitignoreEntry(entry), .gitignoreEntries(entries)):

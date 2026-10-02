@@ -100,7 +100,7 @@ extension DoctorCheck {
     }
 }
 
-enum CheckResult {
+enum CheckResult: Equatable {
     case pass(String)
     case fail(String)
     case warn(String)

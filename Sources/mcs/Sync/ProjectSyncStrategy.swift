@@ -60,6 +60,7 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
         artifacts.fileHashesShippedOnly = true
+        artifacts.plugins = previousArtifacts?.plugins ?? []
 
         for component in pack.components {
             if ComponentExecutor.isAlreadyInstalled(component) {
@@ -102,7 +103,18 @@ struct ProjectSyncStrategy: SyncStrategy {
                     artifacts.gitignoreEntries.append(contentsOf: entries)
                 }
 
-            case .brewInstall, .plugin:
+            case let .plugin(name):
+                if case let .installed(id, userScopeCopy: true) = ConfiguratorSupport.installPlugin(
+                    name, component: component, scope: scope.pluginScope,
+                    executor: executor, artifacts: &artifacts, output: output
+                ), !globalScopeRecordsPlugin(name) {
+                    output.info(
+                        "  '\(id)' is also installed for every project. If nothing outside the projects"
+                            + " that declare it needs it, run: claude plugin uninstall \(id) -s user"
+                    )
+                }
+
+            case .brewInstall:
                 break
 
             case let .shellCommand(command, interactive):
@@ -132,6 +144,17 @@ struct ProjectSyncStrategy: SyncStrategy {
         return artifacts
     }
 
+    /// Whether a global-scope pack owns a user-scope copy of the plugin, so the copy is not stray.
+    private func globalScopeRecordsPlugin(_ name: String) -> Bool {
+        do {
+            let globalState = try ProjectState(stateFile: environment.globalStateFile)
+            return globalState.configuredPacks.contains { globalState.artifacts(for: $0)?.ownsPlugin(name) == true }
+        } catch {
+            // Only decides whether a hint is shown, never whether anything is removed.
+            return false
+        }
+    }
+
     // MARK: - Settings Composition
 
     func composeSettings(
@@ -142,9 +165,23 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
         var settings = Settings()
 
-        // Collect top-level keys to prevent Layer 3 re-injection of stale extraJSON keys
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
-        let dropKeys = Set(allPreviousKeys.filter { !$0.contains(".") })
+        let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
+        // Start from what is already there minus what packs owned, as global scope does, so a pack
+        // value merges under the user's (Claude Code writes `permissions` here too) instead of
+        // replacing the whole object.
+        do {
+            var existing = try Settings.load(from: scope.settingsPath)
+            existing.removeKeys(allPreviousKeys)
+            settings.extraJSON = existing.extraJSON
+            // Written by `claude plugin install -s local`, not by mcs.
+            settings.enabledPlugins = existing.enabledPlugins
+        } catch {
+            output.warn(
+                "Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)"
+                    + " — its contents will be replaced"
+            )
+        }
 
         let (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
@@ -154,10 +191,12 @@ struct ProjectSyncStrategy: SyncStrategy {
             output: output
         )
 
-        if hasContent {
+        if hasContent || !settings.extraJSON.isEmpty || !(settings.enabledPlugins ?? [:]).isEmpty {
             do {
                 try settings.save(to: scope.settingsPath, dropKeys: dropKeys)
-                output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                if hasContent {
+                    output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                }
             } catch {
                 output.error("Could not write \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
                 output.error("Hooks and plugins will not be active. Re-run '\(scope.syncHint)' after fixing the issue.")

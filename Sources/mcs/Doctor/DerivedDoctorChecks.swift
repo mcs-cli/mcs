@@ -6,13 +6,23 @@ extension ComponentDefinition {
     /// Auto-generates doctor check(s) from installAction.
     /// Returns nil for actions that have no mechanical verification
     /// (e.g. .shellCommand, .settingsMerge, .gitignoreEntries).
-    func deriveDoctorCheck(projectRoot: URL? = nil, environment: Environment = Environment()) -> (any DoctorCheck)? {
+    func deriveDoctorCheck(
+        projectRoot: URL? = nil,
+        environment: Environment = Environment(),
+        pluginListing: PluginListing? = nil
+    ) -> (any DoctorCheck)? {
         switch installAction {
         case let .mcpServer(config):
             return MCPServerCheck(name: displayName, serverName: config.name, projectRoot: projectRoot, environment: environment)
 
         case let .plugin(pluginName):
-            return PluginCheck(pluginRef: PluginRef(pluginName), projectRoot: projectRoot, environment: environment)
+            return PluginCheck(
+                pluginRef: PluginRef(pluginName),
+                projectRoot: projectRoot,
+                listing: pluginListing
+                    ?? PluginListing(claudeCLI: ClaudeIntegration(shell: ShellRunner(environment: environment))),
+                homeDirectory: environment.homeDirectory
+            )
 
         case let .brewInstall(package):
             return BrewPackageCheck(

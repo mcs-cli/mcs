@@ -68,7 +68,8 @@ private struct LifecycleTestBed {
             globalOnly: true,
             registry: registry,
             environment: env,
-            projectRootOverride: nil
+            projectRootOverride: nil,
+            claudeCLI: mockCLI
         )
     }
 
@@ -324,7 +325,7 @@ struct SinglePackLifecycleTests {
         let artifacts = state.artifacts(for: "test-pack")
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
-        #expect(artifacts?.settingsKeys.contains("env") == true)
+        #expect(artifacts?.settingsKeys.contains("env.LINT_ENABLED") == true)
         #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("test-pack/lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
@@ -4295,5 +4296,231 @@ struct PackRemoveCleanupFailureTests {
         #expect(bed.mockCLI.mcpAddCalls.allSatisfy { $0.workingDirectory == bed.project })
         #expect(bed.mockCLI.mcpRemoveCalls.count == 2)
         #expect(bed.mockCLI.mcpRemoveCalls.allSatisfy { $0.workingDirectory == bed.project })
+    }
+}
+
+// MARK: - Settings sub-key ownership
+
+struct SettingsSubKeyOwnershipTests {
+    private func readJSON(_ url: URL) throws -> [String: Any] {
+        try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    private func writeJSON(_ json: [String: Any], to url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+    }
+
+    private func envPack(_ bed: LifecycleTestBed) throws -> MockTechPack {
+        let source = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_VAR": "from-pack", "SHARED": "pack-value" } }
+        """)
+        return MockTechPack(
+            identifier: "env-pack",
+            displayName: "Env Pack",
+            components: [bed.settingsComponent(pack: "env-pack", id: "settings", source: source)]
+        )
+    }
+
+    @Test("Global: the user's env entries survive re-sync and removal, and win a conflict")
+    func globalUserEnvSurvives() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        try writeJSON(["env": ["USER_VAR": "mine", "SHARED": "user-value"]], to: bed.env.claudeSettings)
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        for _ in 0 ..< 2 {
+            try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+            let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+            #expect(env == ["USER_VAR": "mine", "SHARED": "user-value", "PACK_VAR": "from-pack"])
+        }
+        #expect(try bed.globalState().artifacts(for: "env-pack")?.settingsKeys == ["env.PACK_VAR"])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(env == ["USER_VAR": "mine", "SHARED": "user-value"])
+    }
+
+    @Test("Project: entries Claude Code or the user wrote to settings.local.json survive sync and removal")
+    func projectUserEntriesSurvive() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        try writeJSON(
+            ["env": ["USER_VAR": "mine"], "permissions": ["allow": ["Bash(ls)"]]],
+            to: bed.settingsLocalPath
+        )
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        var json = try readJSON(bed.settingsLocalPath)
+        #expect(json["env"] as? [String: String] == ["USER_VAR": "mine", "PACK_VAR": "from-pack", "SHARED": "pack-value"])
+        #expect((json["permissions"] as? [String: [String]])?["allow"] == ["Bash(ls)"])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        json = try readJSON(bed.settingsLocalPath)
+        #expect(json["env"] as? [String: String] == ["USER_VAR": "mine"])
+        #expect((json["permissions"] as? [String: [String]])?["allow"] == ["Bash(ls)"])
+    }
+
+    @Test("A legacy whole-object record is narrowed to the keys the pack declares")
+    func legacyRecordIsExpanded() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        // What an older release recorded, plus a user entry added afterwards.
+        var state = try seedLegacyRecord(bed)
+        try state.save()
+        var json = try readJSON(bed.env.claudeSettings)
+        var env = try #require(json["env"] as? [String: String])
+        env["USER_VAR"] = "mine"
+        json["env"] = env
+        try writeJSON(json, to: bed.env.claudeSettings)
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let after = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(after["USER_VAR"] == "mine")
+        #expect(try bed.globalState().artifacts(for: "env-pack")?.settingsKeys == ["env.PACK_VAR", "env.SHARED"])
+    }
+
+    @Test("A legacy whole-object record for an unloadable pack is left in place and cleared from state")
+    func legacyRecordForUnloadablePackIsLeftAlone() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try envPack(bed)
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+        var state = try seedLegacyRecord(bed)
+
+        bed.makeGlobalSyncConfigurator(registry: TechPackRegistry()).unconfigurePack("env-pack", state: &state)
+
+        #expect(try readJSON(bed.env.claudeSettings)["env"] != nil)
+        #expect(state.artifacts(for: "env-pack")?.settingsKeys.isEmpty ?? true)
+    }
+
+    private func seedLegacyRecord(_ bed: LifecycleTestBed) throws -> ProjectState {
+        var state = try bed.globalState()
+        var record = try #require(state.artifacts(for: "env-pack"))
+        record.settingsKeys = ["env"]
+        state.setArtifacts(record, for: "env-pack")
+        return state
+    }
+}
+
+// MARK: - Plugins install per scope
+
+struct PluginScopeLifecycleTests {
+    private func pluginPack(_ identifier: String, plugin: String = "lint@acme") -> MockTechPack {
+        MockTechPack(
+            identifier: identifier,
+            displayName: identifier,
+            components: [ComponentDefinition(
+                id: "\(identifier).plugin",
+                displayName: "Lint plugin",
+                description: "Plugin",
+                type: .plugin,
+                packIdentifier: identifier,
+                installAction: .plugin(name: plugin)
+            )]
+        )
+    }
+
+    @Test("Project: sync installs local to the project, doctor passes, removal uninstalls from that scope")
+    func projectLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginInstallCalls == [MockClaudeCLI.PluginCall(
+            id: "lint@acme", scope: Constants.PluginScope.local, workingDirectory: bed.project
+        )])
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.plugins == ["lint@acme"])
+
+        var doctor = bed.makeDoctorRunner(registry: registry)
+        #expect(try doctor.run().issues == 0)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls == [MockClaudeCLI.PluginCall(
+            id: "lint@acme", scope: Constants.PluginScope.local, workingDirectory: bed.project
+        )])
+        #expect(bed.mockCLI.installedPlugins.isEmpty)
+    }
+
+    @Test("Global: sync installs at user scope")
+    func globalInstallsAtUserScope() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(bed.mockCLI.pluginInstallCalls.map(\.scope) == [Constants.PluginScope.user])
+        #expect(try bed.globalState().artifacts(for: "lint-pack")?.plugins == ["lint@acme"])
+    }
+
+    @Test("A plugin another pack in the same scope declares is kept on removal")
+    func sharedPluginKeptWhileClaimed() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = pluginPack("pack-a")
+        let packB = pluginPack("pack-b")
+        let registry = TechPackRegistry(packs: [packA, packB])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA, packB], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [packB], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.count == 1)
+    }
+
+    @Test("An install mcs didn't make is neither recorded nor removed")
+    func preexistingInstallIsNotOwned() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        bed.mockCLI.installedPlugins = [InstalledPlugin(
+            id: "lint@acme", scope: Constants.PluginScope.local, enabled: true, projectPath: bed.project.path
+        )]
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginInstallCalls.isEmpty)
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.plugins.isEmpty == true)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+    }
+
+    @Test("Project sync keeps the CLI's enabledPlugins entry and drops the legacy bare-name one")
+    func legacyBareKeyDroppedCLIKeyKept() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        // What an older release left: its own bare key next to the one the CLI wrote.
+        var state = try bed.projectState()
+        var record = try #require(state.artifacts(for: "lint-pack"))
+        record.settingsKeys = ["enabledPlugins.lint"]
+        state.setArtifacts(record, for: "lint-pack")
+        try state.save()
+        try JSONSerialization.data(withJSONObject: ["enabledPlugins": ["lint": true, "lint@acme": true]])
+            .write(to: bed.settingsLocalPath)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(try Settings.load(from: bed.settingsLocalPath).enabledPlugins == ["lint@acme": true])
     }
 }

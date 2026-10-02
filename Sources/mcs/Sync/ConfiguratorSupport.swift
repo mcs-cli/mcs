@@ -366,7 +366,7 @@ enum ConfiguratorSupport {
         }
 
         // Pass 1: entries derived from component definitions.
-        for (pack, component) in packComponents {
+        for component in packComponents.map(\.component) {
             if let reg = component.hookRegistration,
                let command = component.hookCommand(pathPrefix: hookPathPrefix) {
                 if settings.addHookEntry(
@@ -386,17 +386,6 @@ enum ConfiguratorSupport {
                     }
                 }
             }
-
-            if case let .plugin(name) = component.installAction {
-                let ref = PluginRef(name)
-                var plugins = settings.enabledPlugins ?? [:]
-                if plugins[ref.bareName] == nil {
-                    plugins[ref.bareName] = true
-                }
-                settings.enabledPlugins = plugins
-                hasContent = true
-                contributedKeys[pack.identifier, default: []].append("enabledPlugins.\(ref.bareName)")
-            }
         }
 
         // Pass 2: pack-supplied settings files, merged on top of the derived entries.
@@ -404,10 +393,19 @@ enum ConfiguratorSupport {
             guard case let .settingsMerge(source) = component.installAction, let source else { continue }
             do {
                 let packSettings = try Settings.load(from: source, substituting: resolvedValues)
-                if !packSettings.extraJSON.isEmpty {
-                    contributedKeys[pack.identifier, default: []].append(contentsOf: packSettings.extraJSON.keys)
+                let report = settings.merge(with: packSettings)
+                // Only what landed is owned: a key the user (or an earlier pack) already set stays
+                // theirs, so removing this pack can never delete it.
+                if !report.landedKeyPaths.isEmpty {
+                    contributedKeys[pack.identifier, default: []].append(contentsOf: report.landedKeyPaths)
                 }
-                for dropped in settings.merge(with: packSettings) {
+                for keyPath in report.skippedKeyPaths {
+                    output.warn(
+                        "\(pack.displayName): '\(keyPath)' from \(source.lastPathComponent) was not applied"
+                            + " — a different value is already set, and it is kept"
+                    )
+                }
+                for dropped in report.droppedHookGroups {
                     output.warn(
                         "\(pack.displayName): hook group for '\(dropped.command)' under \(dropped.event)"
                             + " was not merged — \(source.lastPathComponent) declares matcher"
@@ -424,6 +422,81 @@ enum ConfiguratorSupport {
         }
 
         return (hasContent, contributedKeys)
+    }
+
+    /// State written before per-sub-key ownership records a whole object such as `env`, and
+    /// stripping it would delete the user's entries inside it. Narrow it to the sub-keys the pack
+    /// declares today; when that can't be known, leave the object alone rather than guess.
+    static func expandLegacySettingsKeys(
+        _ keyPaths: [String],
+        pack: (any TechPack)?,
+        packID: String,
+        onDisk: Settings,
+        settingsFileName: String,
+        output: CLIOutput
+    ) -> [String] {
+        let objectKeys = Set(keyPaths.filter { key in
+            guard !key.contains("."), let data = onDisk.extraJSON[key] else { return false }
+            return (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
+        })
+        guard !objectKeys.isEmpty else { return keyPaths }
+
+        // Merging into an empty value records exactly the paths a real sync would own.
+        var declared: [String: [String]] = [:]
+        for component in pack?.components ?? [] {
+            guard case let .settingsMerge(source) = component.installAction, let source else { continue }
+            do {
+                var scratch = Settings()
+                for keyPath in try scratch.merge(with: Settings.load(from: source)).landedKeyPaths {
+                    let topLevel = String(keyPath.split(separator: ".", maxSplits: 1)[0])
+                    if objectKeys.contains(topLevel), keyPath != topLevel {
+                        declared[topLevel, default: []].append(keyPath)
+                    }
+                }
+            } catch {
+                output.warn("Could not read \(source.lastPathComponent) from \(packID): \(error.localizedDescription)")
+            }
+        }
+
+        var expanded: [String] = []
+        for keyPath in keyPaths {
+            guard objectKeys.contains(keyPath) else {
+                expanded.append(keyPath)
+                continue
+            }
+            if let subKeys = declared[keyPath] {
+                expanded.append(contentsOf: subKeys)
+            } else {
+                output.warn(
+                    "\(packID): leaving '\(keyPath)' in \(settingsFileName) untouched — the pack's"
+                        + " entries in it can't be told apart from yours. Remove them by hand if they're stale."
+                )
+            }
+        }
+        return expanded
+    }
+
+    /// Install a plugin at `scope` and record it only when this install is what put it there.
+    @discardableResult
+    static func installPlugin(
+        _ name: String,
+        component: ComponentDefinition,
+        scope: String,
+        executor: ComponentExecutor,
+        artifacts: inout PackArtifactRecord,
+        output: CLIOutput
+    ) -> ComponentExecutor.PluginInstallOutcome {
+        let outcome = executor.installPlugin(name, scope: scope)
+        switch outcome {
+        case .installed:
+            artifacts.recordPlugin(name)
+            output.success("  \(component.displayName) installed (scope: \(scope))")
+        case .alreadyInstalled:
+            output.dimmed("  \(component.displayName) already installed, skipping")
+        case .failed:
+            output.warn("  \(component.displayName) failed to install")
+        }
+        return outcome
     }
 
     /// Compute per-pack SHA-256 hashes of contributed settings values from the on-disk file.

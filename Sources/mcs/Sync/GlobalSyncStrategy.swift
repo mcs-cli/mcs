@@ -92,13 +92,10 @@ struct GlobalSyncStrategy: SyncStrategy {
                 }
 
             case let .plugin(name):
-                output.dimmed("  Installing plugin \(component.displayName)...")
-                if executor.installPlugin(name) {
-                    artifacts.recordPlugin(name)
-                    output.success("  \(component.displayName) installed")
-                } else {
-                    output.warn("  \(component.displayName) failed to install")
-                }
+                ConfiguratorSupport.installPlugin(
+                    name, component: component, scope: scope.pluginScope,
+                    executor: executor, artifacts: &artifacts, output: output
+                )
 
             case let .copyPackFile(source, destination, fileType):
                 let result = executor.installCopyPackFile(
@@ -211,7 +208,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         }
 
         // Collect top-level keys to pass as dropKeys, preventing Layer 3 re-injection
-        let dropKeys = Set(allPreviousKeys.filter { !$0.contains(".") })
+        let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
 
         var (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
