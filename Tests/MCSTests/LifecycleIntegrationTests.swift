@@ -4404,6 +4404,37 @@ struct SettingsSubKeyOwnershipTests {
         #expect(state.artifacts(for: "env-pack")?.settingsKeys.isEmpty ?? true)
     }
 
+    @Test("A pack whose value another pack already landed gives up its claim, so its removal keeps the key")
+    func shadowedPackReleasesOwnership() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        func sharedPack(_ id: String) throws -> MockTechPack {
+            let source = try bed.makeSettingsSource(content: """
+            { "env": { "SHARED": "same" } }
+            """)
+            return MockTechPack(
+                identifier: id,
+                displayName: id,
+                components: [bed.settingsComponent(pack: id, id: "settings", source: source)]
+            )
+        }
+        let first = try sharedPack("first-pack")
+        let second = try sharedPack("second-pack")
+        let registry = TechPackRegistry(packs: [first, second])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [second], confirmRemovals: false)
+        #expect(try bed.globalState().artifacts(for: "second-pack")?.settingsKeys == ["env.SHARED"])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [first, second], confirmRemovals: false)
+        var state = try bed.globalState()
+        #expect(state.artifacts(for: "first-pack")?.settingsKeys == ["env.SHARED"])
+        #expect(state.artifacts(for: "second-pack")?.settingsKeys.isEmpty == true)
+
+        bed.makeGlobalSyncConfigurator(registry: registry).unconfigurePack("second-pack", state: &state)
+        let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(env["SHARED"] == "same")
+    }
+
     private func seedLegacyRecord(_ bed: LifecycleTestBed) throws -> ProjectState {
         var state = try bed.globalState()
         var record = try #require(state.artifacts(for: "env-pack"))

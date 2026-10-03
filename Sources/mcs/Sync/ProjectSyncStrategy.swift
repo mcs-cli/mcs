@@ -145,8 +145,9 @@ struct ProjectSyncStrategy: SyncStrategy {
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
         let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
         // Start from what is already there minus what packs owned, as global scope does, so a pack
-        // value merges under the user's (Claude Code writes `permissions` here too) instead of
-        // replacing the whole object.
+        // value merges under the user's instead of replacing the whole object. Ownership stops one
+        // level down: an array such as `permissions.allow` is owned or skipped whole, so Claude
+        // Code's approvals in one a pack owns are still rewritten on sync.
         do {
             var existing = try Settings.load(from: scope.settingsPath)
             existing.removeKeys(allPreviousKeys)

@@ -342,13 +342,14 @@ struct Configurator {
             resolvedValues: allValues, output: output
         )
 
-        // 6b. Record contributed settings keys and value hashes in artifact records
-        for (packID, keys) in contributedKeys {
-            if var artifacts = state.artifacts(for: packID) {
-                artifacts.settingsKeys = keys
-                artifacts.settingsHash = settingsHashes[packID]
-                state.setArtifacts(artifacts, for: packID)
-            }
+        // 6b. Record contributed settings keys and value hashes in artifact records. Every pack is
+        // reset, not just the ones that landed a key: a pack whose values were all already set
+        // owns nothing now, and a stale claim would let its removal delete another pack's key.
+        for pack in packs {
+            guard var artifacts = state.artifacts(for: pack.identifier) else { continue }
+            artifacts.settingsKeys = contributedKeys[pack.identifier] ?? []
+            artifacts.settingsHash = settingsHashes[pack.identifier]
+            state.setArtifacts(artifacts, for: pack.identifier)
         }
 
         // 7. Compose CLAUDE markdown file
