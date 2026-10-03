@@ -124,7 +124,7 @@ struct SettingsMergeTests {
         )
         var base = Settings(hooks: ["PreToolUse": [group]])
 
-        let dropped = base.merge(with: Settings(hooks: ["PreToolUse": [group]]))
+        let dropped = base.merge(with: Settings(hooks: ["PreToolUse": [group]])).droppedHookGroups
 
         // The ordinary case — a pack repeating a hook it already declared as a component. Nothing
         // is lost, so warning about it would be noise.
@@ -151,7 +151,7 @@ struct SettingsMergeTests {
             ],
         ])
 
-        let dropped = base.merge(with: other)
+        let dropped = base.merge(with: other).droppedHookGroups
 
         // Dedup by command keeps the installed group, so the incoming matcher never takes effect.
         // Silently discarding it is how a hook ends up registered under a matcher nobody asked for.
@@ -182,7 +182,24 @@ struct SettingsMergeTests {
             ],
         ])
 
-        #expect(base.merge(with: other).isEmpty)
+        #expect(base.merge(with: other).droppedHookGroups.isEmpty)
+    }
+
+    @Test("Merge reports the sub-keys it wrote and the ones an existing different value kept")
+    func mergeReportsLandedAndSkippedKeyPaths() throws {
+        var base = Settings()
+        base.extraJSON["env"] = try JSONSerialization.data(withJSONObject: ["USER": "u", "SAME": "x", "CLASH": "user"])
+        base.extraJSON["model"] = try JSONSerialization.data(withJSONObject: "opus", options: .fragmentsAllowed)
+        var other = Settings()
+        other.extraJSON["env"] = try JSONSerialization.data(withJSONObject: ["NEW": "n", "SAME": "x", "CLASH": "pack"])
+        other.extraJSON["model"] = try JSONSerialization.data(withJSONObject: "sonnet", options: .fragmentsAllowed)
+        other.extraJSON["attribution"] = try JSONSerialization.data(withJSONObject: ["commit": ""])
+
+        let report = base.merge(with: other)
+
+        #expect(report.landedKeyPaths == ["attribution.commit", "env.NEW"])
+        // An identical value is not a conflict, so it is neither owned nor reported.
+        #expect(report.skippedKeyPaths == ["env.CLASH", "model"])
     }
 
     @Test("Hooks merge across different events")

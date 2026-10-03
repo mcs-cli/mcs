@@ -324,7 +324,7 @@ struct SinglePackLifecycleTests {
         let artifacts = state.artifacts(for: "test-pack")
         #expect(artifacts != nil)
         #expect(artifacts?.templateSections.contains("test-pack") == true)
-        #expect(artifacts?.settingsKeys.contains("env") == true)
+        #expect(artifacts?.settingsKeys.contains("env.LINT_ENABLED") == true)
         #expect(artifacts?.hookCommands.contains(bed.projectHookCommand("test-pack/lint.sh")) == true)
         #expect(artifacts?.mcpServers.contains { $0.name == "test-mcp" } == true)
 
@@ -4295,5 +4295,151 @@ struct PackRemoveCleanupFailureTests {
         #expect(bed.mockCLI.mcpAddCalls.allSatisfy { $0.workingDirectory == bed.project })
         #expect(bed.mockCLI.mcpRemoveCalls.count == 2)
         #expect(bed.mockCLI.mcpRemoveCalls.allSatisfy { $0.workingDirectory == bed.project })
+    }
+}
+
+// MARK: - Settings sub-key ownership
+
+struct SettingsSubKeyOwnershipTests {
+    private func readJSON(_ url: URL) throws -> [String: Any] {
+        try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+    }
+
+    private func writeJSON(_ json: [String: Any], to url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try JSONSerialization.data(withJSONObject: json).write(to: url)
+    }
+
+    private func envPack(_ bed: LifecycleTestBed) throws -> MockTechPack {
+        let source = try bed.makeSettingsSource(content: """
+        { "env": { "PACK_VAR": "from-pack", "SHARED": "pack-value" } }
+        """)
+        return MockTechPack(
+            identifier: "env-pack",
+            displayName: "Env Pack",
+            components: [bed.settingsComponent(pack: "env-pack", id: "settings", source: source)]
+        )
+    }
+
+    @Test("Global: the user's env entries survive re-sync and removal, and win a conflict")
+    func globalUserEnvSurvives() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        try writeJSON(["env": ["USER_VAR": "mine", "SHARED": "user-value"]], to: bed.env.claudeSettings)
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        for _ in 0 ..< 2 {
+            try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+            let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+            #expect(env == ["USER_VAR": "mine", "SHARED": "user-value", "PACK_VAR": "from-pack"])
+        }
+        #expect(try bed.globalState().artifacts(for: "env-pack")?.settingsKeys == ["env.PACK_VAR"])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(env == ["USER_VAR": "mine", "SHARED": "user-value"])
+    }
+
+    @Test("Project: entries Claude Code or the user wrote to settings.local.json survive sync and removal")
+    func projectUserEntriesSurvive() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        try writeJSON(
+            ["env": ["USER_VAR": "mine"], "permissions": ["allow": ["Bash(ls)"]]],
+            to: bed.settingsLocalPath
+        )
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        var json = try readJSON(bed.settingsLocalPath)
+        #expect(json["env"] as? [String: String] == ["USER_VAR": "mine", "PACK_VAR": "from-pack", "SHARED": "pack-value"])
+        #expect((json["permissions"] as? [String: [String]])?["allow"] == ["Bash(ls)"])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        json = try readJSON(bed.settingsLocalPath)
+        #expect(json["env"] as? [String: String] == ["USER_VAR": "mine"])
+        #expect((json["permissions"] as? [String: [String]])?["allow"] == ["Bash(ls)"])
+    }
+
+    @Test("A legacy whole-object record is narrowed to the keys the pack declares")
+    func legacyRecordIsExpanded() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try envPack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        // What an older release recorded, plus a user entry added afterwards.
+        var state = try seedLegacyRecord(bed)
+        try state.save()
+        var json = try readJSON(bed.env.claudeSettings)
+        var env = try #require(json["env"] as? [String: String])
+        env["USER_VAR"] = "mine"
+        json["env"] = env
+        try writeJSON(json, to: bed.env.claudeSettings)
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let after = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(after["USER_VAR"] == "mine")
+        #expect(try bed.globalState().artifacts(for: "env-pack")?.settingsKeys == ["env.PACK_VAR", "env.SHARED"])
+    }
+
+    @Test("A legacy whole-object record for an unloadable pack is left in place and cleared from state")
+    func legacyRecordForUnloadablePackIsLeftAlone() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try envPack(bed)
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+        var state = try seedLegacyRecord(bed)
+
+        bed.makeGlobalSyncConfigurator(registry: TechPackRegistry()).unconfigurePack("env-pack", state: &state)
+
+        #expect(try readJSON(bed.env.claudeSettings)["env"] != nil)
+        #expect(state.artifacts(for: "env-pack")?.settingsKeys.isEmpty ?? true)
+    }
+
+    @Test("A pack whose value another pack already landed gives up its claim, so its removal keeps the key")
+    func shadowedPackReleasesOwnership() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        func sharedPack(_ id: String) throws -> MockTechPack {
+            let source = try bed.makeSettingsSource(content: """
+            { "env": { "SHARED": "same" } }
+            """)
+            return MockTechPack(
+                identifier: id,
+                displayName: id,
+                components: [bed.settingsComponent(pack: id, id: "settings", source: source)]
+            )
+        }
+        let first = try sharedPack("first-pack")
+        let second = try sharedPack("second-pack")
+        let registry = TechPackRegistry(packs: [first, second])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [second], confirmRemovals: false)
+        #expect(try bed.globalState().artifacts(for: "second-pack")?.settingsKeys == ["env.SHARED"])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [first, second], confirmRemovals: false)
+        var state = try bed.globalState()
+        #expect(state.artifacts(for: "first-pack")?.settingsKeys == ["env.SHARED"])
+        #expect(state.artifacts(for: "second-pack")?.settingsKeys.isEmpty == true)
+
+        bed.makeGlobalSyncConfigurator(registry: registry).unconfigurePack("second-pack", state: &state)
+        let env = try #require(readJSON(bed.env.claudeSettings)["env"] as? [String: String])
+        #expect(env["SHARED"] == "same")
+    }
+
+    private func seedLegacyRecord(_ bed: LifecycleTestBed) throws -> ProjectState {
+        var state = try bed.globalState()
+        var record = try #require(state.artifacts(for: "env-pack"))
+        record.settingsKeys = ["env"]
+        state.setArtifacts(record, for: "env-pack")
+        return state
     }
 }

@@ -211,7 +211,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         }
 
         // Collect top-level keys to pass as dropKeys, preventing Layer 3 re-injection
-        let dropKeys = Set(allPreviousKeys.filter { !$0.contains(".") })
+        let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
 
         var (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
