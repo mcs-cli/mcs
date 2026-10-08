@@ -207,11 +207,12 @@ struct Settings: Codable {
     ///   scalars/arrays use "existing wins" semantics.
     ///
     /// - Returns: The hook groups dropped by deduplication whose matcher disagreed with the group
-    ///   that survived. An identical duplicate is the ordinary case and is not reported. Callers
-    ///   with somewhere to report to should surface these; the result is discardable because most
-    ///   callers merge settings that cannot collide.
+    ///   that survived (an identical duplicate is the ordinary case and is not reported), and the
+    ///   extra-JSON key paths `other` actually wrote versus the ones it lost to an existing,
+    ///   different value. Callers with somewhere to report to should surface the losses; the
+    ///   result is discardable because most callers merge settings that cannot collide.
     @discardableResult
-    mutating func merge(with other: Settings) -> [DroppedHookGroup] {
+    mutating func merge(with other: Settings) -> MergeReport {
         var dropped: [DroppedHookGroup] = []
 
         // Hooks: deduplicate by command
@@ -259,27 +260,75 @@ struct Settings: Codable {
 
         // Extra JSON: generic merge for all non-typed keys (env, permissions,
         // alwaysThinkingEnabled, attribution, and any future keys).
-        for (key, valueData) in other.extraJSON {
-            if let existingData = extraJSON[key] {
-                // Both have the key — attempt dict-level merge if both are JSON objects
-                if let selfDict = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
-                   let otherDict = try? JSONSerialization.jsonObject(with: valueData) as? [String: Any] {
-                    var merged = selfDict
-                    for (k, v) in otherDict where merged[k] == nil {
-                        merged[k] = v
-                    }
-                    if let data = try? JSONSerialization.data(withJSONObject: merged) {
-                        extraJSON[key] = data
-                    }
-                    // Re-serialization failure: keep existing value (no-op)
-                }
-                // Non-dict: existing wins (no action)
-            } else {
+        var landed: [String] = []
+        var skipped: [String] = []
+        for (key, valueData) in other.extraJSON.sorted(by: { $0.key < $1.key }) {
+            guard let existingData = extraJSON[key] else {
                 extraJSON[key] = valueData
+                landed.append(contentsOf: Self.keyPaths(of: key, in: valueData))
+                continue
+            }
+            // Both have the key — attempt dict-level merge if both are JSON objects
+            if let selfDict = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any],
+               let otherDict = try? JSONSerialization.jsonObject(with: valueData) as? [String: Any] {
+                var merged = selfDict
+                var landedHere: [String] = []
+                for (subKey, value) in otherDict.sorted(by: { $0.key < $1.key }) {
+                    if let current = merged[subKey] {
+                        if !Self.jsonEqual(current, value) { skipped.append("\(key).\(subKey)") }
+                    } else {
+                        merged[subKey] = value
+                        landedHere.append("\(key).\(subKey)")
+                    }
+                }
+                if let data = try? JSONSerialization.data(withJSONObject: merged) {
+                    extraJSON[key] = data
+                    landed.append(contentsOf: landedHere)
+                }
+                // Re-serialization failure: keep existing value (no-op)
+            } else if !Self.jsonFragmentsEqual(existingData, valueData) {
+                // Non-dict: existing wins
+                skipped.append(key)
             }
         }
 
-        return dropped
+        return MergeReport(droppedHookGroups: dropped, landedKeyPaths: landed, skippedKeyPaths: skipped)
+    }
+
+    struct MergeReport {
+        var droppedHookGroups: [DroppedHookGroup] = []
+        var landedKeyPaths: [String] = []
+        var skippedKeyPaths: [String] = []
+    }
+
+    // `save(to:dropKeys:)` must not re-inject any of these from the destination file: the
+    // in-memory value is already the destination's minus what was owned, so a key left empty
+    // once its owned sub-keys are removed has to stay gone.
+    static func topLevelKeys(of keyPaths: [String]) -> Set<String> {
+        Set(keyPaths.map { String($0.split(separator: ".", maxSplits: 1)[0]) })
+    }
+
+    /// One level down for objects, so a pack that writes `env.FOO` never claims the user's `env.BAR`.
+    private static func keyPaths(of key: String, in valueData: Data) -> [String] {
+        guard let dict = try? JSONSerialization.jsonObject(with: valueData) as? [String: Any],
+              !dict.isEmpty
+        else {
+            return [key]
+        }
+        return dict.keys.sorted().map { "\(key).\($0)" }
+    }
+
+    private static func jsonEqual(_ lhs: Any, _ rhs: Any) -> Bool {
+        (lhs as AnyObject).isEqual(rhs)
+    }
+
+    private static func jsonFragmentsEqual(_ lhs: Data, _ rhs: Data) -> Bool {
+        guard let left = try? JSONSerialization.jsonObject(with: lhs, options: .fragmentsAllowed),
+              let right = try? JSONSerialization.jsonObject(with: rhs, options: .fragmentsAllowed)
+        else {
+            return lhs == rhs
+        }
+        return jsonEqual(left, right)
     }
 
     // MARK: - Stale key removal

@@ -404,10 +404,19 @@ enum ConfiguratorSupport {
             guard case let .settingsMerge(source) = component.installAction, let source else { continue }
             do {
                 let packSettings = try Settings.load(from: source, substituting: resolvedValues)
-                if !packSettings.extraJSON.isEmpty {
-                    contributedKeys[pack.identifier, default: []].append(contentsOf: packSettings.extraJSON.keys)
+                let report = settings.merge(with: packSettings)
+                // Only what landed is owned: a key the user (or an earlier pack) already set stays
+                // theirs, so removing this pack can never delete it.
+                if !report.landedKeyPaths.isEmpty {
+                    contributedKeys[pack.identifier, default: []].append(contentsOf: report.landedKeyPaths)
                 }
-                for dropped in settings.merge(with: packSettings) {
+                for keyPath in report.skippedKeyPaths {
+                    output.warn(
+                        "\(pack.displayName): '\(keyPath)' from \(source.lastPathComponent) was not applied"
+                            + " — a different value is already set, and it is kept"
+                    )
+                }
+                for dropped in report.droppedHookGroups {
                     output.warn(
                         "\(pack.displayName): hook group for '\(dropped.command)' under \(dropped.event)"
                             + " was not merged — \(source.lastPathComponent) declares matcher"
@@ -424,6 +433,58 @@ enum ConfiguratorSupport {
         }
 
         return (hasContent, contributedKeys)
+    }
+
+    /// State written before per-sub-key ownership records a whole object such as `env`, and
+    /// stripping it would delete the user's entries inside it. Narrow it to the sub-keys the pack
+    /// declares today; when that can't be known, leave the object alone rather than guess.
+    static func expandLegacySettingsKeys(
+        _ keyPaths: [String],
+        pack: (any TechPack)?,
+        packID: String,
+        onDisk: Settings,
+        settingsFileName: String,
+        output: CLIOutput
+    ) -> [String] {
+        let objectKeys = Set(keyPaths.filter { key in
+            guard !key.contains("."), let data = onDisk.extraJSON[key] else { return false }
+            return (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
+        })
+        guard !objectKeys.isEmpty else { return keyPaths }
+
+        // Merging into an empty value yields every path the pack declares: the most a sync could own.
+        var declared: [String: [String]] = [:]
+        for component in pack?.components ?? [] {
+            guard case let .settingsMerge(source) = component.installAction, let source else { continue }
+            do {
+                var scratch = Settings()
+                for keyPath in try scratch.merge(with: Settings.load(from: source)).landedKeyPaths {
+                    let topLevel = String(keyPath.split(separator: ".", maxSplits: 1)[0])
+                    if objectKeys.contains(topLevel), keyPath != topLevel {
+                        declared[topLevel, default: []].append(keyPath)
+                    }
+                }
+            } catch {
+                output.warn("Could not read \(source.lastPathComponent) from \(packID): \(error.localizedDescription)")
+            }
+        }
+
+        var expanded: [String] = []
+        for keyPath in keyPaths {
+            guard objectKeys.contains(keyPath) else {
+                expanded.append(keyPath)
+                continue
+            }
+            if let subKeys = declared[keyPath] {
+                expanded.append(contentsOf: subKeys)
+            } else {
+                output.warn(
+                    "\(packID): leaving '\(keyPath)' in \(settingsFileName) untouched — the pack's"
+                        + " entries in it can't be told apart from yours. Remove them by hand if they're stale."
+                )
+            }
+        }
+        return expanded
     }
 
     /// Compute per-pack SHA-256 hashes of contributed settings values from the on-disk file.

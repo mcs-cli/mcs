@@ -142,9 +142,23 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
         var settings = Settings()
 
-        // Collect top-level keys to prevent Layer 3 re-injection of stale extraJSON keys
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
-        let dropKeys = Set(allPreviousKeys.filter { !$0.contains(".") })
+        let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
+        // Start from the existing extra keys minus what packs owned, so a pack value merges under
+        // the user's instead of replacing the whole object. Hooks and plugins are still rebuilt
+        // from the packs alone. Ownership stops one level down: an array such as
+        // `permissions.allow` is owned or skipped whole, so Claude Code's approvals in one a pack
+        // owns are still rewritten on sync.
+        do {
+            var existing = try Settings.load(from: scope.settingsPath)
+            existing.removeKeys(allPreviousKeys)
+            settings.extraJSON = existing.extraJSON
+        } catch {
+            output.warn(
+                "Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)"
+                    + " — its contents will be replaced"
+            )
+        }
 
         let (hasContent, contributedKeys) = ConfiguratorSupport.mergePackComponentsIntoSettings(
             packs: packs,
@@ -154,10 +168,12 @@ struct ProjectSyncStrategy: SyncStrategy {
             output: output
         )
 
-        if hasContent {
+        if hasContent || !settings.extraJSON.isEmpty {
             do {
                 try settings.save(to: scope.settingsPath, dropKeys: dropKeys)
-                output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                if hasContent {
+                    output.success("Composed \(scope.settingsPath.lastPathComponent)")
+                }
             } catch {
                 output.error("Could not write \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
                 output.error("Hooks and plugins will not be active. Re-run '\(scope.syncHint)' after fixing the issue.")
