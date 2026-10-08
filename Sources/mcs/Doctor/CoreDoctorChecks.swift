@@ -111,7 +111,7 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        // A `local` install belongs to one project; another project's says nothing about this scope.
+        // Another project's install says nothing about this scope.
         let installsHere: [InstalledPlugin]
         switch listing.plugins(in: projectRoot ?? homeDirectory) {
         case let .success(plugins):
@@ -126,12 +126,13 @@ struct PluginCheck: DoctorCheck {
         if installsHere.contains(where: { $0.enabled && $0.scope == expectedScope }) {
             return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
         }
-        // Not mcs's install, but the plugin does load here.
+        // Installed at another scope, but it still loads here.
         if let other = installsHere.first(where: \.enabled) {
             return .pass("enabled (\(other.scope) scope)")
         }
-        // Disabling is the user's choice and a re-sync would not undo it, so this only warns.
-        if let disabled = installsHere.first {
+        // Disabling is the user's choice and a re-sync would not undo it, so this only warns. A
+        // disabled copy elsewhere doesn't count: the missing install here is what a re-sync restores.
+        if let disabled = installsHere.first(where: { $0.scope == expectedScope }) {
             return .warn("installed but disabled — enable with: claude plugin enable \(disabled.id) -s \(disabled.scope)")
         }
         return .fail("not installed")

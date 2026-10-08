@@ -275,6 +275,22 @@ struct PluginCheckTests {
         #expect(result == .warn("installed but disabled — enable with: claude plugin enable lint@acme -s user"))
     }
 
+    @Test("A project missing its local install fails even when a disabled user copy exists")
+    func missingLocalWithDisabledUserCopyFails() {
+        let result = check("lint@acme", projectRoot: project, installed: [
+            InstalledPlugin(id: "lint@acme", scope: "user", enabled: false, projectPath: nil),
+        ])
+        #expect(result == .fail("not installed"))
+    }
+
+    @Test("A project-scope install in another project does not count")
+    func otherProjectsProjectScopeInstallFails() {
+        let result = check("lint@acme", projectRoot: project, installed: [
+            InstalledPlugin(id: "lint@acme", scope: "project", enabled: false, projectPath: "/tmp/elsewhere"),
+        ])
+        #expect(result == .fail("not installed"))
+    }
+
     @Test("The same name from another marketplace is not this plugin")
     func otherMarketplaceDoesNotMatch() {
         let result = check("lint@acme", projectRoot: nil, installed: [

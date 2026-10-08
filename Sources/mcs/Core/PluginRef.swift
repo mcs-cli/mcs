@@ -88,10 +88,11 @@ struct InstalledPlugin: Codable, Equatable {
     /// The project a `local`- or `project`-scoped install belongs to.
     let projectPath: String?
 
-    /// Whether this install is the one a sync at `scope` (in `projectDirectory`, for `local`) owns.
+    /// Whether this install is at `scope` and, unless that is `user`, belongs to `projectDirectory`.
     func isInstall(atScope scope: String, projectDirectory: URL?) -> Bool {
         guard self.scope == scope else { return false }
-        guard scope == Constants.PluginScope.local else { return true }
+        // `local` and `project` installs are listed for every project; only `user` applies everywhere.
+        guard scope != Constants.PluginScope.user else { return true }
         guard let projectDirectory, let projectPath else { return false }
         return URL(fileURLWithPath: projectPath).resolvingSymlinksInPath().path
             == projectDirectory.resolvingSymlinksInPath().path
