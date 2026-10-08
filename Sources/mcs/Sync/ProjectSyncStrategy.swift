@@ -60,7 +60,7 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
         artifacts.fileHashesShippedOnly = true
-        artifacts.plugins = previousArtifacts?.plugins ?? []
+        artifacts.plugins = previousArtifacts?.pluginsStillDeclared(by: pack) ?? []
 
         for component in pack.components {
             if ComponentExecutor.isAlreadyInstalled(component) {
@@ -168,15 +168,14 @@ struct ProjectSyncStrategy: SyncStrategy {
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
         let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
         // Start from the existing extra keys minus what packs owned, so a pack value merges under
-        // the user's instead of replacing the whole object. Hooks and plugins are still rebuilt
-        // from the packs alone. Ownership stops one level down: an array such as
-        // `permissions.allow` is owned or skipped whole, so Claude Code's approvals in one a pack
-        // owns are still rewritten on sync.
+        // the user's instead of replacing the whole object. `enabledPlugins` is kept as the CLI
+        // wrote it; hooks are still rebuilt from the packs alone. Ownership stops one level down:
+        // an array such as `permissions.allow` is owned or skipped whole, so Claude Code's
+        // approvals in one a pack owns are still rewritten on sync.
         do {
             var existing = try Settings.load(from: scope.settingsPath)
             existing.removeKeys(allPreviousKeys)
             settings.extraJSON = existing.extraJSON
-            // Written by `claude plugin install -s local`, not by mcs.
             settings.enabledPlugins = existing.enabledPlugins
         } catch {
             output.warn(

@@ -491,6 +491,8 @@ enum ConfiguratorSupport {
         case .installed:
             artifacts.recordPlugin(name)
             output.success("  \(component.displayName) installed (scope: \(scope))")
+        case .installedUnowned:
+            output.success("  \(component.displayName) installed (scope: \(scope)), not tracked")
         case .alreadyInstalled:
             output.dimmed("  \(component.displayName) already installed, skipping")
         case .failed:

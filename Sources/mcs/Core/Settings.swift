@@ -336,7 +336,10 @@ struct Settings: Codable {
     /// Remove settings keys that mcs previously owned but are no longer in the template.
     /// Key paths use dot notation: `env.KEY`, `permissions.defaultMode`, `enabledPlugins.NAME`.
     /// Single-part paths remove from `extraJSON` or typed properties as appropriate.
-    mutating func removeKeys(_ keyPaths: [String]) {
+    /// - Returns: Whether anything was removed.
+    @discardableResult
+    mutating func removeKeys(_ keyPaths: [String]) -> Bool {
+        var removed = false
         for keyPath in keyPaths {
             let parts = keyPath.split(separator: ".", maxSplits: 1)
             if parts.count == 2 {
@@ -344,26 +347,29 @@ struct Settings: Codable {
                 let key = String(parts[1])
                 switch section {
                 case "hooks":
-                    hooks?.removeValue(forKey: key)
+                    removed = hooks?.removeValue(forKey: key) != nil || removed
                 case "enabledPlugins":
-                    enabledPlugins?.removeValue(forKey: key)
+                    removed = enabledPlugins?.removeValue(forKey: key) != nil || removed
                 default:
                     // Handle dotted paths for extraJSON keys (e.g. "env.FOO",
                     // "permissions.defaultMode")
-                    removeExtraJSONSubKey(topLevel: section, subKey: key)
+                    removed = removeExtraJSONSubKey(topLevel: section, subKey: key) || removed
                 }
             } else {
                 // Single-part key — check typed properties first, then extraJSON
                 switch keyPath {
                 case "hooks":
+                    removed = hooks != nil || removed
                     hooks = nil
                 case "enabledPlugins":
+                    removed = enabledPlugins != nil || removed
                     enabledPlugins = nil
                 default:
-                    extraJSON.removeValue(forKey: keyPath)
+                    removed = extraJSON.removeValue(forKey: keyPath) != nil || removed
                 }
             }
         }
+        return removed
     }
 
     // MARK: - File I/O
@@ -494,19 +500,22 @@ struct Settings: Codable {
     // MARK: - Private Helpers
 
     /// Remove a sub-key from an extraJSON entry that holds a JSON object.
-    private mutating func removeExtraJSONSubKey(topLevel: String, subKey: String) {
+    private mutating func removeExtraJSONSubKey(topLevel: String, subKey: String) -> Bool {
         guard let data = extraJSON[topLevel],
-              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+              var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              dict.removeValue(forKey: subKey) != nil
         else {
-            return
+            return false
         }
-        dict.removeValue(forKey: subKey)
         if dict.isEmpty {
             extraJSON.removeValue(forKey: topLevel)
         } else if let newData = try? JSONSerialization.data(withJSONObject: dict) {
             extraJSON[topLevel] = newData
+        } else {
+            // Re-serialization failure: keep existing value (no-op)
+            return false
         }
-        // Re-serialization failure: keep existing value (no-op)
+        return true
     }
 }
 

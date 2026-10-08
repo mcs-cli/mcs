@@ -2,11 +2,11 @@ import Foundation
 
 /// Parsed representation of a plugin reference from `techpack.yaml`.
 ///
-/// Plugin names in manifests use the format `name@repo` where:
-/// - `name` is the bare plugin name passed to `claude plugin install/remove`
-/// - `repo` is the marketplace repository (e.g. `anthropics/claude-plugins-official`)
+/// Plugin names in manifests use the format `name@source` where `source` is either a
+/// marketplace repository (`anthropics/claude-plugins-official`) or a marketplace's name
+/// (`claude-plugins-official`). The CLI is driven by the resolved `name@<marketplace-name>` id.
 ///
-/// When no `@repo` suffix is present, the official Anthropic marketplace is assumed.
+/// When no `@source` suffix is present, the official Anthropic marketplace is assumed.
 struct PluginRef: Equatable {
     /// The bare plugin name (e.g. `pr-review-toolkit`).
     let bareName: String
@@ -68,7 +68,7 @@ struct PluginRef: Equatable {
     /// Whether `id` (`name@marketplace`) is this plugin.
     func matches(id: String) -> Bool {
         let parts = id.split(separator: "@", maxSplits: 1)
-        guard String(parts[0]) == bareName else { return false }
+        guard let name = parts.first, String(name) == bareName else { return false }
         guard let marketplaceName, parts.count == 2 else { return true }
         return String(parts[1]) == marketplaceName
     }
@@ -150,6 +150,12 @@ extension PackArtifactRecord {
     func ownsPlugin(_ name: String) -> Bool {
         let bareName = PluginRef(name).bareName
         return plugins.contains { PluginRef($0).bareName == bareName }
+    }
+
+    /// A re-sync finds an owned plugin already installed and does not record it again, so ownership
+    /// is carried over, but only while the pack still declares it: a dropped one must read as stale.
+    func pluginsStillDeclared(by pack: any TechPack) -> [String] {
+        plugins.filter { pack.declaresPlugin($0) }
     }
 }
 

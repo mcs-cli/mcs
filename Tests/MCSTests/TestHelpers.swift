@@ -58,6 +58,8 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     /// What `plugin list` reports. A successful install adds to it and a removal drops from it,
     /// so a sync → doctor → remove sequence sees what the real CLI would.
     var installedPlugins: [InstalledPlugin] = []
+    var pluginListDirectories: [URL?] = []
+    var pluginListFails = false
 
     @discardableResult
     func pluginMarketplaceAdd(repo: String) -> ShellResult {
@@ -70,7 +72,9 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     }
 
     func pluginList(workingDirectory: URL?) -> ShellResult {
-        jsonResult(installedPlugins.map { plugin in
+        pluginListDirectories.append(workingDirectory)
+        if pluginListFails { return ShellResult(exitCode: 1, stdout: "", stderr: "list failed") }
+        return jsonResult(installedPlugins.map { plugin in
             // Mirrors the CLI: a local install is enabled only when listed from its own project.
             guard plugin.scope == Constants.PluginScope.local else { return plugin }
             let here = plugin.isInstall(atScope: plugin.scope, projectDirectory: workingDirectory)

@@ -256,7 +256,7 @@ struct PluginCheckTests {
         let result = check("lint@acme", projectRoot: project, installed: [
             InstalledPlugin(id: "lint@acme", scope: "local", enabled: true, projectPath: "/tmp/elsewhere"),
         ])
-        #expect(result == .fail("installed but disabled"))
+        #expect(result == .fail("not installed"))
     }
 
     @Test("A user-scope install still loads in a project")
@@ -267,12 +267,12 @@ struct PluginCheckTests {
         #expect(result == .pass("enabled (user scope)"))
     }
 
-    @Test("A disabled install fails")
-    func disabledInstallFails() {
+    @Test("A disabled install warns with the enable command instead of asking for a re-sync")
+    func disabledInstallWarns() {
         let result = check("lint@acme", projectRoot: nil, installed: [
             InstalledPlugin(id: "lint@acme", scope: "user", enabled: false, projectPath: nil),
         ])
-        #expect(result == .fail("installed but disabled"))
+        #expect(result == .warn("installed but disabled — enable with: claude plugin enable lint@acme -s user"))
     }
 
     @Test("The same name from another marketplace is not this plugin")
@@ -290,55 +290,20 @@ struct PluginCheckTests {
         // A local install in `project` would read as enabled if the listing ran there.
         cli.installedPlugins = [InstalledPlugin(id: "lint@acme", scope: "local", enabled: true, projectPath: project.path)]
         let result = PluginCheck(pluginRef: PluginRef("lint@acme"), projectRoot: nil, listing: PluginListing(claudeCLI: cli), homeDirectory: home).check()
-        #expect(result == .fail("installed but disabled"))
+        #expect(result == .fail("not installed"))
+        #expect(cli.pluginListDirectories == [home])
     }
 
     @Test("An unreadable plugin list fails rather than passing")
     func unreadableListFails() {
         let cli = MockClaudeCLI()
-        let failing = FailingListCLI(base: cli)
-        let result = PluginCheck(pluginRef: PluginRef("lint@acme"), projectRoot: nil, listing: PluginListing(claudeCLI: failing)).check()
+        cli.pluginListFails = true
+        let result = PluginCheck(pluginRef: PluginRef("lint@acme"), projectRoot: nil, listing: PluginListing(claudeCLI: cli)).check()
         guard case let .fail(message) = result else {
             Issue.record("Expected .fail, got \(result)")
             return
         }
         #expect(message.contains("could not list plugins"))
-    }
-}
-
-/// Wraps the mock so only `plugin list` fails.
-private struct FailingListCLI: ClaudeCLI {
-    let base: MockClaudeCLI
-    var isAvailable: Bool {
-        true
-    }
-
-    func mcpAdd(name: String, scope: String, arguments: [String], workingDirectory: URL?) -> ShellResult {
-        base.mcpAdd(name: name, scope: scope, arguments: arguments, workingDirectory: workingDirectory)
-    }
-
-    func mcpRemove(name: String, scope: String, workingDirectory: URL?) -> ShellResult {
-        base.mcpRemove(name: name, scope: scope, workingDirectory: workingDirectory)
-    }
-
-    func pluginMarketplaceAdd(repo: String) -> ShellResult {
-        base.pluginMarketplaceAdd(repo: repo)
-    }
-
-    func pluginMarketplaceList() -> ShellResult {
-        base.pluginMarketplaceList()
-    }
-
-    func pluginList(workingDirectory _: URL?) -> ShellResult {
-        ShellResult(exitCode: 1, stdout: "", stderr: "boom")
-    }
-
-    func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
-        base.pluginInstall(id: id, scope: scope, workingDirectory: workingDirectory)
-    }
-
-    func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
-        base.pluginRemove(id: id, scope: scope, workingDirectory: workingDirectory)
     }
 }
 

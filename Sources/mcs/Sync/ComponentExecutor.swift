@@ -60,8 +60,10 @@ struct ComponentExecutor {
         /// mcs ran the install, so it owns it. `userScopeCopy` is set when the plugin is also
         /// enabled for every project, which a `local` install alone does not need.
         case installed(id: String, userScopeCopy: Bool)
-        /// Already installed at this scope by something else; mcs takes no ownership.
+        /// Already installed at this scope, by the user or another pack; mcs takes no new ownership.
         case alreadyInstalled(id: String)
+        /// Installed, but the installs beforehand couldn't be listed, so it may have been the user's.
+        case installedUnowned(id: String)
         case failed
     }
 
@@ -72,16 +74,19 @@ struct ComponentExecutor {
             return .failed
         }
         let ref = PluginRef(fullName)
-        if ref.hasMarketplaceRepo {
-            claudeCLI.pluginMarketplaceAdd(repo: ref.marketplaceRepo)
-        }
+        // A failed add is often a marketplace that is already there; it only matters when the
+        // plugin then can't be resolved, and its error is the one that explains why.
+        let added = ref.hasMarketplaceRepo ? claudeCLI.pluginMarketplaceAdd(repo: ref.marketplaceRepo) : nil
         guard let id = resolvePluginID(ref) else {
-            output.warn("Could not find the marketplace for plugin '\(fullName)' — is it added? Skipping")
+            let addError = added.flatMap { $0.succeeded ? nil : String($0.stderr.prefix(200)) }
+            let cause = addError.map { "adding \(ref.marketplaceRepo) failed: \($0)" } ?? "is it added?"
+            output.warn("Could not find the marketplace for plugin '\(fullName)' — \(cause). Skipping")
             return .failed
         }
         let listing = pluginListing ?? PluginListing(claudeCLI: claudeCLI)
         let installed = installedPlugins(listing)
-        if installed.contains(where: { $0.id == id && $0.isInstall(atScope: scope, projectDirectory: mcpWorkingDirectory) }) {
+        if let installed,
+           installed.contains(where: { $0.id == id && $0.isInstall(atScope: scope, projectDirectory: mcpWorkingDirectory) }) {
             return .alreadyInstalled(id: id)
         }
         let result = claudeCLI.pluginInstall(id: id, scope: scope, workingDirectory: mcpWorkingDirectory)
@@ -90,6 +95,7 @@ struct ComponentExecutor {
             output.warn("Could not install plugin '\(id)': \(String(result.stderr.prefix(200)))")
             return .failed
         }
+        guard let installed else { return .installedUnowned(id: id) }
         let userScopeCopy = scope != Constants.PluginScope.user
             && installed.contains { $0.id == id && $0.scope == Constants.PluginScope.user && $0.enabled }
         return .installed(id: id, userScopeCopy: userScopeCopy)
@@ -106,11 +112,13 @@ struct ComponentExecutor {
         // A marketplace removed since install can't be resolved; the CLI still matches a bare name.
         let id = resolvePluginID(ref) ?? ref.bareName
         let result = claudeCLI.pluginRemove(id: id, scope: scope, workingDirectory: mcpWorkingDirectory)
-        pluginListing?.invalidate()
-        // Reliable only because a `local` lookup runs in the scope's own project: from anywhere
-        // else the CLI would answer for a different project.
-        if result.stderr.contains(Constants.CLI.pluginNotFound) {
-            output.dimmed("  Plugin '\(ref.bareName)' is not installed — dropping it from tracking")
+        let listing = pluginListing ?? PluginListing(claudeCLI: claudeCLI)
+        listing.invalidate()
+        // A failed uninstall of a plugin that isn't at this scope is already done. Asked of the
+        // listing rather than read from stderr, whose wording differs per case and per CLI version.
+        // Reliable only because a `local` listing runs in the scope's own project.
+        if !result.succeeded, !isInstalled(ref, scope: scope, listing: listing, stderr: result.stderr) {
+            output.dimmed("  Plugin '\(ref.bareName)' is not installed at \(scope) scope — dropping it from tracking")
             return true
         }
         guard result.succeeded else {
@@ -119,6 +127,15 @@ struct ComponentExecutor {
         }
         output.dimmed("  Removed plugin: \(ref.bareName)")
         return true
+    }
+
+    private func isInstalled(_ ref: PluginRef, scope: String, listing: PluginListing, stderr: String) -> Bool {
+        switch listing.plugins(in: mcpWorkingDirectory) {
+        case let .success(plugins):
+            plugins.contains { ref.matches(id: $0.id) && $0.isInstall(atScope: scope, projectDirectory: mcpWorkingDirectory) }
+        case .failure:
+            !stderr.contains(Constants.CLI.pluginNotFound)
+        }
     }
 
     private func resolvePluginID(_ ref: PluginRef) -> String? {
@@ -137,14 +154,15 @@ struct ComponentExecutor {
         }
     }
 
-    /// An unreadable listing only costs an install that turns out to be a no-op, so it is not an error.
-    private func installedPlugins(_ listing: PluginListing) -> [InstalledPlugin] {
+    /// nil when unreadable: the install still runs, but without knowing what was there before,
+    /// mcs can't claim it.
+    private func installedPlugins(_ listing: PluginListing) -> [InstalledPlugin]? {
         switch listing.plugins(in: mcpWorkingDirectory) {
         case let .success(plugins):
             return plugins
         case let .failure(failure):
-            output.dimmed("  \(failure.localizedDescription) — installing anyway")
-            return []
+            output.warn("  \(failure.localizedDescription) — installing anyway, but mcs won't remove it later")
+            return nil
         }
     }
 

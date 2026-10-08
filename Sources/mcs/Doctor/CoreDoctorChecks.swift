@@ -111,23 +111,30 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        let installs: [InstalledPlugin]
+        // A `local` install belongs to one project; another project's says nothing about this scope.
+        let installsHere: [InstalledPlugin]
         switch listing.plugins(in: projectRoot ?? homeDirectory) {
         case let .success(plugins):
-            installs = plugins.filter { pluginRef.matches(id: $0.id) }
+            installsHere = plugins.filter {
+                pluginRef.matches(id: $0.id) && $0.isInstall(atScope: $0.scope, projectDirectory: projectRoot)
+            }
         case let .failure(failure):
             return .fail(failure.localizedDescription)
         }
 
         let expectedScope = projectRoot == nil ? Constants.PluginScope.user : Constants.PluginScope.local
-        if installs.contains(where: { $0.enabled && $0.isInstall(atScope: expectedScope, projectDirectory: projectRoot) }) {
+        if installsHere.contains(where: { $0.enabled && $0.scope == expectedScope }) {
             return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
         }
         // Not mcs's install, but the plugin does load here.
-        if let other = installs.first(where: \.enabled) {
+        if let other = installsHere.first(where: \.enabled) {
             return .pass("enabled (\(other.scope) scope)")
         }
-        return .fail(installs.isEmpty ? "not installed" : "installed but disabled")
+        // Disabling is the user's choice and a re-sync would not undo it, so this only warns.
+        if let disabled = installsHere.first {
+            return .warn("installed but disabled — enable with: claude plugin enable \(disabled.id) -s \(disabled.scope)")
+        }
+        return .fail("not installed")
     }
 
     func fix() -> FixResult {

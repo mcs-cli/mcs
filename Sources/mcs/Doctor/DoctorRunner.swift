@@ -54,6 +54,8 @@ struct DoctorRunner {
     private var pendingFixes: [CollectedCheck] = []
     private let shell: any ShellRunning
     private let claudeCLI: (any ClaudeCLI)?
+    // Shared by every `PluginCheck` in a run; a re-sync installs through a listing of its own.
+    private let pluginListing: PluginListing
 
     private enum SyncTarget: Hashable {
         case global
@@ -133,6 +135,7 @@ struct DoctorRunner {
         self.projectRootOverride = projectRootOverride
         self.shell = shell ?? ShellRunner(environment: environment)
         self.claudeCLI = claudeCLI
+        pluginListing = PluginListing(claudeCLI: claudeCLI ?? ClaudeIntegration(shell: self.shell))
         output = CLIOutput(warningCounter: warningCounter)
     }
 
@@ -227,7 +230,6 @@ struct DoctorRunner {
         }
 
         // Layer 1+2: Derived + supplementary checks from installed components (per scope)
-        let pluginListing = PluginListing(claudeCLI: claudeCLI ?? ClaudeIntegration(shell: ShellRunner(environment: env)))
         for scope in scopes {
             allPackIDs.formUnion(scope.packIDs)
 
@@ -829,6 +831,7 @@ struct DoctorRunner {
         }
 
         // A throw can leave the scope partly written, so the checks report what is on disk now.
+        pluginListing.invalidate()
         output.plain("")
         for check in resync.checks {
             switch check.check() {
