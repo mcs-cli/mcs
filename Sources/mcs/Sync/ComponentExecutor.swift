@@ -7,6 +7,8 @@ struct ComponentExecutor {
     let shell: any ShellRunning
     let claudeCLI: any ClaudeCLI
     var mcpWorkingDirectory: URL?
+    /// Shared across a run so each plugin doesn't pay for its own `plugin list`.
+    var pluginListing: PluginListing?
 
     // MARK: - Brew Packages
 
@@ -54,15 +56,114 @@ struct ComponentExecutor {
 
     // MARK: - Plugins
 
-    /// Install a plugin via the Claude CLI.
-    func installPlugin(_ fullName: String) -> Bool {
+    enum PluginInstallOutcome: Equatable {
+        /// mcs ran the install, so it owns it. `userScopeCopy` is set when the plugin is also
+        /// enabled for every project, which a `local` install alone does not need.
+        case installed(id: String, userScopeCopy: Bool)
+        /// Already installed at this scope, by the user or another pack; mcs takes no new ownership.
+        case alreadyInstalled(id: String)
+        /// Installed, but the installs beforehand couldn't be listed, so it may have been the user's.
+        case installedUnowned(id: String)
+        case failed
+    }
+
+    /// Install a plugin at `scope`, in the scope's project for `local`.
+    func installPlugin(_ fullName: String, scope: String) -> PluginInstallOutcome {
         guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, skipping plugin")
+            return .failed
+        }
+        let ref = PluginRef(fullName)
+        // A failed add is often a marketplace that is already there; it only matters when the
+        // plugin then can't be resolved, and its error is the one that explains why.
+        let added = ref.hasMarketplaceRepo ? claudeCLI.pluginMarketplaceAdd(repo: ref.marketplaceRepo) : nil
+        guard let id = resolvePluginID(ref) else {
+            let addError = added.flatMap { $0.succeeded ? nil : String($0.stderr.prefix(200)) }
+            let cause = addError.map { "adding \(ref.marketplaceRepo) failed: \($0)" } ?? "is it added?"
+            output.warn("Could not find the marketplace for plugin '\(fullName)' — \(cause). Skipping")
+            return .failed
+        }
+        let listing = pluginListing ?? PluginListing(claudeCLI: claudeCLI)
+        let installed = installedPlugins(listing)
+        if let installed,
+           installed.contains(where: { $0.id == id && $0.isInstall(atScope: scope, projectDirectory: mcpWorkingDirectory) }) {
+            return .alreadyInstalled(id: id)
+        }
+        let result = claudeCLI.pluginInstall(id: id, scope: scope, workingDirectory: mcpWorkingDirectory)
+        listing.invalidate()
+        guard result.succeeded else {
+            output.warn("Could not install plugin '\(id)': \(String(result.stderr.prefix(200)))")
+            return .failed
+        }
+        guard let installed else { return .installedUnowned(id: id) }
+        let userScopeCopy = scope != Constants.PluginScope.user
+            && installed.contains { $0.id == id && $0.scope == Constants.PluginScope.user && $0.enabled }
+        return .installed(id: id, userScopeCopy: userScopeCopy)
+    }
+
+    /// Remove a plugin from `scope` via the Claude CLI and log the outcome.
+    /// Returns `true` when the plugin is no longer installed there, including when it already wasn't.
+    func removePlugin(_ fullName: String, scope: String) -> Bool {
+        guard claudeCLI.isAvailable else {
+            output.warn("Claude Code CLI not found, cannot remove plugin")
             return false
         }
         let ref = PluginRef(fullName)
-        let result = claudeCLI.pluginInstall(ref: ref)
-        return result.succeeded
+        // A marketplace removed since install can't be resolved; the CLI still matches a bare name.
+        let id = resolvePluginID(ref) ?? ref.bareName
+        let result = claudeCLI.pluginRemove(id: id, scope: scope, workingDirectory: mcpWorkingDirectory)
+        let listing = pluginListing ?? PluginListing(claudeCLI: claudeCLI)
+        listing.invalidate()
+        // A failed uninstall of a plugin that isn't at this scope is already done. Asked of the
+        // listing rather than read from stderr, whose wording differs per case and per CLI version.
+        // Reliable only because a `local` listing runs in the scope's own project.
+        if !result.succeeded, !isInstalled(ref, scope: scope, listing: listing, stderr: result.stderr) {
+            output.dimmed("  Plugin '\(ref.bareName)' is not installed at \(scope) scope — dropping it from tracking")
+            return true
+        }
+        guard result.succeeded else {
+            output.warn("Could not remove plugin '\(ref.bareName)': \(result.stderr)")
+            return false
+        }
+        output.dimmed("  Removed plugin: \(ref.bareName)")
+        return true
+    }
+
+    private func isInstalled(_ ref: PluginRef, scope: String, listing: PluginListing, stderr: String) -> Bool {
+        switch listing.plugins(in: mcpWorkingDirectory) {
+        case let .success(plugins):
+            plugins.contains { ref.matches(id: $0.id) && $0.isInstall(atScope: scope, projectDirectory: mcpWorkingDirectory) }
+        case .failure:
+            !stderr.contains(Constants.CLI.pluginNotFound)
+        }
+    }
+
+    private func resolvePluginID(_ ref: PluginRef) -> String? {
+        if ref.marketplaceName != nil { return ref.pluginID(in: []) }
+        let result = claudeCLI.pluginMarketplaceList()
+        guard result.succeeded else {
+            output.warn("Could not list plugin marketplaces: \(String(result.stderr.prefix(200)))")
+            return nil
+        }
+        do {
+            let marketplaces = try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
+            return ref.pluginID(in: marketplaces)
+        } catch {
+            output.warn("Could not read the plugin marketplace list: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// nil when unreadable: the install still runs, but without knowing what was there before,
+    /// mcs can't claim it.
+    private func installedPlugins(_ listing: PluginListing) -> [InstalledPlugin]? {
+        switch listing.plugins(in: mcpWorkingDirectory) {
+        case let .success(plugins):
+            return plugins
+        case let .failure(failure):
+            output.warn("  \(failure.localizedDescription) — installing anyway, but mcs won't remove it later")
+            return nil
+        }
     }
 
     /// Uninstall a Homebrew package and log the outcome.
@@ -84,28 +185,6 @@ struct ComponentExecutor {
             return false
         }
         output.dimmed("  Removed brew package: \(package)")
-        return true
-    }
-
-    /// Remove a plugin via the Claude CLI and log the outcome.
-    /// Returns `true` when the plugin is no longer installed, including when it already wasn't.
-    func removePlugin(_ fullName: String) -> Bool {
-        guard claudeCLI.isAvailable else {
-            output.warn("Claude Code CLI not found, cannot remove plugin")
-            return false
-        }
-        let ref = PluginRef(fullName)
-        let result = claudeCLI.pluginRemove(ref: ref)
-        // Plugins are installed at user scope, so "not found" is reliable from any directory.
-        if result.stderr.contains(Constants.CLI.pluginNotFound) {
-            output.dimmed("  Plugin '\(ref.bareName)' is not installed — dropping it from tracking")
-            return true
-        }
-        guard result.succeeded else {
-            output.warn("Could not remove plugin '\(ref.bareName)': \(result.stderr)")
-            return false
-        }
-        output.dimmed("  Removed plugin: \(ref.bareName)")
         return true
     }
 
@@ -394,7 +473,9 @@ struct ComponentExecutor {
     static func isAlreadyInstalled(_ component: ComponentDefinition) -> Bool {
         // Convergent actions: always re-run to pick up config changes
         switch component.installAction {
-        case .settingsMerge, .gitignoreEntries, .copyPackFile, .mcpServer:
+        // `.plugin`: `installPlugin` checks the scope it installs into itself, and a derived check
+        // here has no project, so it would look in the wrong place.
+        case .settingsMerge, .gitignoreEntries, .copyPackFile, .mcpServer, .plugin:
             return false
         default:
             break

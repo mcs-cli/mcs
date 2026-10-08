@@ -54,6 +54,8 @@ struct DoctorRunner {
     private var pendingFixes: [CollectedCheck] = []
     private let shell: any ShellRunning
     private let claudeCLI: (any ClaudeCLI)?
+    // Shared by every `PluginCheck` in a run; a re-sync installs through a listing of its own.
+    private let pluginListing: PluginListing
 
     private enum SyncTarget: Hashable {
         case global
@@ -133,6 +135,7 @@ struct DoctorRunner {
         self.projectRootOverride = projectRootOverride
         self.shell = shell ?? ShellRunner(environment: environment)
         self.claudeCLI = claudeCLI
+        pluginListing = PluginListing(claudeCLI: claudeCLI ?? ClaudeIntegration(shell: self.shell))
         output = CLIOutput(warningCounter: warningCounter)
     }
 
@@ -239,7 +242,9 @@ struct DoctorRunner {
             // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
                 for component in pack.components {
-                    if let derived = component.deriveDoctorCheck(projectRoot: scope.effectiveProjectRoot, environment: env) {
+                    if let derived = component.deriveDoctorCheck(
+                        projectRoot: scope.effectiveProjectRoot, environment: env, pluginListing: pluginListing
+                    ) {
                         allChecks.append((check: derived, syncTarget: scope.syncTarget))
                     }
                     allChecks += component.supplementaryChecks(scope.effectiveProjectRoot, env)
@@ -826,6 +831,7 @@ struct DoctorRunner {
         }
 
         // A throw can leave the scope partly written, so the checks report what is on disk now.
+        pluginListing.invalidate()
         output.plain("")
         for check in resync.checks {
             switch check.check() {

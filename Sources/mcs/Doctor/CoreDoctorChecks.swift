@@ -96,14 +96,11 @@ struct MCPServerCheck: DoctorCheck {
 
 struct PluginCheck: DoctorCheck {
     let pluginRef: PluginRef
+    /// Set for a project scope, where the plugin is installed `local` to this project.
     let projectRoot: URL?
-    let environment: Environment
-
-    init(pluginRef: PluginRef, projectRoot: URL? = nil, environment: Environment = Environment()) {
-        self.pluginRef = pluginRef
-        self.projectRoot = projectRoot
-        self.environment = environment
-    }
+    let listing: PluginListing
+    /// Where the global scope lists from: anywhere else, a project's settings would decide `enabled`.
+    var homeDirectory = URL(fileURLWithPath: NSHomeDirectory())
 
     var name: String {
         pluginRef.bareName
@@ -114,48 +111,31 @@ struct PluginCheck: DoctorCheck {
     }
 
     func check() -> CheckResult {
-        var projectSettingsError: String?
-
-        // Tier 1: Project-scoped settings.local.json
-        if let root = projectRoot {
-            let projectSettingsURL = root
-                .appendingPathComponent(Constants.FileNames.claudeDirectory)
-                .appendingPathComponent(Constants.FileNames.settingsLocal)
-            do {
-                let projectSettings = try Settings.load(from: projectSettingsURL)
-                if projectSettings.enabledPlugins?[pluginRef.bareName] == true {
-                    return .pass("enabled (project)")
-                }
-            } catch {
-                // Corrupt project settings — fall through to global, but note for diagnostics
-                projectSettingsError = error.localizedDescription
+        // Another project's install says nothing about this scope.
+        let installsHere: [InstalledPlugin]
+        switch listing.plugins(in: projectRoot ?? homeDirectory) {
+        case let .success(plugins):
+            installsHere = plugins.filter {
+                pluginRef.matches(id: $0.id) && $0.isInstall(atScope: $0.scope, projectDirectory: projectRoot)
             }
+        case let .failure(failure):
+            return .fail(failure.localizedDescription)
         }
 
-        // Tier 2: Global settings.json
-        let settingsURL = environment.claudeSettings
-        guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-            if projectSettingsError != nil {
-                return .fail("settings.local.json is corrupt and settings.json not found")
-            }
-            return .fail("settings.json not found")
+        let expectedScope = projectRoot == nil ? Constants.PluginScope.user : Constants.PluginScope.local
+        if installsHere.contains(where: { $0.enabled && $0.scope == expectedScope }) {
+            return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
         }
-        let settings: Settings
-        do {
-            settings = try Settings.load(from: settingsURL)
-        } catch {
-            return .fail("settings.json is invalid: \(error.localizedDescription)")
+        // Installed at another scope, but it still loads here.
+        if let other = installsHere.first(where: \.enabled) {
+            return .pass("enabled (\(other.scope) scope)")
         }
-        if settings.enabledPlugins?[pluginRef.bareName] == true {
-            if let errorDesc = projectSettingsError {
-                return .warn("enabled (global) — settings.local.json is unreadable: \(errorDesc)")
-            }
-            return .pass("enabled")
+        // Disabling is the user's choice and a re-sync would not undo it, so this only warns. A
+        // disabled copy elsewhere doesn't count: the missing install here is what a re-sync restores.
+        if let disabled = installsHere.first(where: { $0.scope == expectedScope }) {
+            return .warn("installed but disabled — enable with: claude plugin enable \(disabled.id) -s \(disabled.scope)")
         }
-        if projectSettingsError != nil {
-            return .fail("not enabled (settings.local.json is corrupt)")
-        }
-        return .fail("not enabled")
+        return .fail("not installed")
     }
 
     func fix() -> FixResult {

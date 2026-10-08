@@ -10,10 +10,12 @@ protocol ClaudeCLI: Sendable {
     func mcpRemove(name: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginMarketplaceAdd(repo: String) -> ShellResult
+    func pluginMarketplaceList() -> ShellResult
+    func pluginList(workingDirectory: URL?) -> ShellResult
     @discardableResult
-    func pluginInstall(ref: PluginRef) -> ShellResult
+    func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
-    func pluginRemove(ref: PluginRef) -> ShellResult
+    func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult
 }
 
 /// Wrapper for the `claude` CLI to manage MCP servers and plugins.
@@ -78,24 +80,44 @@ struct ClaudeIntegration: ClaudeCLI {
         )
     }
 
-    /// Install a plugin (registers marketplace first).
-    @discardableResult
-    func pluginInstall(ref: PluginRef) -> ShellResult {
-        pluginMarketplaceAdd(repo: ref.marketplaceRepo)
-
-        return shell.run(
+    /// `claude plugin marketplace list --json`.
+    func pluginMarketplaceList() -> ShellResult {
+        shell.run(
             Constants.CLI.env,
-            arguments: [Constants.CLI.claudeCommand, "plugin", "install", ref.bareName],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "list", "--json"],
             additionalEnvironment: claudeEnv
         )
     }
 
-    /// Remove a plugin.
-    @discardableResult
-    func pluginRemove(ref: PluginRef) -> ShellResult {
+    /// `claude plugin list --json`. Run in a project, `enabled` reflects that project's settings.
+    func pluginList(workingDirectory: URL?) -> ShellResult {
         shell.run(
             Constants.CLI.env,
-            arguments: [Constants.CLI.claudeCommand, "plugin", "remove", ref.bareName],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "list", "--json"],
+            workingDirectory: workingDirectory?.path,
+            additionalEnvironment: claudeEnv
+        )
+    }
+
+    /// Install a plugin by its `name@marketplace` id. A `local` install belongs to the project
+    /// `workingDirectory` names, as with `mcpAdd`.
+    @discardableResult
+    func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        shell.run(
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand, "plugin", "install", id, "-s", scope],
+            workingDirectory: workingDirectory?.path,
+            additionalEnvironment: claudeEnv
+        )
+    }
+
+    /// Uninstall a plugin from one scope. See `pluginInstall` for `workingDirectory`.
+    @discardableResult
+    func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        shell.run(
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand, "plugin", "uninstall", id, "-s", scope],
+            workingDirectory: workingDirectory?.path,
             additionalEnvironment: claudeEnv
         )
     }

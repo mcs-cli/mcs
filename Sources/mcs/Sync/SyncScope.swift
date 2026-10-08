@@ -33,6 +33,9 @@ struct SyncScope {
     /// `nil` = use the pack's declared scope (project default); `"user"` = global scope.
     let mcpScopeOverride: String?
 
+    /// Scope `claude plugin install/uninstall` targets: `local` (this project), `user` (global).
+    let pluginScope: String
+
     /// Directory the `claude mcp` commands run in, which selects the project for `local` scope.
     /// Project: the project path, so a command started elsewhere still targets it; Global: `nil`.
     let mcpWorkingDirectory: URL?
@@ -75,6 +78,7 @@ extension SyncScope {
             claudeFilePath: projectPath.appendingPathComponent(Constants.FileNames.claudeLocalMD),
             scopeIdentifier: projectPath.path,
             mcpScopeOverride: nil,
+            pluginScope: Constants.PluginScope.local,
             mcpWorkingDirectory: projectPath,
             includeTemplatesInScan: true,
             runConfigureProjectHooks: true,
@@ -96,6 +100,7 @@ extension SyncScope {
             claudeFilePath: environment.globalClaudeMD,
             scopeIdentifier: ProjectIndex.globalSentinel,
             mcpScopeOverride: Constants.MCPScope.user,
+            pluginScope: Constants.PluginScope.user,
             mcpWorkingDirectory: nil,
             includeTemplatesInScan: false,
             runConfigureProjectHooks: false,

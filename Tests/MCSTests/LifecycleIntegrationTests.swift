@@ -68,7 +68,8 @@ private struct LifecycleTestBed {
             globalOnly: true,
             registry: registry,
             environment: env,
-            projectRootOverride: nil
+            projectRootOverride: nil,
+            claudeCLI: mockCLI
         )
     }
 
@@ -4441,5 +4442,210 @@ struct SettingsSubKeyOwnershipTests {
         record.settingsKeys = ["env"]
         state.setArtifacts(record, for: "env-pack")
         return state
+    }
+}
+
+// MARK: - Plugins install per scope
+
+struct PluginScopeLifecycleTests {
+    private func pluginPack(_ identifier: String, plugin: String = "lint@acme") -> MockTechPack {
+        MockTechPack(
+            identifier: identifier,
+            displayName: identifier,
+            components: [ComponentDefinition(
+                id: "\(identifier).plugin",
+                displayName: "Lint plugin",
+                description: "Plugin",
+                type: .plugin,
+                packIdentifier: identifier,
+                installAction: .plugin(name: plugin)
+            )]
+        )
+    }
+
+    @Test("Project: sync installs local to the project, doctor passes, removal uninstalls from that scope")
+    func projectLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginInstallCalls == [MockClaudeCLI.PluginCall(
+            id: "lint@acme", scope: Constants.PluginScope.local, workingDirectory: bed.project
+        )])
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.plugins == ["lint@acme"])
+
+        var doctor = bed.makeDoctorRunner(registry: registry)
+        #expect(try doctor.run().issues == 0)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls == [MockClaudeCLI.PluginCall(
+            id: "lint@acme", scope: Constants.PluginScope.local, workingDirectory: bed.project
+        )])
+        #expect(bed.mockCLI.installedPlugins.isEmpty)
+    }
+
+    @Test("Global: sync installs at user scope")
+    func globalInstallsAtUserScope() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [pack]))
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(bed.mockCLI.pluginInstallCalls.map(\.scope) == [Constants.PluginScope.user])
+        #expect(try bed.globalState().artifacts(for: "lint-pack")?.plugins == ["lint@acme"])
+    }
+
+    @Test("A plugin another pack in the same scope declares is kept on removal")
+    func sharedPluginKeptWhileClaimed() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = pluginPack("pack-a")
+        let packB = pluginPack("pack-b")
+        let registry = TechPackRegistry(packs: [packA, packB])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA, packB], confirmRemovals: false)
+        try bed.makeConfigurator(registry: registry).configure(packs: [packB], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.count == 1)
+    }
+
+    @Test("An install mcs didn't make is neither recorded nor removed")
+    func preexistingInstallIsNotOwned() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        bed.mockCLI.installedPlugins = [InstalledPlugin(
+            id: "lint@acme", scope: Constants.PluginScope.local, enabled: true, projectPath: bed.project.path
+        )]
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginInstallCalls.isEmpty)
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.plugins.isEmpty == true)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+    }
+
+    @Test("Project sync keeps the CLI's enabledPlugins entry and drops the legacy bare-name one")
+    func legacyBareKeyDroppedCLIKeyKept() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        // What an older release left: its own bare key next to the one the CLI wrote.
+        var state = try bed.projectState()
+        var record = try #require(state.artifacts(for: "lint-pack"))
+        record.settingsKeys = ["enabledPlugins.lint"]
+        state.setArtifacts(record, for: "lint-pack")
+        try state.save()
+        try JSONSerialization.data(withJSONObject: ["enabledPlugins": ["lint": true, "lint@acme": true]])
+            .write(to: bed.settingsLocalPath)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(try Settings.load(from: bed.settingsLocalPath).enabledPlugins == ["lint@acme": true])
+        // The claim goes with the key, or `SettingsKeysCheck` would fail on it forever.
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.settingsKeys.isEmpty == true)
+    }
+
+    @Test("Global sync drops the legacy bare-name enabledPlugins entry and keeps the CLI's")
+    func globalLegacyBareKeyDropped() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        var config = MCSConfig()
+        config.updateCheck = false
+        try config.save(to: bed.env.mcsConfigFile)
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        var state = try bed.globalState()
+        var record = try #require(state.artifacts(for: "lint-pack"))
+        record.settingsKeys = ["enabledPlugins.lint"]
+        state.setArtifacts(record, for: "lint-pack")
+        try state.save()
+        try JSONSerialization.data(withJSONObject: ["enabledPlugins": ["lint": true, "lint@acme": true]])
+            .write(to: bed.env.claudeSettings)
+
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(try Settings.load(from: bed.env.claudeSettings).enabledPlugins == ["lint@acme": true])
+        #expect(try bed.globalState().artifacts(for: "lint-pack")?.settingsKeys.isEmpty == true)
+    }
+
+    @Test("A plugin a pack update drops is uninstalled from the project")
+    func droppedPluginIsUninstalled() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let v1 = pluginPack("lint-pack")
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [v1])).configure(packs: [v1], confirmRemovals: false)
+
+        let v2 = MockTechPack(identifier: "lint-pack", displayName: "lint-pack", components: [])
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [v2])).configure(packs: [v2], confirmRemovals: false)
+
+        #expect(bed.mockCLI.pluginRemoveCalls == [MockClaudeCLI.PluginCall(
+            id: "lint@acme", scope: Constants.PluginScope.local, workingDirectory: bed.project
+        )])
+        #expect(try bed.projectState().artifacts(for: "lint-pack")?.plugins.isEmpty ?? true)
+    }
+
+    @Test("A plugin one pack drops while another still declares it stays, owned by the other pack")
+    func droppedPluginHandedToClaimant() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = pluginPack("pack-a")
+        let packB = pluginPack("pack-b")
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+
+        let packAv2 = MockTechPack(identifier: "pack-a", displayName: "pack-a", components: [])
+        let registry = TechPackRegistry(packs: [packAv2, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packAv2, packB], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+        #expect(try bed.projectState().artifacts(for: "pack-b")?.plugins == ["lint@acme"])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [packAv2], confirmRemovals: false)
+        #expect(bed.mockCLI.pluginRemoveCalls.count == 1)
+    }
+
+    @Test("Removing a pack while another configured pack can't be loaded hands the plugin to that pack")
+    func unloadableClaimantTakesOverPlugin() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = pluginPack("pack-a")
+        let packB = pluginPack("pack-b", plugin: "other@acme")
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [packA, packB]))
+            .configure(packs: [packA, packB], confirmRemovals: false)
+        var state = try bed.projectState()
+
+        // pack-b is configured but missing from the registry, so it might still declare the plugin.
+        bed.makeConfigurator(registry: TechPackRegistry(packs: [packA])).unconfigurePack("pack-a", state: &state)
+
+        #expect(bed.mockCLI.pluginRemoveCalls.isEmpty)
+        #expect(state.artifacts(for: "pack-b")?.plugins.contains("lint@acme") == true)
+    }
+
+    @Test("doctor --fix reinstalls a plugin removed out of band and reports it fixed")
+    func doctorFixReinstallsPlugin() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        bed.mockCLI.installedPlugins = []
+        #expect(try bed.runDoctor(registry: registry).issues > 0)
+
+        var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
+        #expect(try runner.run().isHealthy)
+        #expect(bed.mockCLI.pluginInstallCalls.count == 2)
     }
 }

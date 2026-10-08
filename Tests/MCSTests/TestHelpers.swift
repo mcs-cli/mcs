@@ -40,19 +40,78 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
         return result
     }
 
+    struct PluginCall: Equatable {
+        let id: String
+        let scope: String
+        var workingDirectory: URL?
+    }
+
+    var marketplaceAddCalls: [String] = []
+    var pluginInstallCalls: [PluginCall] = []
+    var pluginRemoveCalls: [PluginCall] = []
+
+    /// What `plugin marketplace list` reports. Defaults to the official marketplace.
+    var marketplaces = [PluginMarketplace(
+        name: Constants.Plugins.officialMarketplace, repo: Constants.Plugins.officialMarketplaceRepo
+    )]
+
+    /// What `plugin list` reports. A successful install adds to it and a removal drops from it,
+    /// so a sync → doctor → remove sequence sees what the real CLI would.
+    var installedPlugins: [InstalledPlugin] = []
+    var pluginListDirectories: [URL?] = []
+    var pluginListFails = false
+
     @discardableResult
-    func pluginMarketplaceAdd(repo _: String) -> ShellResult {
-        result
+    func pluginMarketplaceAdd(repo: String) -> ShellResult {
+        marketplaceAddCalls.append(repo)
+        return result
+    }
+
+    func pluginMarketplaceList() -> ShellResult {
+        jsonResult(marketplaces)
+    }
+
+    func pluginList(workingDirectory: URL?) -> ShellResult {
+        pluginListDirectories.append(workingDirectory)
+        if pluginListFails { return ShellResult(exitCode: 1, stdout: "", stderr: "list failed") }
+        return jsonResult(installedPlugins.map { plugin in
+            // Mirrors the CLI: a local install is enabled only when listed from its own project.
+            guard plugin.scope == Constants.PluginScope.local else { return plugin }
+            let here = plugin.isInstall(atScope: plugin.scope, projectDirectory: workingDirectory)
+            return InstalledPlugin(
+                id: plugin.id, scope: plugin.scope, enabled: plugin.enabled && here, projectPath: plugin.projectPath
+            )
+        })
     }
 
     @discardableResult
-    func pluginInstall(ref _: PluginRef) -> ShellResult {
-        result
+    func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        pluginInstallCalls.append(PluginCall(id: id, scope: scope, workingDirectory: workingDirectory))
+        if result.succeeded {
+            installedPlugins.append(InstalledPlugin(
+                id: id, scope: scope, enabled: true,
+                projectPath: scope == Constants.PluginScope.local ? workingDirectory?.path : nil
+            ))
+        }
+        return result
     }
 
     @discardableResult
-    func pluginRemove(ref _: PluginRef) -> ShellResult {
-        result
+    func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        pluginRemoveCalls.append(PluginCall(id: id, scope: scope, workingDirectory: workingDirectory))
+        if result.succeeded {
+            installedPlugins.removeAll { $0.id == id && $0.isInstall(atScope: scope, projectDirectory: workingDirectory) }
+        }
+        return result
+    }
+
+    private func jsonResult(_ value: some Encodable) -> ShellResult {
+        do {
+            let data = try JSONEncoder().encode(value)
+            return ShellResult(exitCode: 0, stdout: String(decoding: data, as: UTF8.self), stderr: "")
+        } catch {
+            return ShellResult(exitCode: 1, stdout: "", stderr: error.localizedDescription)
+        }
     }
 }
 

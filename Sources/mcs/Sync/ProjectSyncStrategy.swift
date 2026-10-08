@@ -60,6 +60,7 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) -> PackArtifactRecord {
         var artifacts = PackArtifactRecord()
         artifacts.fileHashesShippedOnly = true
+        artifacts.plugins = previousArtifacts?.pluginsStillDeclared(by: pack) ?? []
 
         for component in pack.components {
             if ComponentExecutor.isAlreadyInstalled(component) {
@@ -102,7 +103,18 @@ struct ProjectSyncStrategy: SyncStrategy {
                     artifacts.gitignoreEntries.append(contentsOf: entries)
                 }
 
-            case .brewInstall, .plugin:
+            case let .plugin(name):
+                if case let .installed(id, userScopeCopy: true) = ConfiguratorSupport.installPlugin(
+                    name, component: component, scope: scope.pluginScope,
+                    executor: executor, artifacts: &artifacts, output: output
+                ), !globalScopeRecordsPlugin(name) {
+                    output.info(
+                        "  '\(id)' is also installed for every project. If nothing outside the projects"
+                            + " that declare it needs it, run: claude plugin uninstall \(id) -s user"
+                    )
+                }
+
+            case .brewInstall:
                 break
 
             case let .shellCommand(command, interactive):
@@ -132,6 +144,17 @@ struct ProjectSyncStrategy: SyncStrategy {
         return artifacts
     }
 
+    /// Whether a global-scope pack owns a user-scope copy of the plugin, so the copy is not stray.
+    private func globalScopeRecordsPlugin(_ name: String) -> Bool {
+        do {
+            let globalState = try ProjectState(stateFile: environment.globalStateFile)
+            return globalState.configuredPacks.contains { globalState.artifacts(for: $0)?.ownsPlugin(name) == true }
+        } catch {
+            // Only decides whether a hint is shown, never whether anything is removed.
+            return false
+        }
+    }
+
     // MARK: - Settings Composition
 
     func composeSettings(
@@ -145,14 +168,15 @@ struct ProjectSyncStrategy: SyncStrategy {
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
         let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)
         // Start from the existing extra keys minus what packs owned, so a pack value merges under
-        // the user's instead of replacing the whole object. Hooks and plugins are still rebuilt
-        // from the packs alone. Ownership stops one level down: an array such as
-        // `permissions.allow` is owned or skipped whole, so Claude Code's approvals in one a pack
-        // owns are still rewritten on sync.
+        // the user's instead of replacing the whole object. `enabledPlugins` is kept as the CLI
+        // wrote it; hooks are still rebuilt from the packs alone. Ownership stops one level down:
+        // an array such as `permissions.allow` is owned or skipped whole, so Claude Code's
+        // approvals in one a pack owns are still rewritten on sync.
         do {
             var existing = try Settings.load(from: scope.settingsPath)
             existing.removeKeys(allPreviousKeys)
             settings.extraJSON = existing.extraJSON
+            settings.enabledPlugins = existing.enabledPlugins
         } catch {
             output.warn(
                 "Could not parse \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)"
@@ -168,7 +192,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             output: output
         )
 
-        if hasContent || !settings.extraJSON.isEmpty {
+        if hasContent || !settings.extraJSON.isEmpty || !(settings.enabledPlugins ?? [:]).isEmpty {
             do {
                 try settings.save(to: scope.settingsPath, dropKeys: dropKeys)
                 if hasContent {

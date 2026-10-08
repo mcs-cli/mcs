@@ -56,7 +56,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         artifacts.fileHashesShippedOnly = true
         // Carry forward ownership records from previous sync
         artifacts.brewPackages = previousArtifacts?.brewPackages ?? []
-        artifacts.plugins = previousArtifacts?.plugins ?? []
+        artifacts.plugins = previousArtifacts?.pluginsStillDeclared(by: pack) ?? []
 
         for component in pack.components {
             if ComponentExecutor.isAlreadyInstalled(component) {
@@ -92,13 +92,10 @@ struct GlobalSyncStrategy: SyncStrategy {
                 }
 
             case let .plugin(name):
-                output.dimmed("  Installing plugin \(component.displayName)...")
-                if executor.installPlugin(name) {
-                    artifacts.recordPlugin(name)
-                    output.success("  \(component.displayName) installed")
-                } else {
-                    output.warn("  \(component.displayName) failed to install")
-                }
+                ConfiguratorSupport.installPlugin(
+                    name, component: component, scope: scope.pluginScope,
+                    executor: executor, artifacts: &artifacts, output: output
+                )
 
             case let .copyPackFile(source, destination, fileType):
                 let result = executor.installCopyPackFile(
@@ -201,14 +198,14 @@ struct GlobalSyncStrategy: SyncStrategy {
             settings.hooks = hooks.isEmpty ? nil : hooks
         }
         let groupCountAfter = settings.hooks?.values.reduce(0) { $0 + $1.count } ?? 0
-        let strippedContent = groupCountAfter < groupCountBefore
 
         // Strip previously-tracked settings keys (enabledPlugins + settingsMerge extraJSON)
         // before re-composing, so removed components don't leave stale entries.
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
-        if !allPreviousKeys.isEmpty {
-            settings.removeKeys(allPreviousKeys)
-        }
+        // A stripped key has to reach disk even when nothing is recomposed: step 6b resets each
+        // pack's record to what it contributes now, so an unsaved strip would orphan the key.
+        let strippedKeys = settings.removeKeys(allPreviousKeys)
+        let strippedContent = groupCountAfter < groupCountBefore || strippedKeys
 
         // Collect top-level keys to pass as dropKeys, preventing Layer 3 re-injection
         let dropKeys = Settings.topLevelKeys(of: allPreviousKeys)

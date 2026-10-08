@@ -627,23 +627,30 @@ struct AutoDerivedSettingsTests {
         #expect(command?.contains("~/.claude") != true)
     }
 
-    @Test("plugin component auto-derives enabledPlugins entry")
-    func pluginAutoDerivesEnabledPlugins() throws {
+    @Test("plugin component installs local to the project and leaves enabledPlugins to the CLI")
+    func pluginInstallsLocalToProject() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let cli = MockClaudeCLI()
 
-        let pack = makePluginPack()
+        let env = Environment(home: tmpDir)
+        try Configurator(
+            environment: env,
+            output: output,
+            shell: ShellRunner(environment: env),
+            strategy: ProjectSyncStrategy(projectPath: tmpDir, environment: env),
+            claudeCLI: cli
+        ).configure(packs: [makePluginPack()])
 
-        let claudeDir = tmpDir.appendingPathComponent(".claude")
-        try FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
-
-        let configurator = makeConfigurator(projectPath: tmpDir, home: tmpDir)
-        try configurator.configure(packs: [pack])
-
-        let settingsPath = claudeDir.appendingPathComponent("settings.local.json")
-        let result = try Settings.load(from: settingsPath)
-
-        #expect(result.enabledPlugins?["pr-review-toolkit"] == true)
+        #expect(cli.pluginInstallCalls == [MockClaudeCLI.PluginCall(
+            id: "pr-review-toolkit@\(Constants.Plugins.officialMarketplace)",
+            scope: Constants.PluginScope.local,
+            workingDirectory: tmpDir
+        )])
+        let artifacts = try ProjectState(projectRoot: tmpDir).artifacts(for: "test-pack")
+        #expect(artifacts?.plugins == ["pr-review-toolkit@claude-plugins-official"])
+        let settings = try Settings.load(from: tmpDir.appendingPathComponent(".claude/settings.local.json"))
+        #expect(settings.enabledPlugins?["pr-review-toolkit"] == nil)
     }
 
     @Test("hookFile without hookEvent does not generate settings entry")

@@ -15,17 +15,17 @@ struct ComponentExecutorTests {
 
     // MARK: - removePlugin
 
-    private func removePlugin(returning result: ShellResult) -> Bool {
-        let env = Environment()
+    private let userCopy = InstalledPlugin(id: "lint@acme", scope: "user", enabled: true, projectPath: nil)
+
+    private func removePlugin(
+        returning result: ShellResult,
+        scope: String = Constants.PluginScope.user,
+        installed: [InstalledPlugin] = []
+    ) -> Bool {
         let cli = MockClaudeCLI()
         cli.result = result
-        let exec = ComponentExecutor(
-            environment: env,
-            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
-            shell: ShellRunner(environment: env),
-            claudeCLI: cli
-        )
-        return exec.removePlugin("lint@acme")
+        cli.installedPlugins = installed
+        return makeExecutor(cli).removePlugin("lint@acme", scope: scope)
     }
 
     @Test("removePlugin counts a plugin that is already uninstalled as removed")
@@ -34,9 +34,17 @@ struct ComponentExecutorTests {
         #expect(removePlugin(returning: ShellResult(exitCode: 1, stdout: "", stderr: stderr)))
     }
 
-    @Test("removePlugin reports any other failure")
+    @Test("removePlugin counts a plugin left only at another scope as removed from this one")
+    func removePluginOnlyAtOtherScope() {
+        let stderr = "✘ Failed to uninstall plugin \"lint@acme\": Plugin \"lint@acme\" is installed in user scope, not local."
+        #expect(removePlugin(
+            returning: ShellResult(exitCode: 1, stdout: "", stderr: stderr), scope: Constants.PluginScope.local, installed: [userCopy]
+        ))
+    }
+
+    @Test("removePlugin reports a failure that leaves the plugin installed at this scope")
     func removePluginRealFailure() {
-        #expect(!removePlugin(returning: ShellResult(exitCode: 1, stdout: "", stderr: "network unreachable")))
+        #expect(!removePlugin(returning: ShellResult(exitCode: 1, stdout: "", stderr: "network unreachable"), installed: [userCopy]))
     }
 
     // MARK: - installProjectFile placeholder substitution
@@ -133,5 +141,66 @@ struct ComponentExecutorTests {
         let installed = projectPath.appendingPathComponent(".claude/hooks/test-hook.sh")
         let expectedHash = try FileHasher.sha256(of: installed)
         #expect(result.hashes.values.first == expectedHash)
+    }
+
+    // MARK: - installPlugin
+
+    private func makeExecutor(_ cli: MockClaudeCLI, project: URL? = nil) -> ComponentExecutor {
+        let env = Environment()
+        return ComponentExecutor(
+            environment: env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: env),
+            claudeCLI: cli,
+            mcpWorkingDirectory: project
+        )
+    }
+
+    @Test("installPlugin registers a repo marketplace and installs by its resolved id")
+    func installPluginResolvesRepoMarketplace() {
+        let cli = MockClaudeCLI()
+        cli.marketplaces = [PluginMarketplace(name: "hud", repo: "org/hud-repo")]
+        let project = URL(fileURLWithPath: "/tmp/mcs-exec-project")
+
+        let outcome = makeExecutor(cli, project: project).installPlugin("lint@org/hud-repo", scope: Constants.PluginScope.local)
+
+        #expect(outcome == .installed(id: "lint@hud", userScopeCopy: false))
+        #expect(cli.marketplaceAddCalls == ["org/hud-repo"])
+        #expect(cli.pluginInstallCalls == [MockClaudeCLI.PluginCall(id: "lint@hud", scope: "local", workingDirectory: project)])
+    }
+
+    @Test("installPlugin skips a plugin whose marketplace can't be found")
+    func installPluginUnresolvableMarketplace() {
+        let cli = MockClaudeCLI()
+        let outcome = makeExecutor(cli).installPlugin("lint@org/unknown", scope: Constants.PluginScope.user)
+        #expect(outcome == .failed)
+        #expect(cli.pluginInstallCalls.isEmpty)
+    }
+
+    @Test("installPlugin takes no ownership of an install already at the target scope")
+    func installPluginAlreadyInstalled() {
+        let cli = MockClaudeCLI()
+        cli.installedPlugins = [InstalledPlugin(id: "lint@acme", scope: "user", enabled: true, projectPath: nil)]
+        let outcome = makeExecutor(cli).installPlugin("lint@acme", scope: Constants.PluginScope.user)
+        #expect(outcome == .alreadyInstalled(id: "lint@acme"))
+        #expect(cli.pluginInstallCalls.isEmpty)
+    }
+
+    @Test("installPlugin reports a user-scope copy when installing locally")
+    func installPluginFlagsUserScopeCopy() {
+        let cli = MockClaudeCLI()
+        cli.installedPlugins = [InstalledPlugin(id: "lint@acme", scope: "user", enabled: true, projectPath: nil)]
+        let project = URL(fileURLWithPath: "/tmp/mcs-exec-project")
+        let outcome = makeExecutor(cli, project: project).installPlugin("lint@acme", scope: Constants.PluginScope.local)
+        #expect(outcome == .installed(id: "lint@acme", userScopeCopy: true))
+    }
+
+    @Test("installPlugin claims nothing when it couldn't see what was installed before")
+    func installPluginUnlistedIsUnowned() {
+        let cli = MockClaudeCLI()
+        cli.pluginListFails = true
+        let outcome = makeExecutor(cli).installPlugin("lint@acme", scope: Constants.PluginScope.user)
+        #expect(outcome == .installedUnowned(id: "lint@acme"))
+        #expect(cli.pluginInstallCalls.count == 1)
     }
 }

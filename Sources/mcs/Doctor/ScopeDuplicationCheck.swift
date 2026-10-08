@@ -86,7 +86,8 @@ struct ScopeDuplicationCheck: DoctorCheck {
             strategy: ProjectSyncStrategy(projectPath: projectRoot, environment: environment)
         )
         // Default `refCountScope` (nil → this project's path): the global scope still counts, so
-        // brew packages, plugins and gitignore entries report `.stillNeeded` and stay in place.
+        // brew packages and gitignore entries report `.stillNeeded` and stay in place. Plugins are
+        // per scope, so the project's `local` install goes and the global `user` one stays.
         // Passing `packRemoveSentinel` here would exclude every scope and remove them.
         configurator.unconfigurePack(packID, state: &state)
 
@@ -194,9 +195,10 @@ struct ScopeDuplicationCheck: DoctorCheck {
     /// resolved per component and is the same in both scopes, but the directory differs, so the
     /// two entries are distinct strings that both fire. Everything else either shadows (project
     /// `settings.local.json` over global
-    /// `settings.json`, MCP `local` over `user`), is installed once (the project scope skips brew
-    /// packages and plugins entirely), writes one idempotent line (gitignore), or is a one-shot
-    /// side effect rather than a standing artifact (`shellCommand`).
+    /// `settings.json`, MCP `local` over `user`), is the same plugin enabled at two scopes and
+    /// loaded once, is installed once (the project scope skips brew packages), writes one
+    /// idempotent line (gitignore), or is a one-shot side effect rather than a standing artifact
+    /// (`shellCommand`).
     ///
     /// Deliberately exhaustive: a new install action should not silently default to "harmless".
     private static func duplicatesAcrossScopes(_ action: ComponentInstallAction) -> Bool {

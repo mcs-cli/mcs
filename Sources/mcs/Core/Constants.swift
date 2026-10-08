@@ -56,7 +56,7 @@ enum Constants {
         /// Stderr text `claude mcp remove` prints when the server is not registered in that scope.
         static let mcpServerNotFound = "No MCP server named"
 
-        /// Stderr text `claude plugin remove` prints when the plugin is not installed.
+        /// Stderr text `claude plugin uninstall` prints when the plugin is not installed.
         static let pluginNotFound = "not found in installed plugins"
     }
 
@@ -163,6 +163,15 @@ enum Constants {
     }
 
     // MARK: - Plugins
+
+    /// Claude Code plugin install scopes.
+    enum PluginScope {
+        /// Enabled only in the project the install ran in (`settings.local.json` there).
+        static let local = "local"
+
+        /// Enabled in every project (`~/.claude/settings.json`).
+        static let user = "user"
+    }
 
     enum Plugins {
         /// The official Anthropic plugin marketplace identifier.
