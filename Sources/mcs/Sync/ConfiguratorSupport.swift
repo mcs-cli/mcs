@@ -452,7 +452,7 @@ enum ConfiguratorSupport {
         })
         guard !objectKeys.isEmpty else { return keyPaths }
 
-        // Merging into an empty value records exactly the paths a real sync would own.
+        // Merging into an empty value yields every path the pack declares: the most a sync could own.
         var declared: [String: [String]] = [:]
         for component in pack?.components ?? [] {
             guard case let .settingsMerge(source) = component.installAction, let source else { continue }
