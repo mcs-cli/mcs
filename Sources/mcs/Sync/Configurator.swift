@@ -123,7 +123,7 @@ struct Configurator {
         output.plain("")
         output.plain("  Selected packs stay or get added. Deselected packs are removed.")
 
-        let selectedNumbers = output.multiSelect(groups: &groups)
+        let selectedNumbers = try output.multiSelect(groups: &groups)
 
         let selectedPacks = selectablePacks.enumerated().compactMap { index, pack in
             selectedNumbers.contains(index + 1) ? pack : nil
@@ -149,7 +149,7 @@ struct Configurator {
                 // 'n' in the picker binds to "select none"; default: false lets a user who hit it
                 // thinking "cancel" still abort safely from the confirmation.
                 let prompt = summary.isFullWipe ? "Remove all configured packs?" : "Apply these changes?"
-                guard output.askYesNo(prompt, default: false) else {
+                guard try output.askYesNo(prompt, default: false) else {
                     output.info("Sync cancelled.")
                     return
                 }
@@ -269,7 +269,7 @@ struct Configurator {
                 }
             }
             output.plain("")
-            guard output.askYesNo("Proceed with removal?", default: true) else {
+            guard try output.askYesNo("Proceed with removal?", default: true) else {
                 output.info("Sync cancelled.")
                 return
             }
@@ -701,7 +701,7 @@ struct Configurator {
         )
         let undeclaredKeys = plan.undeclaredKeys
 
-        let seedFromPriors = decideSeedStrategy(
+        let seedFromPriors = try decideSeedStrategy(
             reusableValues: plan.reusableValues,
             newDeclaredKeys: plan.newKeys,
             visibleValueKeys: CrossPackPromptResolver.visibleValueKeys(in: plan.declared),
@@ -807,7 +807,7 @@ struct Configurator {
         newDeclaredKeys: Set<String>,
         visibleValueKeys: Set<String>,
         reusePriorValuesSilently: Bool
-    ) -> Bool {
+    ) throws -> Bool {
         let decision = Self.priorReuse(
             hasReusable: !reusableValues.isEmpty, hasNewKeys: !newDeclaredKeys.isEmpty,
             interactive: output.hasInteractiveStdin, silently: reusePriorValuesSilently
@@ -841,7 +841,7 @@ struct Configurator {
         ) {
             output.dimmed(line)
         }
-        return output.askYesNo("Reuse these values?", default: true)
+        return try output.askYesNo("Reuse these values?", default: true)
     }
 
     /// Pre-load templates from disk (single read per pack).

@@ -104,4 +104,87 @@ struct EnvironmentTests {
 
         #expect(!env.isInsideClaudeHome(env.homeDirectory))
     }
+
+    // MARK: - Home directory
+
+    @Test("The default home directory prefers $HOME")
+    func defaultHomeDirectoryPrefersHOME() {
+        // Tested as a pure function rather than by mutating the process environment: swift-testing
+        // runs in parallel, and setenv would leak into every other test in flight.
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": "/sandbox/home"]) == "/sandbox/home")
+    }
+
+    @Test("An unset or empty $HOME falls back to the passwd entry")
+    func defaultHomeDirectoryFallsBackToPasswd() {
+        #expect(Environment.defaultHomeDirectory(environment: [:]) == NSHomeDirectory())
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": ""]) == NSHomeDirectory())
+        #expect(Environment.defaultHomeDirectory(environment: ["HOME": "relative/home"]) == NSHomeDirectory())
+    }
+
+    @Test("The default initializer wires the resolved home through")
+    func defaultInitUsesDefaultHomeDirectory() {
+        #expect(Environment().homeDirectory.path == Environment.defaultHomeDirectory())
+    }
+
+    @Test("A leading tilde expands against the environment's home, not the passwd entry")
+    func expandingTildeUsesEnvironmentHome() {
+        let env = Environment(home: URL(fileURLWithPath: "/sandbox/home"))
+
+        #expect(env.expandingTilde("~") == "/sandbox/home")
+        #expect(env.expandingTilde("~/") == "/sandbox/home")
+        #expect(env.expandingTilde("~/packs/ios") == "/sandbox/home/packs/ios")
+        #expect(env.expandingTilde("/abs/path") == "/abs/path")
+        #expect(env.expandingTilde("relative/~/x") == "relative/~/x")
+        #expect(env.expandingTilde("~other/x") == "~other/x")
+    }
+
+    // MARK: - Homebrew prefix
+
+    @Test("brewPrefix strips the Homebrew repository component the installer's symlink resolves to")
+    func brewPrefixStripsRepositoryCheckout() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // The shape Linuxbrew and Intel macOS install: $PREFIX/bin/brew -> ../Homebrew/bin/brew.
+        let prefix = home.appendingPathComponent("prefix")
+        let repositoryBin = prefix.appendingPathComponent("Homebrew/bin")
+        let prefixBin = prefix.appendingPathComponent("bin")
+        try FileManager.default.createDirectory(at: repositoryBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: prefixBin, withIntermediateDirectories: true)
+        try Data().write(to: repositoryBin.appendingPathComponent("brew"))
+        try FileManager.default.createSymbolicLink(
+            atPath: prefixBin.appendingPathComponent("brew").path,
+            withDestinationPath: "../Homebrew/bin/brew"
+        )
+
+        // Resolving alone yields <prefix>/Homebrew, whose bin holds only brew.
+        #expect(Environment.brewPrefix(forBrewPath: prefixBin.appendingPathComponent("brew").path) == prefix.path)
+    }
+
+    @Test("brewPrefix follows a shim symlink back to the real prefix")
+    func brewPrefixFollowsShim() throws {
+        let home = try makeTmpHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+
+        // A user-made ~/.local/bin/brew -> <prefix>/bin/brew with <prefix>/bin off PATH: the
+        // prefix formulae link into is the target's, not the shim's.
+        let prefix = home.appendingPathComponent("opt/homebrew")
+        let prefixBin = prefix.appendingPathComponent("bin")
+        let shimBin = home.appendingPathComponent(".local/bin")
+        try FileManager.default.createDirectory(at: prefixBin, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: shimBin, withIntermediateDirectories: true)
+        try Data().write(to: prefixBin.appendingPathComponent("brew"))
+        try FileManager.default.createSymbolicLink(
+            atPath: shimBin.appendingPathComponent("brew").path,
+            withDestinationPath: prefixBin.appendingPathComponent("brew").path
+        )
+
+        let expected = prefix.resolvingSymlinksInPath().path
+        #expect(Environment.brewPrefix(forBrewPath: shimBin.appendingPathComponent("brew").path) == expected)
+    }
+
+    @Test("brewPrefix handles a real file at $PREFIX/bin/brew (arm64 macOS shape)")
+    func brewPrefixForRealFile() {
+        #expect(Environment.brewPrefix(forBrewPath: "/opt/homebrew/bin/brew") == "/opt/homebrew")
+    }
 }

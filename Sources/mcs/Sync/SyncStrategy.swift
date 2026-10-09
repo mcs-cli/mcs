@@ -106,6 +106,16 @@ protocol SyncStrategy {
 // MARK: - Default Implementations
 
 extension SyncStrategy {
+    /// A `shellInteractive` command gets a PTY only when there is a terminal to bridge it to: off a
+    /// TTY nothing can answer its prompts, and a PTY child waiting on input would never see EOF.
+    func announceShellCommand(_ name: String, interactive: Bool, usesTerminal: Bool, output: CLIOutput) {
+        if usesTerminal {
+            output.plain("  Running \(name) (may prompt for your password)...")
+        } else if interactive {
+            output.warn("  \(name) wants a terminal, but stdin is not one; running it without, so any prompt it shows fails")
+        }
+    }
+
     /// Default removal summary — prints all non-empty artifact fields.
     ///
     /// Uses `scope.claudeFilePath.lastPathComponent` for template section labels.

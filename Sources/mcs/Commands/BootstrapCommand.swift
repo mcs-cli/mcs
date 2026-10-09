@@ -34,7 +34,7 @@ struct BootstrapCommand: LockedCommand {
         // Dry-run must not trigger the Homebrew install prompt for Claude Code — that
         // would violate the no-changes contract on a preview.
         if !dryRun {
-            guard ensureClaudeCLI(shell: ctx.shell, environment: ctx.env, output: ctx.output) else {
+            guard ensureClaudeCLI(shell: ctx.shell, output: ctx.output) else {
                 throw ExitCode.failure
             }
         }
@@ -112,7 +112,7 @@ struct BootstrapCommand: LockedCommand {
         file: BootstrapFile,
         ctx: PackCommandContext
     ) throws -> [String] {
-        let resolver = PackSourceResolver()
+        let resolver = PackSourceResolver(environment: ctx.env)
         let adder = PackAdder(ctx: ctx)
         // Bootstrap is non-interactive by design: mcs.yaml already expresses the user's
         // intent, so identifier duplicates and artifact collisions must not fall through

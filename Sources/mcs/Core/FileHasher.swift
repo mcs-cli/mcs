@@ -1,9 +1,8 @@
-import CryptoKit
+import Crypto
 import Foundation
 
-/// Pure CryptoKit utilities for SHA-256 file hashing.
-/// Extracted from the deleted `Manifest` type — used by `PackTrustManager`
-/// for trust verification and by `ComponentExecutor` for directory copies.
+/// SHA-256 file hashing utilities, used by `PackTrustManager` for trust verification and by
+/// `ComponentExecutor` for directory copies.
 enum FileHasher {
     /// Compute SHA-256 hash of a file.
     static func sha256(of url: URL) throws -> String {

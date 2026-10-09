@@ -91,7 +91,7 @@ struct PackAdder {
             throw error
         }
 
-        guard resolveDuplicate(
+        guard try resolveDuplicate(
             manifest: manifest,
             sourceURL: gitURL,
             registryData: registryData,
@@ -109,7 +109,7 @@ struct PackAdder {
             fetcher.removeQuietly(packPath: fetchResult.localPath)
             throw error
         }
-        if !collisions.isEmpty, !acceptCollisions(policy: options.duplicatePolicy) {
+        if !collisions.isEmpty, try !acceptCollisions(policy: options.duplicatePolicy) {
             fetcher.removeQuietly(packPath: fetchResult.localPath)
             ctx.output.info("Pack not added.")
             return .declined
@@ -203,7 +203,7 @@ struct PackAdder {
 
         let registryData = try ctx.loadRegistry()
 
-        guard resolveDuplicate(
+        guard try resolveDuplicate(
             manifest: manifest,
             sourceURL: path.path,
             registryData: registryData,
@@ -214,7 +214,7 @@ struct PackAdder {
         }
 
         let collisions = try detectCollisions(manifest: manifest, registryData: registryData)
-        if !collisions.isEmpty, !acceptCollisions(policy: options.duplicatePolicy) {
+        if !collisions.isEmpty, try !acceptCollisions(policy: options.duplicatePolicy) {
             ctx.output.info("Pack not added.")
             return .declined
         }
@@ -319,7 +319,7 @@ struct PackAdder {
         sourceURL: String,
         registryData: PackRegistryFile.RegistryData,
         policy: DuplicatePolicy
-    ) -> Bool {
+    ) throws -> Bool {
         guard let existing = registryData.packs.first(where: { $0.identifier == manifest.identifier }) else {
             return true
         }
@@ -334,7 +334,7 @@ struct PackAdder {
 
         switch policy {
         case .prompt:
-            return ctx.output.askYesNo("Replace existing pack?", default: false)
+            return try ctx.output.askYesNo("Replace existing pack?", default: false)
         case .autoAccept:
             ctx.output.plain("  Replacing (declared by mcs.yaml).")
             return true
@@ -343,10 +343,10 @@ struct PackAdder {
 
     /// Prompt on collision when policy requires it. `autoAccept` returns `true`
     /// after the warning is already printed by `detectCollisions`.
-    func acceptCollisions(policy: DuplicatePolicy) -> Bool {
+    func acceptCollisions(policy: DuplicatePolicy) throws -> Bool {
         switch policy {
         case .prompt:
-            ctx.output.askYesNo("Continue anyway?", default: false)
+            try ctx.output.askYesNo("Continue anyway?", default: false)
         case .autoAccept:
             true
         }
@@ -359,7 +359,7 @@ struct PackAdder {
     ) throws -> [String: String]? {
         let trustManager = PackTrustManager(output: ctx.output, policy: policy)
         let items = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
-        guard trustManager.promptForTrust(
+        guard try trustManager.promptForTrust(
             manifest: manifest,
             packPath: packPath,
             items: items

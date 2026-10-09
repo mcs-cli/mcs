@@ -2,8 +2,27 @@ import Foundation
 
 /// Manages Homebrew package installation and service management.
 struct Homebrew {
-    /// Both Homebrew prefix paths — arm64 and x86_64.
-    static let allPrefixes = ["/opt/homebrew", "/usr/local"]
+    /// Where Homebrew installs itself when no `brew` is on PATH to ask.
+    static var defaultPrefix: String {
+        #if canImport(Darwin) && arch(arm64)
+        "/opt/homebrew"
+        #elseif canImport(Darwin)
+        "/usr/local"
+        #else
+        // Linuxbrew's documented multi-user prefix; unlike macOS it does not vary by architecture.
+        "/home/linuxbrew/.linuxbrew"
+        #endif
+    }
+
+    /// Every prefix Homebrew installs itself at on this platform: both macOS architectures, or
+    /// Linuxbrew's multi-user and single-user locations.
+    static func allPrefixes(home: URL) -> [String] {
+        #if canImport(Darwin)
+        ["/opt/homebrew", "/usr/local"]
+        #else
+        [defaultPrefix, home.appendingPathComponent(".linuxbrew").path]
+        #endif
+    }
 
     let shell: any ShellRunning
     let environment: Environment
@@ -56,6 +75,18 @@ struct Homebrew {
         shell.run(environment.brewPath, arguments: ["uninstall", name])
     }
 
+    /// What to tell the user about `package` when Homebrew is not installed. It names a step outside
+    /// mcs first, because advice that only says to re-run `mcs sync` would loop. On Linux the package
+    /// almost certainly comes from the distribution, so that is what is named.
+    static func manualInstallAdvice(for package: String) -> String {
+        #if canImport(Darwin)
+        "Homebrew not found — install it from https://brew.sh, then re-run 'mcs sync' to get \(package)"
+        #else
+        "Homebrew not found — install \(package) with your system package manager"
+            + " (apt, dnf, pacman, …) or install Homebrew from https://brew.sh"
+        #endif
+    }
+
     /// Detects the Homebrew formula that provides a command by reading the immediate
     /// symlink target in the Homebrew bin directory. Returns nil if the command isn't
     /// brew-installed.
@@ -63,10 +94,10 @@ struct Homebrew {
     /// Uses single-hop symlink reading (`destinationOfSymbolicLink`) instead of full
     /// resolution because some commands chain through multiple symlinks where the final
     /// target leaves the Cellar path (e.g. npx → Cellar/node/.../npx → lib/node_modules/...).
-    static func detectFormula(for command: String) -> String? {
+    static func detectFormula(for command: String, environment: Environment) -> String? {
         let fm = FileManager.default
         let basename = bareName(of: command)
-        for prefix in allPrefixes {
+        for prefix in allPrefixes(home: environment.homeDirectory) {
             let binPath = "\(prefix)/bin/\(basename)"
             guard let dest = try? fm.destinationOfSymbolicLink(atPath: binPath) else { continue }
 

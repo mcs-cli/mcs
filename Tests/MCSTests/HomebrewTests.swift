@@ -15,6 +15,42 @@ struct HomebrewTests {
         #expect(Homebrew.bareName(of: package) == expected)
     }
 
+    // MARK: - allPrefixes
+
+    @Test("The fallback prefix is the platform's own default")
+    func defaultPrefixPerPlatform() {
+        #if canImport(Darwin) && arch(arm64)
+        #expect(Homebrew.defaultPrefix == "/opt/homebrew")
+        #elseif canImport(Darwin)
+        #expect(Homebrew.defaultPrefix == "/usr/local")
+        #else
+        #expect(Homebrew.defaultPrefix == "/home/linuxbrew/.linuxbrew")
+        #endif
+    }
+
+    @Test("allPrefixes lists this platform's Homebrew locations")
+    func allPrefixesPerPlatform() {
+        let home = URL(fileURLWithPath: "/tmp/mcs-home")
+        #if canImport(Darwin)
+        #expect(Homebrew.allPrefixes(home: home) == ["/opt/homebrew", "/usr/local"])
+        #else
+        #expect(Homebrew.allPrefixes(home: home) == ["/home/linuxbrew/.linuxbrew", "/tmp/mcs-home/.linuxbrew"])
+        #endif
+    }
+
+    // MARK: - Guidance when Homebrew is absent
+
+    @Test("Install advice names the package and the platform's way to get it")
+    func manualInstallAdviceIsActionable() {
+        let advice = Homebrew.manualInstallAdvice(for: "ripgrep")
+        #expect(advice.contains("ripgrep"))
+        #if canImport(Darwin)
+        #expect(advice.contains("brew.sh"))
+        #else
+        #expect(advice.contains("system package manager"))
+        #endif
+    }
+
     // MARK: - provides
 
     @Test("provides takes the PATH fast path without spawning brew")

@@ -10,17 +10,41 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Pinned so a lint verdict is a function of the repo: a new rule lands when this is bumped,
+  # not when upstream tags a release mid-review.
+  SWIFTLINT_VERSION: '0.65.1'
+  SWIFTFORMAT_VERSION: '0.63.0'
+
 jobs:
   lint:
     name: Lint
+    # macOS, not Linux: SwiftLint's static Linux binary cannot load SourceKit, so it silently skips
+    # every SourceKit-backed rule and CI would enforce less than a local run.
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Install linters
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew install swiftformat swiftlint || true
-          brew upgrade swiftformat swiftlint || true
+          mkdir -p "$RUNNER_TEMP/linters/bin"
+          cd "$RUNNER_TEMP/linters"
+          gh release download "$SWIFTLINT_VERSION" --repo realm/SwiftLint --pattern portable_swiftlint.zip
+          gh release download "$SWIFTFORMAT_VERSION" --repo nicklockwood/SwiftFormat --pattern swiftformat.zip
+          unzip -q portable_swiftlint.zip -d swiftlint-zip
+          unzip -q swiftformat.zip -d swiftformat-zip
+          install -m 0755 swiftlint-zip/swiftlint bin/swiftlint
+          install -m 0755 swiftformat-zip/swiftformat bin/swiftformat
+          echo "$RUNNER_TEMP/linters/bin" >> "$GITHUB_PATH"
+
+      # Asserted, not just printed: a pin that silently resolved to something else would make every
+      # later verdict untrustworthy.
+      - name: Verify linter versions
+        run: |
+          swiftformat --version | grep -qx "$SWIFTFORMAT_VERSION"
+          swiftlint --version | grep -qx "$SWIFTLINT_VERSION"
 
       - name: SwiftFormat
         run: swiftformat --lint --strict .
@@ -28,53 +52,80 @@ jobs:
       - name: SwiftLint
         run: swiftlint --strict --reporter github-actions-logging
 
-  build-and-test:
-    name: Build & Test (${{ matrix.os }})
+  # Each entry's name is a required status check, so it is spelled out rather than derived.
+  test:
+    name: ${{ matrix.name }}
     needs: lint
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
+        include:
+          - name: Build & Test (macos-15)
+            runner: macos-15
+          - name: Build & Test (macos-26)
+            runner: macos-26
+          # 22.04 on both arches so PR checks build against the same glibc floor the release does.
+          # --no-parallel: see "Known limitations" in docs/linux-support.md.
+          - name: Test (ubuntu-22.04)
+            runner: ubuntu-22.04
+            test-flags: --no-parallel
+          - name: Test (ubuntu-22.04-arm)
+            runner: ubuntu-22.04-arm
+            test-flags: --no-parallel
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ matrix.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ matrix.os }}-
+      # Not a `container:` job: the official swift images run as root, and
+      # UpdateCheckerTests.registryWriteFailureContract asserts that a write into a 0555
+      # directory fails, which root ignores.
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-swift-linux
 
-      - name: Swift version
-        run: swift --version
-
-      - name: Resolve packages
-        run: swift package resolve
+      - uses: ./.github/actions/spm-deps
 
       - name: Test
-        run: swift test
+        env:
+          TEST_FLAGS: ${{ matrix.test-flags }}
+        run: |
+          read -ra FLAGS <<< "$TEST_FLAGS"
+          swift test "${FLAGS[@]}"
 
-  build-universal:
-    name: Universal Binary
+  # The shapes release.yml ships, each followed by whole command flows against a real pack — the
+  # unit suite cannot reach them, and here they cost seconds rather than a build.
+  build:
+    name: ${{ matrix.name }}
     needs: lint
-    runs-on: macos-latest
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Universal Binary
+            runner: macos-latest
+            build-flags: --arch arm64 --arch x86_64
+          - name: Build & Smoke (ubuntu-22.04)
+            runner: ubuntu-22.04
+            build-flags: --static-swift-stdlib
+          - name: Build & Smoke (ubuntu-22.04-arm)
+            runner: ubuntu-22.04-arm
+            build-flags: --static-swift-stdlib
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/cache@v6
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/setup-swift-linux
+
+      - uses: ./.github/actions/spm-deps
+
+      - name: Build release binary
+        env:
+          BUILD_FLAGS: ${{ matrix.build-flags }}
+        run: |
+          read -ra FLAGS <<< "$BUILD_FLAGS"
+          swift build -c release "${FLAGS[@]}"
+          echo "MCS=$(swift build -c release "${FLAGS[@]}" --show-bin-path)/mcs" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/mcs-smoke
         with:
-          path: |
-            .build/checkouts
-            .build/repositories
-            .build/workspace-state.json
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift') }}
-          restore-keys: spm-${{ runner.os }}-
-
-      - name: Resolve packages
-        run: swift package resolve
-
-      - name: Build universal binary
-        run: swift build -c release --arch arm64 --arch x86_64
+          mcs: ${{ env.MCS }}

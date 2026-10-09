@@ -49,12 +49,13 @@ private struct LifecycleTestBed {
 
     func makeGlobalSyncConfigurator(
         registry: TechPackRegistry = TechPackRegistry(),
-        warningCounter: WarningCounter? = nil
+        warningCounter: WarningCounter? = nil,
+        shell: (any ShellRunning)? = nil
     ) -> Configurator {
         Configurator(
             environment: env,
             output: CLIOutput(colorsEnabled: false, warningCounter: warningCounter, interactiveStdin: false),
-            shell: ShellRunner(environment: env),
+            shell: shell ?? ShellRunner(environment: env),
             registry: registry,
             strategy: GlobalSyncStrategy(environment: env),
             claudeCLI: mockCLI
@@ -1277,12 +1278,13 @@ struct ShellCommandLifecycleTests {
         #expect(FileManager.default.fileExists(atPath: markerPath))
     }
 
-    @Test("shellCommand with interactive flag is accepted and state is recorded")
-    func shellCommandInteractiveAccepted() throws {
+    @Test("An interactive shellCommand off a terminal runs without a PTY, so its prompt ends instead of hanging")
+    func shellCommandInteractiveOffTerminalDoesNotHang() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
 
-        let markerPath = bed.home.appendingPathComponent("interactive-marker.txt").path
+        // `read` sees EOF only without a PTY: under one, nothing would ever end the child's input.
+        let markerPath = bed.home.appendingPathComponent("eof-marker.txt").path
         let pack = MockTechPack(
             identifier: "interactive-pack",
             displayName: "Interactive Pack",
@@ -1293,18 +1295,17 @@ struct ShellCommandLifecycleTests {
                     description: "Install with interactive flag",
                     type: .configuration,
                     packIdentifier: "interactive-pack",
-                    installAction: .shellCommand(command: "touch '\(markerPath)'", interactive: true)
+                    installAction: .shellCommand(command: "read answer || touch '\(markerPath)'", interactive: true)
                 ),
             ]
         )
         let registry = TechPackRegistry(packs: [pack])
 
-        // Configure — interactive commands use forkpty() in real ShellRunner,
-        // but the test verifies the component is accepted and state is recorded.
         let configurator = bed.makeGlobalSyncConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
 
-        // Verify state records the pack
+        #expect(FileManager.default.fileExists(atPath: markerPath))
+
         let state = try ProjectState(stateFile: bed.env.globalStateFile)
         #expect(state.configuredPacks.contains("interactive-pack"))
     }
@@ -2783,8 +2784,15 @@ struct HookInterpreterLifecycleTests {
             #expect(artifacts.hookCommands.contains(command), "state should record '\(command)'")
         }
 
-        // 4. Doctor joins the recorded commands back to their components without complaint
-        #expect(try bed.runDoctor(registry: registry).issues == 0)
+        // 4. Doctor joins the recorded commands back to their components without complaint.
+        // `HookInterpreterCheck` resolves each interpreter on PATH, so a machine without `node`
+        // fails here for a reason that has nothing to do with the composition under test — say so
+        // rather than leaving a bare count.
+        let summary = try bed.runDoctor(registry: registry)
+        let nodeHint = ShellRunner(environment: Environment()).commandExists("node")
+            ? ""
+            : " ('node' is not on PATH, which the declared and inferred interpreters need)"
+        #expect(summary.issues == 0, "doctor reported \(summary.issues) issue(s)\(nodeHint)")
 
         // 5. Deselecting the pack removes the files and every hook entry, interpreter regardless
         try configurator.configure(packs: [], confirmRemovals: false)
@@ -3302,6 +3310,37 @@ struct BrewPackageDoctorTests {
         let summary = try runner.run()
         #expect(summary.warnings == 0)
         #expect(summary.issues == 0)
+    }
+
+    @Test("A brew package satisfied on PATH spawns no brew subprocess")
+    func pathSatisfiedBrewPackageSpawnsNoSubprocess() throws {
+        // What makes `brew:` usable on Linux: a command on PATH needs no Homebrew at all. The package
+        // name is one no machine has, so the mocked PATH hit decides it.
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let package = "mcs-nonexistent-formula-for-tests"
+        let shell = MockShellRunner(environment: bed.env)
+        shell.commandExistsResult = true
+
+        let pack = MockTechPack(
+            identifier: "brew-pack",
+            displayName: "Brew Pack",
+            components: [bed.brewComponent(pack: "brew-pack", id: "tool", package: package)]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeGlobalSyncConfigurator(registry: registry, shell: shell)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(shell.commandExistsCalls.contains(package))
+        #expect(
+            !shell.runCalls.contains { $0.executable == bed.env.brewPath },
+            "a PATH hit must settle the question without asking brew"
+        )
+
+        let state = try ProjectState(stateFile: bed.env.globalStateFile)
+        #expect(state.configuredPacks.contains("brew-pack"))
     }
 }
 

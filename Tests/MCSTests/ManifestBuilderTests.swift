@@ -100,7 +100,7 @@ struct ManifestBuilderTests {
             author: "Test Author"
         )
 
-        let result = ManifestBuilder().build(
+        let result = ManifestBuilder(environment: Environment()).build(
             from: config,
             metadata: metadata,
             options: ManifestBuilder.BuildOptions(
@@ -251,7 +251,7 @@ struct ManifestBuilderTests {
             ),
         ]
 
-        let result = ManifestBuilder().build(
+        let result = ManifestBuilder(environment: Environment()).build(
             from: config,
             metadata: ManifestBuilder.Metadata(
                 identifier: "ts-pack", displayName: "TS Pack", description: "TypeScript hooks", author: nil
@@ -287,7 +287,7 @@ struct ManifestBuilderTests {
             author: nil
         )
 
-        let result = ManifestBuilder().build(
+        let result = ManifestBuilder(environment: Environment()).build(
             from: config, metadata: metadata,
             options: ManifestBuilder.BuildOptions(
                 selectedMCPServers: [], selectedHookFiles: [], selectedSkillFiles: [],
@@ -338,7 +338,7 @@ struct ManifestBuilderTests {
             author: nil
         )
 
-        let result = ManifestBuilder().build(
+        let result = ManifestBuilder(environment: Environment()).build(
             from: config, metadata: metadata,
             options: ManifestBuilder.BuildOptions(
                 selectedMCPServers: Set(config.mcpServers.map(\.name)),
@@ -386,7 +386,7 @@ struct ManifestBuilderTests {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
-        let result = ManifestBuilder().build(
+        let result = ManifestBuilder(environment: Environment()).build(
             from: config, metadata: metadata,
             options: ManifestBuilder.BuildOptions(
                 selectedMCPServers: selectedMCPServers,

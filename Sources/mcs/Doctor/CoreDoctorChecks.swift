@@ -39,8 +39,18 @@ struct BrewPackageCheck: DoctorCheck {
         return .fail("not found")
     }
 
+    /// Without Homebrew there is nothing for a re-sync to run, so offering one would promise a
+    /// repair and then report the same failure. The hint names the system package manager instead.
+    var isRepairableByResync: Bool {
+        Homebrew(shell: ShellRunner(environment: environment), environment: environment).isInstalled
+    }
+
     func fix() -> FixResult {
-        .notFixable("Run 'mcs sync' to install dependencies")
+        let shell = ShellRunner(environment: environment)
+        guard Homebrew(shell: shell, environment: environment).isInstalled else {
+            return .notFixable(Homebrew.manualInstallAdvice(for: package))
+        }
+        return .notFixable("Run 'mcs sync' to install dependencies")
     }
 }
 

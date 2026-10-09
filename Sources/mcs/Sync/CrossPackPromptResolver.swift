@@ -372,7 +372,7 @@ enum CrossPackPromptResolver {
                 let items = mergedOptions.map { (name: $0.label, description: $0.value) }
                 let label = "Select value for \(key)"
                 let initialIndex = PromptOption.index(of: prior, in: mergedOptions, fallback: declaredDefault)
-                let selected = output.singleSelect(title: label, items: items, initialIndex: initialIndex)
+                let selected = try output.singleSelect(title: label, items: items, initialIndex: initialIndex)
                 resolved[key] = mergedOptions[selected].value
             } else {
                 // Default to text input; prior value seeds the Enter-to-accept default.

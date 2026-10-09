@@ -57,7 +57,7 @@ struct SyncCommand: LockedCommand {
         let output = CLIOutput()
         let shell = ShellRunner(environment: env)
 
-        guard ensureClaudeCLI(shell: shell, environment: env, output: output) else {
+        guard ensureClaudeCLI(shell: shell, output: output) else {
             throw ExitCode.failure
         }
 
@@ -255,7 +255,7 @@ struct SyncCommand: LockedCommand {
                 output.plain("  Add '--global' to run global sync, or run from a project directory.")
                 throw ExitCode.failure
             }
-            let useGlobal = output.askYesNo(
+            let useGlobal = try output.askYesNo(
                 "It looks like you want to sync global scope. Use 'mcs sync --global' instead?",
                 default: true
             )

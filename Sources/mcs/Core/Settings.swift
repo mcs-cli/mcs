@@ -318,8 +318,20 @@ struct Settings: Codable {
         return dict.keys.sorted().map { "\(key).\($0)" }
     }
 
+    /// Structural JSON equality without the ObjC runtime: `AnyObject.isEqual` resolves only where
+    /// Foundation bridges to `NSObject`, so it does not compile on Glibc. Both sides come from
+    /// `JSONSerialization`, so canonical bytes settle it — `.sortedKeys` makes key order
+    /// irrelevant, and nesting is covered for free. A value that cannot be re-serialized counts as
+    /// unequal, which is the conservative direction at both call sites: the existing value wins
+    /// and nothing the user wrote is overwritten.
     private static func jsonEqual(_ lhs: Any, _ rhs: Any) -> Bool {
-        (lhs as AnyObject).isEqual(rhs)
+        let canonical: JSONSerialization.WritingOptions = [.sortedKeys, .fragmentsAllowed]
+        guard let left = try? JSONSerialization.data(withJSONObject: lhs, options: canonical),
+              let right = try? JSONSerialization.data(withJSONObject: rhs, options: canonical)
+        else {
+            return false
+        }
+        return left == right
     }
 
     private static func jsonFragmentsEqual(_ lhs: Data, _ rhs: Data) -> Bool {

@@ -301,8 +301,9 @@ struct HookInterpreterCheckableBinaryTests {
     func skipsShells() {
         #expect(binaries([
             "bash .claude/hooks/p/a.sh",
-            "zsh .claude/hooks/p/b.zsh",
-        ]).isEmpty)
+            "sh .claude/hooks/p/b.sh",
+            "zsh .claude/hooks/p/c.zsh",
+        ]) == ["zsh"])
     }
 
     @Test("Reports the binary only, not its arguments")
