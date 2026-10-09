@@ -202,6 +202,29 @@ struct SettingsMergeTests {
         #expect(report.skippedKeyPaths == ["env.CLASH", "model"])
     }
 
+    @Test("Sub-key equality is structural: key order is irrelevant, a nested difference is not")
+    func subKeyEqualityIsStructural() throws {
+        var base = Settings()
+        base.extraJSON["env"] = try JSONSerialization.data(withJSONObject: [
+            // Same contents as the pack's, written in the other order.
+            "REORDERED": ["b": 2, "a": 1],
+            "NESTED": ["outer": ["inner": "user"]],
+            "TYPED": true,
+        ])
+        var other = Settings()
+        other.extraJSON["env"] = try JSONSerialization.data(withJSONObject: [
+            "REORDERED": ["a": 1, "b": 2],
+            "NESTED": ["outer": ["inner": "pack"]],
+            "TYPED": 1,
+        ])
+
+        let report = base.merge(with: other)
+
+        // Only the two that genuinely differ are conflicts; a reordered object is the same value.
+        #expect(report.skippedKeyPaths == ["env.NESTED", "env.TYPED"])
+        #expect(report.landedKeyPaths.isEmpty)
+    }
+
     @Test("Hooks merge across different events")
     func hooksMergeDifferentEvents() {
         var base = Settings(hooks: [
