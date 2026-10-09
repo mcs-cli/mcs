@@ -812,6 +812,16 @@ struct SettingsDriftCheckTests {
 }
 
 struct BrewPackageCheckGuidanceTests {
+    @Test("A brew package counts as re-syncable only where Homebrew can act")
+    func resyncOfferedOnlyWithHomebrew() {
+        let package = "mcs-nonexistent-formula-for-tests"
+        let check = BrewPackageCheck(name: package, section: "Dependencies", package: package)
+
+        // Branches on the host for the same reason the hint test below does: the brew path is
+        // resolved once per process, so nothing can fake a machine without Homebrew.
+        #expect(check.isRepairableByResync == FileManager.default.fileExists(atPath: Environment().brewPath))
+    }
+
     @Test("The fix for a missing package never advertises a command that cannot work")
     func fixDoesNotPointAtSyncWhenBrewIsAbsent() {
         let package = "mcs-nonexistent-formula-for-tests"

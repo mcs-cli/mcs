@@ -750,7 +750,7 @@ struct DoctorRunner {
         var checksByTarget: [SyncTarget: [any DoctorCheck]] = [:]
         var hintOnly: [any DoctorCheck] = []
         for entry in entries {
-            guard let target = entry.syncTarget else {
+            guard let target = entry.syncTarget, entry.check.isRepairableByResync else {
                 hintOnly.append(entry.check)
                 continue
             }

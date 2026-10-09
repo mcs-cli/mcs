@@ -20,9 +20,15 @@ enum TerminalAttributes {
 
     /// Non-canonical, no-echo attributes: one byte satisfies a read and nothing is echoed, so arrow
     /// keys reach the picker as they are typed.
+    ///
+    /// `ISIG` is cleared too, so Ctrl-C arrives as a byte the picker can act on instead of a
+    /// SIGINT that kills the process mid-prompt — which would skip the `defer` that restores
+    /// these attributes and leave the user at a terminal with no echo and no cursor. Ctrl-Z and
+    /// Ctrl-\ stop being signals for the same reason; the pickers ignore them rather than
+    /// suspending into a raw terminal.
     static func rawMode(from attributes: termios) -> termios {
         var raw = attributes
-        raw.c_lflag &= ~tcflag_t(ICANON | ECHO)
+        raw.c_lflag &= ~tcflag_t(ICANON | ECHO | ISIG)
         setControlCharacter(&raw, VMIN, to: 1)
         setControlCharacter(&raw, VTIME, to: 0)
         return raw

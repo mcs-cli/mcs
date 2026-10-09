@@ -2784,8 +2784,15 @@ struct HookInterpreterLifecycleTests {
             #expect(artifacts.hookCommands.contains(command), "state should record '\(command)'")
         }
 
-        // 4. Doctor joins the recorded commands back to their components without complaint
-        #expect(try bed.runDoctor(registry: registry).issues == 0)
+        // 4. Doctor joins the recorded commands back to their components without complaint.
+        // `HookInterpreterCheck` resolves each interpreter on PATH, so a machine without `node`
+        // fails here for a reason that has nothing to do with the composition under test — say so
+        // rather than leaving a bare count.
+        let summary = try bed.runDoctor(registry: registry)
+        let nodeHint = ShellRunner(environment: Environment()).commandExists("node")
+            ? ""
+            : " ('node' is not on PATH, which the declared and inferred interpreters need)"
+        #expect(summary.issues == 0, "doctor reported \(summary.issues) issue(s)\(nodeHint)")
 
         // 5. Deselecting the pack removes the files and every hook entry, interpreter regardless
         try configurator.configure(packs: [], confirmRemovals: false)

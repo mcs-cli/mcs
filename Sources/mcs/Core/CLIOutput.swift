@@ -35,6 +35,14 @@ struct InputClosedError: Error, LocalizedError {
     }
 }
 
+/// Ctrl-C at a picker. Distinct from `InputClosedError` because the user did answer — the answer
+/// is "stop" — and because raw mode clears `ISIG`, so nothing else turns this into an exit.
+struct PromptCancelledError: Error, LocalizedError {
+    var errorDescription: String? {
+        "Cancelled."
+    }
+}
+
 /// Terminal output with ANSI color support and structured logging.
 struct CLIOutput {
     let colorsEnabled: Bool
@@ -317,9 +325,13 @@ struct CLIOutput {
                     write("\n")
                     return false
 
-                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                case 0x03: // Ctrl-C
                     write("\n")
-                    return defaultValue
+                    throw PromptCancelledError()
+
+                case 0x04: // Ctrl-D — end of input, same as the stream closing
+                    write("\n")
+                    throw InputClosedError()
 
                 default:
                     break
@@ -446,9 +458,13 @@ struct CLIOutput {
                         }
                     }
 
-                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                case 0x03: // Ctrl-C
                     write("\n")
-                    return cursor
+                    throw PromptCancelledError()
+
+                case 0x04: // Ctrl-D — end of input, same as the stream closing
+                    write("\n")
+                    throw InputClosedError()
 
                 default:
                     break
@@ -600,9 +616,13 @@ struct CLIOutput {
                         }
                     }
 
-                case 0x03, 0x04: // Ctrl+C, Ctrl+D
+                case 0x03: // Ctrl-C
                     write("\n")
-                    return collectSelected(from: groups)
+                    throw PromptCancelledError()
+
+                case 0x04: // Ctrl-D — end of input, same as the stream closing
+                    write("\n")
+                    throw InputClosedError()
 
                 default:
                     break

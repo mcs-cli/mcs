@@ -107,7 +107,7 @@ others were run by hand on Ubuntu 24.04 when the port landed.
 |---|---|---|---|
 | `mcs sync` (project) | supported | verified | `mcs sync --pack linux-probe` in a git project: components installed, `settings.local.json` composed, `CLAUDE.local.md` generated, `.mcs-project` written. |
 | `mcs sync --global` | supported | verified | `mcs sync --global --pack git-probe`: artifacts under `~/.claude/`, `settings.json` composed, `global-state.json` written. |
-| Raw-mode pickers | supported | verified | Driven under a real PTY: `↓` moved the cursor, `Space` toggled, `Enter` applied; in-place redraw and cursor hide/show correct. A hangup mid-prompt throws, so the command exits non-zero instead of acting on an unconfirmed choice. |
+| Raw-mode pickers | supported | verified | Driven under a real PTY: `↓` moved the cursor, `Space` toggled, `Enter` applied; in-place redraw and cursor hide/show correct. A hangup mid-prompt throws, so the command exits non-zero instead of acting on an unconfirmed choice. Ctrl-C is a byte, not a signal (`ISIG` is cleared), so it cancels the prompt and the terminal is restored on the way out |
 | Non-TTY fallback picker | supported | verified | stdin a PTY, stdout a pipe: numeric toggle + `Enter`, colours disabled. |
 | `shell:` components † | supported | verified | `shell: touch <path>` created the marker. |
 | `shellInteractive: true` (PTY/sudo) † | supported | verified | Under a real terminal the `forkpty` path ran the command. Off a terminal (stdin `/dev/null`, CI) it runs without a PTY, so a prompt sees end of input instead of hanging; smoke asserts this under a time limit. The PTY is allocated with a default 0×0 window size on both platforms. |
@@ -415,6 +415,10 @@ release build fails if the runner's `uname -m` and the asset's architecture disa
 
 - **glibc ≥ 2.35**, because both release binaries are built on Ubuntu 22.04. musl is untested, and
   there is no `canImport(Musl)` branch.
+- **Building from source on Swift 6.4 needs `--build-system native`.** With 6.4's default build
+  system, `swift build -c release --static-swift-stdlib` fails to link against the bundled
+  Foundation (`undefined reference to 'CFCharacterSetGetPredefined'`, and a `Synchronization`
+  mutex symbol). CI pins 6.2, so the release artifacts are unaffected until the pin moves.
 - **The binary is ~95 MB and needs `libstdc++6`.** `--static-swift-stdlib` links the *Swift* runtime
   statically only; `ldd` still shows `libstdc++.so.6`, `libgcc_s.so.1`, `libm`, `libc` and
   `ld-linux`. A minimal container needs `apt-get install -y libstdc++6`. A fully static binary would

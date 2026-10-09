@@ -90,6 +90,12 @@ protocol DoctorCheck: Sendable {
     /// `nil` means the check has no fix of its own: `doctor --fix` then re-syncs its scope when
     /// sync can repair it, and otherwise shows the `.notFixable` hint `fix()` returns.
     var fixCommandPreview: String? { get }
+    /// Whether re-syncing this check's scope could actually repair it. Defaults to `true`, since a
+    /// component-derived check usually fails because its artifact is missing and sync installs it.
+    /// A check that knows the install cannot succeed — a `brew:` package on a machine with no
+    /// Homebrew — returns `false` so `doctor --fix` shows its hint instead of offering a re-sync
+    /// that reports the same failure afterwards.
+    var isRepairableByResync: Bool { get }
     func check() -> CheckResult
     func fix() -> FixResult
 }
@@ -97,6 +103,10 @@ protocol DoctorCheck: Sendable {
 extension DoctorCheck {
     var fixCommandPreview: String? {
         nil
+    }
+
+    var isRepairableByResync: Bool {
+        true
     }
 }
 

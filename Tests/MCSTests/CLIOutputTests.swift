@@ -9,6 +9,50 @@ struct CLIOutputTests {
         return (fds[0], fds[1])
     }
 
+    /// `withRawTerminal` degrades to a plain read when `input` is not a tty, so a pipe drives the
+    /// raw-mode pickers directly — which is the only way to deliver a Ctrl-C byte in a test.
+    private func feed(_ byte: UInt8) -> (output: CLIOutput, close: () -> Void) {
+        let (readEnd, writeEnd) = makePipe()
+        var byte = byte
+        #expect(write(writeEnd, &byte, 1) == 1)
+        close(writeEnd)
+        return (CLIOutput(colorsEnabled: false, input: readEnd), { close(readEnd) })
+    }
+
+    @Test("Ctrl-C cancels a yes/no prompt instead of answering it")
+    func ctrlCCancelsYesNo() {
+        let (output, cleanup) = feed(0x03)
+        defer { cleanup() }
+
+        // `default: true` is the dangerous case: a Ctrl-C that returned the default would read as
+        // consent on prompts like "Proceed with removal?".
+        #expect(throws: PromptCancelledError.self) {
+            try output.interactiveYesNo("Proceed?", default: true)
+        }
+    }
+
+    @Test("Ctrl-D at a yes/no prompt is an end of input, not an answer")
+    func ctrlDClosesYesNo() {
+        let (output, cleanup) = feed(0x04)
+        defer { cleanup() }
+
+        #expect(throws: InputClosedError.self) {
+            try output.interactiveYesNo("Proceed?", default: true)
+        }
+    }
+
+    @Test("Ctrl-C cancels a single-select picker")
+    func ctrlCCancelsSingleSelect() {
+        let (output, cleanup) = feed(0x03)
+        defer { cleanup() }
+
+        #expect(throws: PromptCancelledError.self) {
+            try output.interactiveSingleSelect(
+                title: "Pick", items: [(name: "a", description: ""), (name: "b", description: "")], initialIndex: 0
+            )
+        }
+    }
+
     @Test("readByte returns the byte that was written")
     func readByteReturnsWrittenByte() {
         let (readEnd, writeEnd) = makePipe()

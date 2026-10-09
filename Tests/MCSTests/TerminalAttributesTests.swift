@@ -7,7 +7,7 @@ import Glibc
 import Testing
 
 struct TerminalAttributesTests {
-    @Test("rawMode clears ICANON and ECHO, keeps ISIG, and sets VMIN/VTIME at the platform's indices")
+    @Test("rawMode clears ICANON, ECHO and ISIG, and sets VMIN/VTIME at the platform's indices")
     func rawModeFlagsAndControlCharacters() {
         var original = termios()
         original.c_lflag = tcflag_t(ICANON | ECHO | ISIG)
@@ -19,7 +19,9 @@ struct TerminalAttributesTests {
 
         #expect(raw.c_lflag & tcflag_t(ICANON) == 0)
         #expect(raw.c_lflag & tcflag_t(ECHO) == 0)
-        #expect(raw.c_lflag & tcflag_t(ISIG) != 0, "Ctrl-C must still generate SIGINT")
+        // Ctrl-C has to arrive as a byte: a SIGINT would kill the process before the picker could
+        // restore these attributes, leaving the terminal with no echo and no cursor.
+        #expect(raw.c_lflag & tcflag_t(ISIG) == 0, "Ctrl-C must reach the picker instead of signalling")
         #expect(controlCharacter(raw, VMIN) == 1)
         #expect(controlCharacter(raw, VTIME) == 0)
     }
