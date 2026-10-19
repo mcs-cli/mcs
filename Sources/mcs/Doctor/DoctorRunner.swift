@@ -285,7 +285,7 @@ struct DoctorRunner {
             )
         }
 
-        // Global-scoped template freshness check (always runs, self-skips if no global CLAUDE.md)
+        // Global-scoped template freshness check (always runs, self-skips unless mcs composed sections into the global CLAUDE.md)
         nonComponentChecks.append(CLAUDEMDFreshnessCheck(
             fileURL: env.globalClaudeMD,
             stateLoader: { try ProjectState(stateFile: env.globalStateFile) },

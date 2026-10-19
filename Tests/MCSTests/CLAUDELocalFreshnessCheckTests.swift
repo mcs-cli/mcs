@@ -614,6 +614,78 @@ struct CLAUDEMDFreshnessCheckTests {
             Issue.record("Expected failed but got \(fixResult)")
         }
     }
+
+    // MARK: - Unmarked file
+
+    private func writeUnmarkedClaudeLocal(at projectRoot: URL) throws {
+        try "# Hand-written instructions\n".write(
+            to: projectRoot.appendingPathComponent(Constants.FileNames.claudeLocalMD),
+            atomically: true,
+            encoding: .utf8
+        )
+    }
+
+    @Test("Unmarked file — skips when configured packs recorded no template sections")
+    func unmarkedFileSkipsWithoutRecordedSections() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try writeUnmarkedClaudeLocal(at: tmpDir)
+        try writeProjectState(
+            at: tmpDir,
+            packs: ["mcp-pack"],
+            artifacts: ["mcp-pack": PackArtifactRecord(mcpServers: [MCPServerRef(name: "srv", scope: "local")])]
+        )
+
+        let check = makeProjectCheck(projectRoot: tmpDir, registry: makeRegistry(packs: []))
+
+        let result = check.check()
+        if case .skip = result {
+            // expected
+        } else {
+            Issue.record("Expected skip but got \(result)")
+        }
+    }
+
+    @Test("Unmarked file — warns when state records sections the file no longer has")
+    func unmarkedFileWarnsWithRecordedSections() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try writeUnmarkedClaudeLocal(at: tmpDir)
+        try writeProjectState(
+            at: tmpDir,
+            packs: ["test-pack"],
+            artifacts: ["test-pack": PackArtifactRecord(templateSections: ["test-pack.section-a"])]
+        )
+
+        let check = makeProjectCheck(projectRoot: tmpDir, registry: makeRegistry(packs: []))
+
+        let result = check.check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("no mcs section markers"))
+        } else {
+            Issue.record("Expected warn but got \(result)")
+        }
+    }
+
+    @Test("Unmarked file — warns for a legacy pack with no artifact record")
+    func unmarkedFileWarnsForLegacyPack() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        try writeUnmarkedClaudeLocal(at: tmpDir)
+        try writeProjectState(at: tmpDir, packs: ["legacy-pack"])
+
+        let check = makeProjectCheck(projectRoot: tmpDir, registry: makeRegistry(packs: []))
+
+        let result = check.check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("no mcs section markers"))
+        } else {
+            Issue.record("Expected warn but got \(result)")
+        }
+    }
 }
 
 // MARK: - Test doubles

@@ -202,8 +202,8 @@ struct ProjectDoctorCheckTests {
         }
     }
 
-    @Test("CLAUDEMDFreshnessCheck warns when no section markers")
-    func freshnessCheckWarnsNoMarkers() throws {
+    @Test("CLAUDEMDFreshnessCheck skips an unmarked file mcs never synced into")
+    func freshnessCheckSkipsUnmarkedUnsyncedFile() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -219,10 +219,10 @@ struct ProjectDoctorCheckTests {
             displayName: "CLAUDE.local.md freshness",
             syncHint: "mcs sync"
         )
-        if case .warn = check.check() {
+        if case .skip = check.check() {
             // expected
         } else {
-            #expect(Bool(false), "Expected .warn result")
+            #expect(Bool(false), "Expected .skip result")
         }
     }
 
