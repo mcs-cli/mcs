@@ -1087,6 +1087,32 @@ struct GlobalScopeLifecycleTests {
         // === Doctor passes ===
         #expect(try bed.runGlobalDoctor(registry: registry).issues == 0)
     }
+
+    @Test("A hand-written global CLAUDE.md adds no doctor findings after a project-only sync")
+    func handWrittenGlobalClaudeMDAfterProjectSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let pack = MockTechPack(
+            identifier: "project-pack",
+            displayName: "Project Pack",
+            components: [bed.mcpComponent(pack: "project-pack", id: "srv", name: "srv")]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let baseline = try bed.runDoctor(registry: registry)
+
+        try FileManager.default.createDirectory(
+            at: bed.env.globalClaudeMD.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try "# My own instructions\n".write(to: bed.env.globalClaudeMD, atomically: true, encoding: .utf8)
+
+        let summary = try bed.runDoctor(registry: registry)
+        #expect(summary.warnings == baseline.warnings)
+        #expect(summary.issues == baseline.issues)
+    }
 }
 
 // MARK: - Scenario 5c: Global install warns about projects that already hold the pack

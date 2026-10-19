@@ -171,16 +171,21 @@ struct CLAUDEMDFreshnessCheck: DoctorCheck {
             return .fail("\(fileName) exists but could not be read: \(error.localizedDescription)")
         }
 
-        let sections = TemplateComposer.parseSections(from: content)
-        guard !sections.isEmpty else {
-            return .warn("\(fileName) has no mcs section markers — run '\(syncHint)'")
-        }
-
         let state: ProjectState
         do {
             state = try stateLoader()
         } catch {
             return .warn("could not read state: \(error.localizedDescription) — run '\(syncHint)' to regenerate")
+        }
+
+        let sections = TemplateComposer.parseSections(from: content)
+        guard !sections.isEmpty else {
+            // Missing markers are only drift if mcs wrote sections here; a hand-written
+            // CLAUDE.md in a scope mcs never composed into is not ours to report on.
+            guard hasRecordedTemplateSections(state) else {
+                return .skip("no mcs-managed sections in \(fileName)")
+            }
+            return .warn("\(fileName) has no mcs section markers — run '\(syncHint)'")
         }
 
         guard let storedValues = state.resolvedValues else {
@@ -258,6 +263,14 @@ struct CLAUDEMDFreshnessCheck: DoctorCheck {
     }
 
     // MARK: - Helpers
+
+    /// A pack without an artifact record predates section tracking, so it may have written any of its sections.
+    private func hasRecordedTemplateSections(_ state: ProjectState) -> Bool {
+        state.configuredPacks.contains { packID in
+            guard let record = state.artifacts(for: packID) else { return true }
+            return !record.templateSections.isEmpty
+        }
+    }
 
     /// Build expected sections by re-rendering current pack templates with stored values.
     private func buildExpectedSections(
