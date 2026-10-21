@@ -110,6 +110,11 @@ struct Environment {
         mcsDirectory.appendingPathComponent(Constants.FileNames.updateCheckCache)
     }
 
+    /// Update check snooze file (`~/.mcs/update-check-snooze`).
+    var updateCheckSnoozeFile: URL {
+        mcsDirectory.appendingPathComponent(Constants.FileNames.updateCheckSnooze)
+    }
+
     /// User preferences file (`~/.mcs/config.yaml`).
     var mcsConfigFile: URL {
         mcsDirectory.appendingPathComponent(Constants.FileNames.mcsConfig)

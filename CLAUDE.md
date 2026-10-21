@@ -59,6 +59,7 @@ mcs export <dir> --dry-run       # Preview what would be exported
 mcs check-updates                # Check for pack and CLI updates
 mcs check-updates --hook         # Run as SessionStart hook (24-hour cooldown, respects config)
 mcs check-updates --json         # Machine-readable JSON output
+mcs check-updates --snooze       # Silence the SessionStart update notice until tomorrow (local time)
 mcs config list                  # Show all settings with current values
 mcs config get <key>             # Get a specific setting value
 mcs config set <key> <value>     # Set a configuration value (true/false)

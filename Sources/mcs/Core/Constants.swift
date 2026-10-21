@@ -31,6 +31,9 @@ enum Constants {
         /// The update check cache file (timestamp + results).
         static let updateCheckCache = "update-check.json"
 
+        /// The local date (`yyyy-MM-dd`) until whose end the SessionStart update notice is snoozed.
+        static let updateCheckSnooze = "update-check-snooze"
+
         /// The per-project settings file written by `mcs sync`.
         static let settingsLocal = "settings.local.json"
 

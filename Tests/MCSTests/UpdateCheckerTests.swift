@@ -1218,9 +1218,13 @@ struct UpdateCheckerContextStringTests {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [], cliUpdate: cliUpdate)
         )
-        #expect(context.contains("On yes, run: \(UpdateChecker.cliUpgradeCommands.joined(separator: " && "))\n"))
+        #expect(context.contains(
+            "On \"Update now\", run: \(UpdateChecker.cliUpgradeCommands.joined(separator: " && "))\n"
+        ))
         #expect(context.contains("AskUserQuestion"))
-        #expect(context.contains("mcs config set update-check false"))
+        #expect(context.contains("\"Not now\""))
+        #expect(context.contains("On \"Remind me tomorrow\", run only: \(UpdateChecker.snoozeCommand)"))
+        #expect(!context.contains("mcs config set update-check"))
         #expect(!context.contains("--trust-all"))
         #expect(!context.contains("mcs doctor"))
         #expect(!context.contains("mcs cleanup"))
@@ -1232,7 +1236,7 @@ struct UpdateCheckerContextStringTests {
         let context = UpdateChecker.buildContextString(
             UpdateChecker.CheckResult(packUpdates: [packUpdate], cliUpdate: nil)
         )
-        #expect(context.contains("On yes, run: \(UpdateChecker.hookPackUpdateCommand)\n"))
+        #expect(context.contains("On \"Update now\", run: \(UpdateChecker.hookPackUpdateCommand)\n"))
         #expect(context.contains("without review"))
         #expect(context.contains(UpdateChecker.manualPackUpdateCommand))
         #expect(!context.contains(UpdateChecker.cliUpgradeCommands[1]))
@@ -1249,7 +1253,7 @@ struct UpdateCheckerContextStringTests {
         )
         let chain = (UpdateChecker.cliUpgradeCommands + [UpdateChecker.hookPackUpdateCommand])
             .joined(separator: " && ")
-        #expect(context.contains("On yes, run: \(chain)\n"))
+        #expect(context.contains("On \"Update now\", run: \(chain)\n"))
         #expect(context.hasSuffix("continue with the user's original request."))
     }
 }
@@ -1286,5 +1290,38 @@ struct CheckUpdatesCommandHookGateTests {
         let command = try CheckUpdatesCommand.parse(["--hook"])
         let result = command.check(env: env, output: CLIOutput(colorsEnabled: false))
         #expect(result?.cliUpdate?.latestVersion == "9999.1.1")
+    }
+
+    @Test("Hook mode returns nothing while snoozed today, even with a fresh cache")
+    func snoozedSkipsCache() throws {
+        let env = try makeHome(updateCheck: true)
+        defer { try? FileManager.default.removeItem(at: env.homeDirectory) }
+        try UpdateChecker.snooze(environment: env)
+        let command = try CheckUpdatesCommand.parse(["--hook"])
+        #expect(command.check(env: env, output: CLIOutput(colorsEnabled: false)) == nil)
+    }
+
+    @Test("--snooze is rejected alongside --hook or --json")
+    func snoozeRejectsOtherModes() {
+        #expect(throws: (any Error).self) { try CheckUpdatesCommand.parse(["--snooze", "--hook"]) }
+        #expect(throws: (any Error).self) { try CheckUpdatesCommand.parse(["--snooze", "--json"]) }
+    }
+}
+
+// MARK: - Snooze Tests
+
+struct UpdateCheckerSnoozeTests {
+    @Test("A snooze expires at local midnight, not 24 hours later")
+    func expiresAtMidnight() throws {
+        let home = try makeTmpDir(label: "snooze")
+        let env = Environment(home: home)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let midnight = Calendar.current.startOfDay(for: Date())
+        let lateEvening = midnight.addingTimeInterval(-60)
+
+        try UpdateChecker.snooze(environment: env, now: lateEvening)
+
+        #expect(UpdateChecker.isSnoozed(environment: env, now: lateEvening.addingTimeInterval(30)))
+        #expect(!UpdateChecker.isSnoozed(environment: env, now: midnight))
     }
 }

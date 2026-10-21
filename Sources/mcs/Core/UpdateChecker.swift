@@ -28,6 +28,7 @@ struct UpdateChecker {
     static let cliUpgradeCommands = ["brew update", "brew upgrade \(Constants.MCSRepo.brewFormula)"]
     static let manualPackUpdateCommand = "mcs update --all-projects"
     static let hookPackUpdateCommand = "mcs update -a --trust-all"
+    static let snoozeCommand = "mcs check-updates --snooze"
 
     @discardableResult
     static func addHook(to settings: inout Settings) -> Bool {
@@ -178,6 +179,24 @@ struct UpdateChecker {
         } catch {
             return false
         }
+    }
+
+    // MARK: - Snooze
+
+    /// Silence the SessionStart notice until the local date changes.
+    static func snooze(environment: Environment, now: Date = Date()) throws {
+        let file = environment.updateCheckSnoozeFile
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try localDay(now).write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    static func isSnoozed(environment: Environment, now: Date = Date()) -> Bool {
+        let day = try? String(contentsOf: environment.updateCheckSnoozeFile, encoding: .utf8)
+        return day?.trimmingCharacters(in: .whitespacesAndNewlines) == localDay(now)
+    }
+
+    private static func localDay(_ date: Date) -> String {
+        date.formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
     }
 
     // MARK: - Pack Checks
@@ -645,12 +664,12 @@ struct UpdateChecker {
             lines.append("- \(result.packUpdates.count) \(noun) updates available: \(names).")
             commands.append(hookPackUpdateCommand)
         }
-        lines.append("- To stop these notifications, run: mcs config set update-check false")
         lines.append("")
         lines.append(
-            "Then make the AskUserQuestion tool your first tool call: one yes/no question asking whether to"
-                + " apply all of these updates now. If AskUserQuestion is unavailable, ask in plain text and"
-                + " end your turn to wait for the answer. Never run these commands without an explicit yes,"
+            "Then make the AskUserQuestion tool your first tool call: one question asking whether to apply all"
+                + " of these updates now, with exactly three options: \"Update now\", \"Not now\" and"
+                + " \"Remind me tomorrow\". If AskUserQuestion is unavailable, ask in plain text and end your"
+                + " turn to wait for the answer. Never run the update commands without an explicit \"Update now\","
                 + " and ask at most once per session."
         )
         if hasPackUpdates {
@@ -662,7 +681,7 @@ struct UpdateChecker {
             )
         }
         lines.append("")
-        lines.append("On yes, run: \(commands.joined(separator: " && "))")
+        lines.append("On \"Update now\", run: \(commands.joined(separator: " && "))")
         lines.append(
             "Report the outcome. Most changes apply immediately; new hooks or MCP servers may need a new"
                 + " Claude Code session."
@@ -682,10 +701,14 @@ struct UpdateChecker {
                     + " a separate AskUserQuestion yes/no before running: mcs doctor --fix --yes"
             )
             lines.append(
-                "On no, suggest running '\(manualPackUpdateCommand)' in a separate terminal to review each"
-                    + " trust prompt."
+                "On \"Not now\", suggest running '\(manualPackUpdateCommand)' in a separate terminal to review"
+                    + " each trust prompt."
             )
         }
+        lines.append(
+            "On \"Remind me tomorrow\", run only: \(snoozeCommand) (silences this notice in every session"
+                + " until the local date changes)."
+        )
         lines.append("Only after these questions are settled, continue with the user's original request.")
         return lines.joined(separator: "\n")
     }
