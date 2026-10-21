@@ -306,6 +306,7 @@ Check for available tech pack and CLI updates. Designed to be lightweight and no
 mcs check-updates                # Check for updates (always fetches from remote)
 mcs check-updates --hook         # Run as SessionStart hook (respects 24-hour cooldown and config)
 mcs check-updates --json         # Machine-readable JSON output
+mcs check-updates --snooze       # Silence the SessionStart update notice until tomorrow (local time)
 ```
 
 | Flag | Description |
@@ -351,7 +352,7 @@ When either key changes, `mcs config set` immediately adds or removes the hook f
 
 On first interactive sync, `mcs` prompts whether to enable automatic update notifications (sets both keys at once). Fine-tune later with `mcs config set`.
 
-When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them; for pack updates that question also warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). It runs nothing without your yes, and continues with your request once every question is answered. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. After a pack update Claude runs `mcs doctor` (global scope and current project only). If every check passes it asks, separately, whether to delete all mcs backups across tracked projects with `mcs cleanup -af`; if a check fails it keeps the backups and asks, separately, whether to run `mcs doctor --fix --yes`. If you decline the pack update, run `mcs update --all-projects` in your own terminal to review each trust prompt. The notice also tells you how to turn it off, with `mcs config set update-check false`.
+When updates are pending, Claude tells you before it starts on your request and asks once, through a question prompt, whether to apply them; for pack updates that question also warns that `--trust-all` approves the packs' changed executable content without review (see the [`--trust-all` caveat](#mcs-bootstrap)). The question offers three answers: **Update now**, **Not now** (asked again next session) and **Remind me tomorrow**, which runs `mcs check-updates --snooze` so no session asks again until the local date changes. Claude runs no update command without **Update now**, and continues with your request once every question is answered. The commands run in this order: `brew update` and `brew upgrade mcs-cli/tap/mcs` for a CLI update, then `mcs update -a --trust-all` for pack updates. After a pack update Claude runs `mcs doctor` (global scope and current project only). If every check passes it asks, separately, whether to delete all mcs backups across tracked projects with `mcs cleanup -af`; if a check fails it keeps the backups and asks, separately, whether to run `mcs doctor --fix --yes`. If you answer **Not now** to a pack update, run `mcs update --all-projects` in your own terminal to review each trust prompt. To turn the notice off entirely, run `mcs config set update-check false`.
 
 ---
 

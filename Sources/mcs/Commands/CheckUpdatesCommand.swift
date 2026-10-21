@@ -13,9 +13,28 @@ struct CheckUpdatesCommand: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Output results as JSON")
     var json: Bool = false
 
+    @Flag(name: .long, help: "Silence the SessionStart update notice until tomorrow (local time)")
+    var snooze: Bool = false
+
+    func validate() throws {
+        if snooze, hook || json {
+            throw ValidationError("--snooze cannot be combined with --hook or --json.")
+        }
+    }
+
     func run() throws {
         let env = Environment()
         let output = CLIOutput()
+        if snooze {
+            do {
+                try UpdateChecker.snooze(environment: env)
+            } catch {
+                output.error("Could not write \(env.updateCheckSnoozeFile.path): \(error.localizedDescription)")
+                throw ExitCode.failure
+            }
+            output.success("Update notifications snoozed until tomorrow.")
+            return
+        }
         guard let result = check(env: env, output: output) else { return }
 
         if json {
@@ -26,9 +45,9 @@ struct CheckUpdatesCommand: ParsableCommand {
     }
 
     func check(env: Environment, output: CLIOutput) -> UpdateChecker.CheckResult? {
-        // A hand-edited config can disable checks while the hook entry is still registered;
+        // A hand-edited config or a snooze silences the hook while its entry is still registered;
         // bail before `performCheck`, which would otherwise serve a <24h cache written by sync or doctor.
-        if hook, !MCSConfig.load(from: env.mcsConfigFile).isUpdateCheckEnabled {
+        if hook, !MCSConfig.load(from: env.mcsConfigFile).isUpdateCheckEnabled || UpdateChecker.isSnoozed(environment: env) {
             return nil
         }
 
