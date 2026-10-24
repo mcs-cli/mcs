@@ -35,7 +35,7 @@ A selected pack always installs every component it declares. Components that an 
 
 ## `mcs bootstrap`
 
-Apply a declarative `mcs.yaml` from the current directory. Bootstrap installs any packs the file declares, seeds prompt values, and syncs the project.
+Apply a declarative `mcs.yaml` from the current directory. Bootstrap installs any packs the file declares, seeds prompt values, and syncs each pack into the scope it routes to — the current project or `~/.claude/`.
 
 ```bash
 mcs bootstrap                    # Read ./mcs.yaml, install declared packs, keep any others
@@ -48,7 +48,7 @@ mcs bootstrap --trust-all        # Trust declared packs without prompting
 | Flag | Description |
 |------|-------------|
 | `--dry-run` | Preview without making changes. For un-registered packs, prints `would fetch <source>@<ref>` without cloning. |
-| `--prune` | Remove packs configured in this project but absent from `mcs.yaml`. Prompts before removing unless `--yes` is passed. |
+| `--prune` | Remove packs configured in this project but absent from `mcs.yaml` — and in global scope too when the file's own `scope` is `global`. Prompts once before removing unless `--yes` is passed. |
 | `-y, --yes` | Skip the removal-confirmation prompt. Only meaningful with `--prune`. |
 | `--trust-all` | Approve each declared pack's executable content without prompting, so the trust prompts need no TTY. Other prompts are unaffected — see `--yes` for removals and `values:` for pack prompts. No-op with `--dry-run`, which returns before any pack is fetched. |
 
@@ -56,24 +56,37 @@ mcs bootstrap --trust-all        # Trust declared packs without prompting
 
 ```yaml
 schemaVersion: 1
+# scope: global                      # optional: default scope for every entry (see below)
 packs:
   - source: mcs-cli/dev              # git URL, GitHub shorthand, or local path
     ref: main                        # optional (git only)
     values:                          # optional: seeds prompt priors
       BRANCH_PREFIX: feature
   - source: mcs-cli/memory
+    scope: global                    # optional: install this one into ~/.claude/
 ```
 
 - `source` is required. `ref`, `values`, and `scope` are optional.
-- `values` seeds `ProjectState.resolvedValues` so the keys it covers do not re-prompt. A key counts when a declared pack declares it as a prompt or references it as a `__KEY__` placeholder in a file, template, settings file, or MCP config. A key that matches neither is ignored with a warning (usually a typo). Any key not seeded here falls through to normal interactive resolution.
-- `scope` is reserved for a future release; v1 accepts only `project` (or omitted).
+- `values` seeds the `resolvedValues` of the scope the entry routes to, so the keys it covers do not re-prompt. A key counts when a declared pack declares it as a prompt or references it as a `__KEY__` placeholder in a file, template, settings file, or MCP config. A key that matches neither is ignored with a warning (usually a typo). Any key not seeded here falls through to normal resolution.
+- `scope` is `project` or `global`, per entry or once for the whole file.
+
+**Scope routing**
+
+Each declared pack goes to the first of: its entry's `scope`, the file's `scope`, the pack's own [`scopes:`](techpack-schema.md#the-scopes-field) when it lists exactly one, then `project`. So a pack whose author declared `scopes: [global]` goes global without a tag, and everything else defaults to the project.
+
+- **Routing must match the pack.** Sending a pack to a scope its `scopes:` excludes fails before anything is installed in either scope.
+- **Both scopes are checked first, then global converges before the project.** A mismatch, an unanswerable prompt, or a duplicate stops the run before either scope changes.
+- **Global changes are shown, not gated.** The plan prints a separate *Sync Global* block noting that it affects every project on the machine. The trust prompt (or `--trust-all`) stays the only gate on new executable content.
+- **A file whose `scope` is `global` is machine-only.** The current directory is not treated as a project: nothing is written under it, it is not added to `~/.mcs/projects.yaml`, and it may be `$HOME`. A `scope: project` entry in such a file is an error. Use this for an org config repo applied on every machine.
+- **No duplicates.** A pack routed to global that this project already configures is an error; with `--prune` it is moved (removed from the project, installed globally). A pack routed to the project that is already installed globally is skipped with a warning, since the global copy already applies.
 
 **Semantics**
 
-- **Project-scoped convergence.** Bootstrap's pack set applies to the current project; use `mcs sync --global` to manage packs in `~/.claude/`. Like `mcs sync`, bootstrap does refresh the shared user-level update-check hook in `~/.claude/settings.json` on non-dry-run runs — that hook is per-user, not per-project.
-- **Additive by default.** Packs listed in `mcs.yaml` are installed / updated; any pack configured in the project but not listed is preserved. After sync, a note lists any such extras so the divergence stays visible.
-- **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set — extras are unconfigured. A confirmation prompt lists what will be removed (skip with `--yes`).
-- **Idempotent.** Re-running converges — no work if nothing changed.
+- Like `mcs sync`, bootstrap refreshes the shared user-level update-check hook in `~/.claude/settings.json` on non-dry-run runs — that hook is per-user, not per-project.
+- **Additive by default.** Packs listed in `mcs.yaml` are installed / updated; any pack configured in a scope but not listed is preserved. After sync, a note lists any such extras so the divergence stays visible.
+- **`--prune` opts into authoritative mode.** With `--prune`, `mcs.yaml` becomes the exact desired set for the project — extras are unconfigured. Global scope is pruned only when the file's own `scope` is `global`: one repo's file is never the full list of a user's global packs. One confirmation lists what will be removed in every scope (skip with `--yes`).
+- **One status line per pack.** After reconciling the registry, bootstrap prints `<pack>: added`, `moved to <ref>`, `updated`, `unchanged`, or `failed`.
+- **Idempotent.** Re-running converges — no work if nothing changed, and an unchanged `CLAUDE.md` / `CLAUDE.local.md` is neither rewritten nor backed up, so a scheduled run does not pile up backups.
 - **Missing checkouts are restored.** A git pack still in the registry whose `~/.mcs/packs/` checkout was deleted is re-cloned at its recorded `ref` (or the declared one, when `mcs.yaml` changes it), with the usual trust check.
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason. When bootstrap aborts partway through, an epilogue lists which packs already registered — re-run after fixing the failing entry to continue.
 - **Trust prompts need a TTY unless `--trust-all` is passed.** Both trust surfaces bootstrap can reach — adding a pack it has never seen, and advancing a pack's `ref:` to a revision with changed scripts — end at an interactive confirmation. Without a terminal that confirmation reads as "no" and bootstrap aborts, so any unattended run against a fresh pack needs `--trust-all`.
