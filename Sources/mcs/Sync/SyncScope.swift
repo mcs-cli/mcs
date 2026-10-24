@@ -50,6 +50,10 @@ struct SyncScope {
     /// Whether this is the global scope (affects template value resolution context).
     let isGlobalScope: Bool
 
+    var packScope: PackScope {
+        isGlobalScope ? .global : .project
+    }
+
     /// The sync hint shown in error/recovery messages (e.g. `"mcs sync"` or `"mcs sync --global"`).
     let syncHint: String
 

@@ -2706,10 +2706,59 @@ struct ExternalPackManifestTests {
         #expect(Set(labels) == [
             // Metadata — not diffed, references no files.
             "schemaVersion", "identifier", "displayName", "description", "author", "minMCSVersion",
-            "ignore",
+            "ignore", "scopes",
             // Author-visible surfaces — each needs a `PackDiff.Kind` case, and any that names a
             // file needs a `referencedSource` folded into `referencedPaths`.
             "components", "templates", "prompts", "configureProject", "supplementaryDoctorChecks",
         ])
+    }
+
+    // MARK: - Scopes
+
+    private func scopedManifest(_ scopesLine: String) throws -> ExternalPackManifest {
+        try loadManifest("""
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        \(scopesLine)
+        """)
+    }
+
+    @Test("A pack without scopes supports both")
+    func scopesDefaultToBoth() throws {
+        let manifest = try scopedManifest("")
+        try manifest.validate()
+        #expect(manifest.supportedScopes == [.project, .global])
+    }
+
+    @Test("Declared scopes restrict the pack")
+    func scopesRestrict() throws {
+        let manifest = try scopedManifest("scopes: [project]")
+        try manifest.validate()
+        #expect(manifest.supportedScopes == [.project])
+    }
+
+    @Test("Validation rejects an empty or unknown scopes list", arguments: ["scopes: []", "scopes: [project, machine]"])
+    func scopesRejectInvalid(line: String) throws {
+        let manifest = try scopedManifest(line)
+        #expect(throws: ManifestError.self) {
+            try manifest.validate()
+        }
+    }
+
+    @Test("Runtime sanitizing drops unknown scopes and falls back to both")
+    func scopesSanitize() throws {
+        let counter = WarningCounter()
+        let output = CLIOutput(colorsEnabled: false, warningCounter: counter)
+
+        let partial = try scopedManifest("scopes: [global, machine]").sanitizedScopes(output: output)
+        #expect(partial.scopes == ["global"])
+        try partial.validate()
+
+        let none = try scopedManifest("scopes: [machine]").sanitizedScopes(output: output)
+        #expect(none.scopes == nil)
+        #expect(none.supportedScopes == [.project, .global])
+        #expect(counter.count == 2)
     }
 }

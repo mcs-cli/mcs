@@ -241,6 +241,10 @@ struct DoctorRunner {
             // Derived and artifact-record checks verify what sync installs or recorded, so a re-sync
             // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
+                let packScope: PackScope = scope.effectiveProjectRoot == nil ? .global : .project
+                if !pack.supportedScopes.contains(packScope) {
+                    allChecks.append((check: PackScopeCheck(packID: pack.identifier, scope: packScope), syncTarget: nil))
+                }
                 for component in pack.components {
                     if let derived = component.deriveDoctorCheck(
                         projectRoot: scope.effectiveProjectRoot, environment: env, pluginListing: pluginListing
