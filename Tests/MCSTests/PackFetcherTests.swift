@@ -93,7 +93,7 @@ struct PackFetcherOperationTests {
 
     // MARK: - fetch tests
 
-    @Test("fetch calls git clone with correct arguments")
+    @Test("fetch without a ref checks out the remote's default branch at depth 1")
     func fetchCallsClone() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -102,6 +102,9 @@ struct PackFetcherOperationTests {
 
         shell.runResults = [
             ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
             ShellResult(exitCode: 0, stdout: "abc123def456", stderr: ""),
         ]
 
@@ -109,24 +112,27 @@ struct PackFetcherOperationTests {
             url: "https://github.com/org/repo.git", identifier: "my-pack", ref: nil
         )
 
-        let cloneCall = try #require(shell.runCalls.first { $0.arguments.contains("clone") })
-        #expect(cloneCall.arguments.contains("--depth"))
-        #expect(cloneCall.arguments.contains("1"))
-        #expect(cloneCall.arguments.contains("https://github.com/org/repo.git"))
-        #expect(!cloneCall.arguments.contains("--branch"))
+        let remoteCall = try #require(shell.runCalls.first { $0.arguments.starts(with: ["remote", "add"]) })
+        #expect(remoteCall.arguments.contains("https://github.com/org/repo.git"))
+        let fetchCall = try #require(shell.runCalls.first { $0.arguments.first == "fetch" })
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "HEAD"])
+        #expect(shell.runCalls.contains { $0.arguments == ["checkout", "--quiet", "FETCH_HEAD"] })
 
         #expect(result.commitSHA == "abc123def456")
         #expect(result.ref == nil)
         #expect(result.localPath.lastPathComponent == "my-pack")
     }
 
-    @Test("fetch with ref adds --branch flag")
+    @Test("fetch with a ref fetches that ref")
     func fetchWithRefAddsBranch() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let (fetcher, shell) = makeMockFetcher(home: tmpDir)
 
         shell.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
             ShellResult(exitCode: 0, stdout: "", stderr: ""),
             ShellResult(exitCode: 0, stdout: "sha123", stderr: ""),
         ]
@@ -135,9 +141,8 @@ struct PackFetcherOperationTests {
             url: "https://github.com/org/repo.git", identifier: "test-pack", ref: "v1.0.0"
         )
 
-        let cloneCall = try #require(shell.runCalls.first { $0.arguments.contains("clone") })
-        #expect(cloneCall.arguments.contains("--branch"))
-        #expect(cloneCall.arguments.contains("v1.0.0"))
+        let fetchCall = try #require(shell.runCalls.first { $0.arguments.first == "fetch" })
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "v1.0.0"])
         #expect(result.ref == "v1.0.0")
     }
 
@@ -172,6 +177,9 @@ struct PackFetcherOperationTests {
         )
 
         shell.runResults = [
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
+            ShellResult(exitCode: 0, stdout: "", stderr: ""),
             ShellResult(exitCode: 0, stdout: "", stderr: ""),
             ShellResult(exitCode: 0, stdout: "sha456", stderr: ""),
         ]
@@ -223,9 +231,9 @@ struct PackFetcherOperationTests {
         #expect(result?.commitSHA == "new-sha")
 
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("--depth"))
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "HEAD"])
         let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("origin/HEAD"))
+        #expect(resetCall.arguments.contains("FETCH_HEAD"))
     }
 
     @Test("update returns nil when SHA is unchanged")
@@ -375,13 +383,19 @@ struct PackFetcherOperationTests {
 }
 
 struct PackFetcherCommitRefTests {
+    private struct TestSetupError: Error {
+        let message: String
+    }
+
     private func git(_ arguments: [String], in dir: URL, shell: ShellRunner) throws -> String {
         let result = shell.run(
             shell.environment.gitPath,
             arguments: ["-c", "user.email=test@example.com", "-c", "user.name=Test"] + arguments,
             workingDirectory: dir.path
         )
-        #expect(result.succeeded, "git \(arguments.joined(separator: " ")): \(result.stderr)")
+        guard result.succeeded else {
+            throw TestSetupError(message: "git \(arguments.joined(separator: " ")): \(result.stderr)")
+        }
         return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -395,7 +409,7 @@ struct PackFetcherCommitRefTests {
         #expect(PackFetcher.isCommitSHA(ref) == expected)
     }
 
-    @Test("fetch at a full commit SHA checks out that commit, not the branch tip")
+    @Test("A pack fetched at a commit SHA stays there, then follows the default branch once unpinned")
     func fetchAtCommitSHA() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -407,6 +421,7 @@ struct PackFetcherCommitRefTests {
         _ = try git(["commit", "--quiet", "--allow-empty", "-m", "first"], in: remote, shell: shell)
         let pinned = try git(["rev-parse", "HEAD"], in: remote, shell: shell)
         _ = try git(["commit", "--quiet", "--allow-empty", "-m", "second"], in: remote, shell: shell)
+        let tip = try git(["rev-parse", "HEAD"], in: remote, shell: shell)
 
         let fetcher = PackFetcher(
             shell: shell,
@@ -417,5 +432,10 @@ struct PackFetcherCommitRefTests {
         #expect(result.commitSHA == pinned)
 
         #expect(try fetcher.update(packPath: result.localPath, ref: pinned) == nil)
+
+        // Dropping the pin must reach the default branch even though a ref-first checkout has
+        // no `origin/HEAD`.
+        let unpinned = try fetcher.update(packPath: result.localPath, ref: nil)
+        #expect(unpinned?.commitSHA == tip)
     }
 }

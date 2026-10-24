@@ -47,16 +47,18 @@ struct PackFetcher {
             try fm.removeItem(at: packPath)
         }
 
-        if let ref, Self.isCommitSHA(ref) {
-            try cloneAtCommit(url: url, into: packPath, sha: ref)
-        } else {
-            var args = ["clone", "--depth", "1"]
-            if let ref {
-                args += ["--branch", ref]
-            }
-            args += [url, packPath.path]
-
-            let result = shell.run(shell.environment.gitPath, arguments: args)
+        // Built by hand rather than `clone --branch`, which cannot resolve a commit SHA. The
+        // checkout is the same detached, depth-1 shape `update` resets to, for every ref type.
+        let steps: [(arguments: [String], workingDirectory: String?)] = [
+            (["init", "--quiet", packPath.path], nil),
+            (["remote", "add", "origin", url], packPath.path),
+            (["fetch", "--depth", "1", "origin", Self.fetchTarget(ref)], packPath.path),
+            (["checkout", "--quiet", "FETCH_HEAD"], packPath.path),
+        ]
+        for step in steps {
+            let result = shell.run(
+                shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
+            )
             guard result.succeeded else {
                 throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
             }
@@ -71,27 +73,16 @@ struct PackFetcher {
         )
     }
 
-    /// A full 40-hex commit SHA, the one ref shape `clone --branch` cannot resolve.
+    /// A full 40-hex commit SHA: a ref that can never move.
     static func isCommitSHA(_ ref: String) -> Bool {
         ref.count == 40 && ref.allSatisfy(\.isHexDigit)
     }
 
-    /// `clone --branch` rejects a SHA, so build the same detached, depth-1 checkout by hand.
-    private func cloneAtCommit(url: String, into packPath: URL, sha: String) throws {
-        let steps: [(arguments: [String], workingDirectory: String?)] = [
-            (["init", "--quiet", packPath.path], nil),
-            (["remote", "add", "origin", url], packPath.path),
-            (["fetch", "--depth", "1", "origin", sha], packPath.path),
-            (["checkout", "--quiet", "FETCH_HEAD"], packPath.path),
-        ]
-        for step in steps {
-            let result = shell.run(
-                shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
-            )
-            guard result.succeeded else {
-                throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
-            }
-        }
+    /// What every fetch asks the remote for. With no ref it is the remote's default branch,
+    /// fetched by name so no checkout depends on a local `origin/HEAD`, which a pack first
+    /// cloned at a ref never has.
+    static func fetchTarget(_ ref: String?) -> String {
+        ref ?? "HEAD"
     }
 
     // MARK: - Update
@@ -99,9 +90,9 @@ struct PackFetcher {
     /// Update an existing pack checkout.
     /// Returns a `FetchResult` if updated, or `nil` if already at the latest commit.
     ///
-    /// When `ref` is set, fetches that ref explicitly and resets to `FETCH_HEAD` — uniform for
-    /// any ref type. A plain `checkout <branch>` would not advance the local branch past
-    /// whatever was captured at clone time, freezing branch-ref packs.
+    /// Fetches the ref (or the remote's default branch) explicitly and resets to `FETCH_HEAD` —
+    /// uniform for every ref type, including none. A plain `checkout <branch>` would not advance
+    /// the local branch past whatever was captured at clone time, freezing branch-ref packs.
     func update(packPath: URL, ref: String?) throws -> FetchResult? {
         try ensureGitAvailable()
         if let ref { try validateRef(ref) }
@@ -109,18 +100,8 @@ struct PackFetcher {
         let beforeSHA = try currentCommit(at: packPath)
         let workDir = packPath.path
 
-        let fetchArgs: [String]
-        let resetTarget: String
-        if let ref {
-            fetchArgs = ["fetch", "--depth", "1", "origin", ref]
-            resetTarget = "FETCH_HEAD"
-        } else {
-            fetchArgs = ["fetch", "--depth", "1", "origin"]
-            resetTarget = "origin/HEAD"
-        }
-
         let fetchResult = shell.run(
-            shell.environment.gitPath, arguments: fetchArgs,
+            shell.environment.gitPath, arguments: ["fetch", "--depth", "1", "origin", Self.fetchTarget(ref)],
             workingDirectory: workDir
         )
         guard fetchResult.succeeded else {
@@ -128,7 +109,7 @@ struct PackFetcher {
         }
 
         let resetResult = shell.run(
-            shell.environment.gitPath, arguments: ["reset", "--hard", resetTarget],
+            shell.environment.gitPath, arguments: ["reset", "--hard", "FETCH_HEAD"],
             workingDirectory: workDir
         )
         guard resetResult.succeeded else {

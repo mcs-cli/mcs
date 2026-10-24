@@ -55,24 +55,20 @@ extension LockedCommand {
     }
 }
 
-/// How a command reports that another `mcs` process holds the lock, so a scheduled caller can
-/// retry later instead of treating it as a failure.
-enum LockContention {
-    /// `EX_TEMPFAIL` from sysexits(3): a temporary condition, try again later.
-    static let exitCode: Int32 = 75
-    static let stderrPrefix = "mcs: lock held:"
-}
+/// `EX_TEMPFAIL` from sysexits(3): another `mcs` process holds the lock, so a scheduled caller
+/// can retry later instead of treating the run as a failure.
+let lockContentionExitCode: Int32 = 75
 
-/// Run `body` under the process lock, turning contention into `LockContention`'s exit code and
-/// stderr line rather than a generic failure.
+/// Run `body` under the process lock, turning contention into `lockContentionExitCode` and a
+/// stable `mcs: lock held:` stderr line rather than a generic failure.
 func runHoldingLock(at lockFile: URL, body: () throws -> Void) throws {
     do {
         try withFileLock(at: lockFile, body: body)
     } catch let FileLockError.acquireFailed(path) {
         FileHandle.standardError.write(Data(
-            "\(LockContention.stderrPrefix) another mcs process is running (lock file: \(path))\n".utf8
+            "mcs: lock held: another mcs process is running (lock file: \(path))\n".utf8
         ))
-        throw ExitCode(LockContention.exitCode)
+        throw ExitCode(lockContentionExitCode)
     }
 }
 
