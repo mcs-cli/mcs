@@ -441,20 +441,11 @@ enum ConfiguratorSupport {
         })
         guard !objectKeys.isEmpty else { return keyPaths }
 
-        // Merging into an empty value yields every path the pack declares: the most a sync could own.
         var declared: [String: [String]] = [:]
-        for component in pack?.components ?? [] {
-            guard case let .settingsMerge(source) = component.installAction, let source else { continue }
-            do {
-                var scratch = Settings()
-                for keyPath in try scratch.merge(with: Settings.load(from: source)).landedKeyPaths {
-                    let topLevel = String(keyPath.split(separator: ".", maxSplits: 1)[0])
-                    if objectKeys.contains(topLevel), keyPath != topLevel {
-                        declared[topLevel, default: []].append(keyPath)
-                    }
-                }
-            } catch {
-                output.warn("Could not read \(source.lastPathComponent) from \(packID): \(error.localizedDescription)")
+        for keyPath in declaredSettingsKeyPaths(pack: pack, packID: packID, output: output) {
+            let topLevel = String(keyPath.split(separator: ".", maxSplits: 1)[0])
+            if objectKeys.contains(topLevel), keyPath != topLevel {
+                declared[topLevel, default: []].append(keyPath)
             }
         }
 
@@ -474,6 +465,21 @@ enum ConfiguratorSupport {
             }
         }
         return expanded
+    }
+
+    /// Every settings key path the pack's settings files declare: the most a sync could own.
+    static func declaredSettingsKeyPaths(pack: (any TechPack)?, packID: String, output: CLIOutput) -> [String] {
+        var declared: [String] = []
+        for component in pack?.components ?? [] {
+            guard case let .settingsMerge(source) = component.installAction, let source else { continue }
+            do {
+                var scratch = Settings()
+                try declared.append(contentsOf: scratch.merge(with: Settings.load(from: source)).landedKeyPaths)
+            } catch {
+                output.warn("Could not read \(source.lastPathComponent) from \(packID): \(error.localizedDescription)")
+            }
+        }
+        return declared
     }
 
     /// Install a plugin at `scope` and record it only when this install is what put it there.
@@ -503,40 +509,63 @@ enum ConfiguratorSupport {
 
     /// Compute per-pack SHA-256 hashes of contributed settings values from the on-disk file.
     ///
-    /// Reads the settings file once and hashes each pack's key-value pairs independently.
-    /// Returns an empty dictionary if no content was written or the file cannot be read.
+    /// Reads the settings file once and hashes each pack's key-value pairs independently, both as
+    /// one hash per pack and one per key path. Returns empty dictionaries if no content was
+    /// written or the file cannot be read.
     static func computeSettingsHashes(
         hasContent: Bool,
         contributedKeys: [String: [String]],
         settingsPath: URL,
         output: CLIOutput
-    ) -> [String: String] {
-        guard hasContent else { return [:] }
+    ) -> (packHashes: [String: String], valueHashes: [String: [String: String]]) {
+        guard hasContent else { return ([:], [:]) }
         let savedData: Data
         do {
             savedData = try Data(contentsOf: settingsPath)
         } catch {
             output.warn("Could not read settings for drift hash: \(error.localizedDescription)")
-            return [:]
+            return ([:], [:])
         }
         let savedJSON: [String: Any]
         do {
             guard let parsed = try JSONSerialization.jsonObject(with: savedData) as? [String: Any] else {
                 output.warn("Settings file is not a JSON object — skipping drift hash")
-                return [:]
+                return ([:], [:])
             }
             savedJSON = parsed
         } catch {
             output.warn("Could not parse settings for drift hash: \(error.localizedDescription)")
-            return [:]
+            return ([:], [:])
         }
         var hashes: [String: String] = [:]
+        var valueHashes: [String: [String: String]] = [:]
         for (packID, keys) in contributedKeys {
             if let hash = SettingsHasher.hash(keyPaths: keys, in: savedJSON) {
                 hashes[packID] = hash
             }
+            valueHashes[packID] = SettingsHasher.valueHashes(keyPaths: keys, in: savedJSON)
         }
-        return hashes
+        return (hashes, valueHashes)
+    }
+
+    /// Owned keys the user edited since mcs wrote them, split into those composition restores (the
+    /// pack still declares them) and those left as the user has them (still set, no longer declared).
+    /// A path with no recorded hash (an array, or a record from an older MCS) is never edited.
+    static func classifyEditedSettingsKeys(
+        _ keyPaths: [String],
+        recorded: [String: String],
+        in json: [String: Any],
+        declared: @autoclosure () -> Set<String>
+    ) -> (restore: [String], keep: [String]) {
+        let edited = keyPaths.filter { keyPath in
+            recorded[keyPath].map { SettingsHasher.valueHash(keyPath, in: json) != $0 } ?? false
+        }
+        guard !edited.isEmpty else { return ([], []) }
+        let declared = declared()
+        return (
+            edited.filter { declared.contains($0) },
+            edited.filter { !declared.contains($0) && SettingsHasher.extractValue($0, from: json) != nil }
+        )
     }
 
     // MARK: - Repo Name Parsing

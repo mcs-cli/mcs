@@ -10,30 +10,48 @@ enum SettingsHasher {
     static func hash(keyPaths: [String], in json: [String: Any]) -> String? {
         guard !keyPaths.isEmpty else { return nil }
 
-        var canonical = ""
-        for keyPath in keyPaths.sorted() {
-            let value = extractValue(keyPath, from: json)
-            let jsonString: String
-            if let value {
-                do {
-                    let data = try JSONSerialization.data(
-                        withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]
-                    )
-                    jsonString = String(data: data, encoding: .utf8) ?? "null"
-                } catch {
-                    // Value came from JSONSerialization.jsonObject — round-trip should not fail.
-                    // Use deterministic fallback to avoid phantom drift warnings.
-                    jsonString = "null"
-                }
-            } else {
+        let canonical = keyPaths.sorted().map { canonicalLine($0, value: extractValue($0, from: json)) }.joined()
+        return sha256(canonical)
+    }
+
+    /// One hash per key path whose value is set and is not an array.
+    ///
+    /// Arrays are skipped: one a pack owns whole (such as `permissions.allow`) also collects
+    /// entries Claude Code appends, so comparing it would report an edit on nearly every sync.
+    static func valueHashes(keyPaths: [String], in json: [String: Any]) -> [String: String] {
+        var hashes: [String: String] = [:]
+        for keyPath in keyPaths where !(extractValue(keyPath, from: json) is [Any]) {
+            hashes[keyPath] = valueHash(keyPath, in: json)
+        }
+        return hashes
+    }
+
+    /// Hash of the value at `keyPath` in the same form `valueHashes` records, or `nil` when unset.
+    static func valueHash(_ keyPath: String, in json: [String: Any]) -> String? {
+        extractValue(keyPath, from: json).map { sha256(canonicalLine(keyPath, value: $0)) }
+    }
+
+    private static func canonicalLine(_ keyPath: String, value: Any?) -> String {
+        let jsonString: String
+        if let value {
+            do {
+                let data = try JSONSerialization.data(
+                    withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed]
+                )
+                jsonString = String(data: data, encoding: .utf8) ?? "null"
+            } catch {
+                // Value came from JSONSerialization.jsonObject — round-trip should not fail.
+                // Use deterministic fallback to avoid phantom drift warnings.
                 jsonString = "null"
             }
-            canonical += "\(keyPath)=\(jsonString)\n"
+        } else {
+            jsonString = "null"
         }
+        return "\(keyPath)=\(jsonString)\n"
+    }
 
-        let data = Data(canonical.utf8)
-        let digest = SHA256.hash(data: data)
-        return digest.map { String(format: "%02x", $0) }.joined()
+    private static func sha256(_ canonical: String) -> String {
+        SHA256.hash(data: Data(canonical.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Extract a value from a JSON dictionary using dot-notation key path (one level of nesting).

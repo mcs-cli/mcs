@@ -162,7 +162,9 @@ struct ProjectSyncStrategy: SyncStrategy {
         previousSettingsKeys: [String: [String]],
         resolvedValues: [String: String],
         output: CLIOutput
-    ) throws -> (contributedKeys: [String: [String]], settingsHashes: [String: String]) {
+    ) throws -> (
+        contributedKeys: [String: [String]], settingsHashes: [String: String], valueHashes: [String: [String: String]]
+    ) {
         var settings = Settings()
 
         let allPreviousKeys = previousSettingsKeys.values.flatMap(\.self)
@@ -215,14 +217,14 @@ struct ProjectSyncStrategy: SyncStrategy {
             }
         }
 
-        let settingsHashes = ConfiguratorSupport.computeSettingsHashes(
+        let (settingsHashes, valueHashes) = ConfiguratorSupport.computeSettingsHashes(
             hasContent: hasContent,
             contributedKeys: contributedKeys,
             settingsPath: scope.settingsPath,
             output: output
         )
 
-        return (contributedKeys, settingsHashes)
+        return (contributedKeys, settingsHashes, valueHashes)
     }
 
     // MARK: - CLAUDE.local.md Composition
