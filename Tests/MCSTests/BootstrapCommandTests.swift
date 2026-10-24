@@ -187,7 +187,7 @@ struct BootstrapReconcileMissingCheckoutTests {
             existing: atTip, pack: BootstrapFile.PackRef(source: source, ref: fix.taggedSHA), ctx: fix.ctx
         )
         #expect(pinned.commitSHA == fix.taggedSHA)
-        #expect(BootstrapCommand.reconcileStatus(existing: atTip, reconciled: pinned) == "moved to \(fix.taggedSHA)")
+        #expect(BootstrapCommand.PackStatus(existing: atTip, reconciled: pinned) == .moved(to: fix.taggedSHA))
         let persisted = try fix.ctx.loadRegistry().packs.first
         #expect(persisted?.ref == fix.taggedSHA)
         #expect(persisted?.commitSHA == fix.taggedSHA)
@@ -195,7 +195,7 @@ struct BootstrapReconcileMissingCheckoutTests {
         let again = try command.reconcileExistingGitPack(
             existing: pinned, pack: BootstrapFile.PackRef(source: source, ref: fix.taggedSHA), ctx: fix.ctx
         )
-        #expect(BootstrapCommand.reconcileStatus(existing: pinned, reconciled: again) == "unchanged")
+        #expect(BootstrapCommand.PackStatus(existing: pinned, reconciled: again) == .unchanged)
     }
 
     @Test("A pack first added from mcs.yaml at a commit SHA is checked out at that commit")
