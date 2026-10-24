@@ -474,7 +474,7 @@ enum ConfiguratorSupport {
             guard case let .settingsMerge(source) = component.installAction, let source else { continue }
             do {
                 var scratch = Settings()
-                declared.append(contentsOf: try scratch.merge(with: Settings.load(from: source)).landedKeyPaths)
+                try declared.append(contentsOf: scratch.merge(with: Settings.load(from: source)).landedKeyPaths)
             } catch {
                 output.warn("Could not read \(source.lastPathComponent) from \(packID): \(error.localizedDescription)")
             }
