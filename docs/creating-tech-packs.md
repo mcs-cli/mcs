@@ -582,6 +582,23 @@ echo "Created .xcodebuildmcp/config.yaml for $project_file"
 
 ---
 
+## Restricting Scopes
+
+A pack installs into a project (`mcs sync`) or into `~/.claude/` (`mcs sync --global`). By default it
+may go in either. Some features only exist in a project: `configureProject` scripts don't run in global
+scope, `__REPO_NAME__` / `__PROJECT_DIR_NAME__` stay unresolved in the global `CLAUDE.md`, and
+`fileDetect` prompts are skipped. A pack that relies on them should say so:
+
+```yaml
+scopes: [project]
+```
+
+`mcs` then refuses to install the pack globally instead of installing half of it, and
+`mcs pack validate` warns when a pack uses these features without the declaration. See
+[The `scopes:` field](techpack-schema.md#the-scopes-field).
+
+---
+
 ## How Convergence Works
 
 `mcs sync` is **idempotent** — safe to run repeatedly. The engine tracks what each pack installed and converges to the desired state:
