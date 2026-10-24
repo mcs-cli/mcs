@@ -3619,6 +3619,7 @@ struct BootstrapIntegrationTests {
         _ arguments: [String],
         _ declared: [BootstrapCommand.DeclaredPack],
         fileScope: PackScope? = nil,
+        identity: String? = nil,
         bed: LifecycleTestBed,
         registry: TechPackRegistry
     ) throws {
@@ -3630,17 +3631,19 @@ struct BootstrapIntegrationTests {
             output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             shell: ShellRunner(environment: bed.env),
             registry: registry,
-            claudeCLI: bed.mockCLI
+            claudeCLI: bed.mockCLI,
+            fileIdentity: identity
         )
     }
 
     private func bootstrap(
         _ declared: [BootstrapCommand.DeclaredPack],
         fileScope: PackScope? = nil,
+        identity: String? = nil,
         bed: LifecycleTestBed,
         registry: TechPackRegistry
     ) throws {
-        try bootstrap([], declared, fileScope: fileScope, bed: bed, registry: registry)
+        try bootstrap([], declared, fileScope: fileScope, identity: identity, bed: bed, registry: registry)
     }
 
     private static func file(_ declared: [BootstrapCommand.DeclaredPack], scope: PackScope? = nil) -> BootstrapFile {
@@ -3668,12 +3671,26 @@ struct BootstrapIntegrationTests {
         let registry = TechPackRegistry(packs: [local, tagged, machine])
 
         try bootstrap(
-            [entry("local"), entry("tagged", scope: .global), entry("machine")],
+            [entry("local"), entry("tagged", scope: .global), entry("machine", scope: .global)],
             bed: bed, registry: registry
         )
 
         #expect(try bed.projectState().configuredPacks == ["local"])
         #expect(try bed.globalState().configuredPacks == ["tagged", "machine"])
+    }
+
+    @Test("An untagged entry never goes global because its pack only supports global")
+    func untaggedGlobalOnlyPackFails() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let machine = MockTechPack(identifier: "machine", displayName: "Machine", supportedScopes: [.global])
+        let registry = TechPackRegistry(packs: [machine])
+
+        #expect(throws: (any Error).self) {
+            try bootstrap([entry("machine")], bed: bed, registry: registry)
+        }
+        #expect(try bed.globalState().configuredPacks.isEmpty)
+        #expect(BootstrapCommand.misroutedMessage(pack: machine, target: .project).contains("`scope: global`"))
     }
 
     @Test("A file-level global file writes nothing under the project")
@@ -3731,16 +3748,113 @@ struct BootstrapIntegrationTests {
     func globalPruneNeedsGlobalFile() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
-        let extra = MockTechPack(identifier: "extra", displayName: "Extra")
+        let owned = MockTechPack(identifier: "owned", displayName: "Owned")
         let declared = MockTechPack(identifier: "declared", displayName: "Declared")
-        let registry = TechPackRegistry(packs: [extra, declared])
-        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [extra], confirmRemovals: false)
+        let registry = TechPackRegistry(packs: [owned, declared])
+        try bootstrap([entry("owned"), entry("declared")], fileScope: .global, bed: bed, registry: registry)
 
         try bootstrap(["--prune", "--yes"], [entry("declared", scope: .global)], bed: bed, registry: registry)
-        #expect(try bed.globalState().configuredPacks == ["extra", "declared"])
+        #expect(try bed.globalState().configuredPacks == ["declared", "owned"])
 
         try bootstrap(["--prune", "--yes"], [entry("declared")], fileScope: .global, bed: bed, registry: registry)
         #expect(try bed.globalState().configuredPacks == ["declared"])
+    }
+
+    @Test("A global --prune never removes a pack the user installed themselves")
+    func globalPruneKeepsPersonalPacks() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let personal = MockTechPack(identifier: "personal", displayName: "Personal")
+        let org = MockTechPack(identifier: "org", displayName: "Org")
+        let registry = TechPackRegistry(packs: [personal, org])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [personal], confirmRemovals: false)
+
+        try bootstrap(["--prune", "--yes"], [entry("org")], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["org", "personal"])
+    }
+
+    @Test("A pack two files install survives one of them pruning it")
+    func globalPruneKeepsPacksAnotherFileOwns() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let shared = MockTechPack(identifier: "shared", displayName: "Shared")
+        let other = MockTechPack(identifier: "other", displayName: "Other")
+        let registry = TechPackRegistry(packs: [shared, other])
+        try bootstrap([entry("shared")], fileScope: .global, identity: "one", bed: bed, registry: registry)
+        try bootstrap([entry("shared")], fileScope: .global, identity: "two", bed: bed, registry: registry)
+
+        try bootstrap(["--prune", "--yes"], [entry("other")], fileScope: .global, identity: "one", bed: bed, registry: registry)
+        #expect(try bed.globalState().configuredPacks == ["other", "shared"])
+        #expect(try bed.globalState().owners(of: "shared") == ["file:two"])
+
+        try bootstrap(["--prune", "--yes"], [entry("other")], fileScope: .global, identity: "two", bed: bed, registry: registry)
+        #expect(try bed.globalState().configuredPacks == ["other"])
+    }
+
+    @Test("A configured pack that fails to load fails the run instead of reporting success")
+    func unloadablePackFailsTheRun() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let broken = MockTechPack(identifier: "broken", displayName: "Broken")
+        let fine = MockTechPack(identifier: "fine", displayName: "Fine")
+        try bed.makeGlobalSyncConfigurator(registry: TechPackRegistry(packs: [broken]))
+            .configure(packs: [broken], confirmRemovals: false)
+        let registry = TechPackRegistry(packs: [fine], registeredPackIDs: ["broken", "fine"])
+
+        #expect(throws: (any Error).self) {
+            try bootstrap([entry("fine", scope: .global)], bed: bed, registry: registry)
+        }
+        #expect(try bed.globalState().configuredPacks == ["broken"])
+    }
+
+    @Test("Moving a pack global keeps its user-scope MCP server registered")
+    func moveKeepsUserScopeMCPServer() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let mover = MockTechPack(identifier: "mover", displayName: "Mover", components: [ComponentDefinition(
+            id: "mover.srv", displayName: "srv", description: "MCP srv", type: .mcpServer, packIdentifier: "mover",
+            installAction: .mcpServer(MCPServerConfig(name: "srv", command: "npx", args: [], env: [:], scope: "user"))
+        )])
+        let registry = TechPackRegistry(packs: [mover])
+        try bed.makeConfigurator(registry: registry).configure(packs: [mover], confirmRemovals: false)
+
+        try bootstrap(["--prune", "--yes"], [entry("mover", scope: .global)], bed: bed, registry: registry)
+
+        #expect(try bed.projectState().configuredPacks.isEmpty)
+        #expect(try bed.globalState().artifacts(for: "mover")?.mcpServers == [MCPServerRef(name: "srv", scope: "user")])
+        #expect(!bed.mockCLI.mcpRemoveCalls.contains { $0.name == "srv" && $0.scope == "user" })
+    }
+
+    @Test("A project entry already installed globally doesn't abort the global part of the file")
+    func projectEntryAlreadyGlobalDoesNotAbort() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let both = MockTechPack(identifier: "both", displayName: "Both")
+        let machine = MockTechPack(identifier: "machine", displayName: "Machine")
+        let registry = TechPackRegistry(packs: [both, machine])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [both], confirmRemovals: false)
+
+        try bootstrap([entry("both"), entry("machine", scope: .global)], bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["both", "machine"])
+        #expect(try bed.projectState().configuredPacks.isEmpty)
+    }
+
+    @Test("A global entry's seeded value fills a placeholder used only in its template")
+    func globalSeedFillsTemplatePlaceholder() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = MockTechPack(
+            identifier: "org",
+            displayName: "Org",
+            templates: [TemplateContribution(sectionIdentifier: "org", templateContent: "Org: __ORG__", placeholders: [])]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bootstrap([entry("org", values: ["ORG": "Acme"])], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try String(contentsOf: bed.env.globalClaudeMD, encoding: .utf8).contains("Org: Acme"))
     }
 
     @Test("A second identical global run rewrites no CLAUDE.md and leaves no backups")

@@ -4,13 +4,16 @@ import Foundation
 struct BootstrapCommand: LockedCommand {
     static let configuration = CommandConfiguration(
         commandName: "bootstrap",
-        abstract: "Apply a declarative \(BootstrapFile.defaultFilename) — install packs and sync the current project"
+        abstract: "Apply a declarative \(BootstrapFile.defaultFilename) — install packs into the project or global scope each entry names"
     )
 
     @Flag(name: .long, help: "Show what would change without making any modifications")
     var dryRun = false
 
-    @Flag(name: .long, help: "Remove packs configured in this project but absent from mcs.yaml")
+    @Flag(
+        name: .long,
+        help: "Remove project packs absent from mcs.yaml (a 'scope: global' file: only global packs it installed)"
+    )
     var prune: Bool = false
 
     @Flag(name: .shortAndLong, help: "Skip the removal-confirmation prompt (only meaningful with --prune)")
@@ -37,8 +40,9 @@ struct BootstrapCommand: LockedCommand {
             ctx.output.error(error.localizedDescription)
             throw ExitCode.failure
         }
-        // A machine-only file never treats cwd as a project, so it may live anywhere.
-        if file.fileScope != .global {
+        // Only a run that converges the project treats cwd as one; a file that sends everything
+        // global may live anywhere, $HOME included.
+        if file.fileScope != .global, file.routesToProject || prune {
             try guardCwd(cwd: cwd, env: ctx.env, output: ctx.output)
         }
 
@@ -64,7 +68,8 @@ struct BootstrapCommand: LockedCommand {
             env: ctx.env,
             output: ctx.output,
             shell: ctx.shell,
-            registry: registry
+            registry: registry,
+            fileIdentity: Self.fileIdentity(of: filePath, shell: ctx.shell)
         )
 
         if !dryRun {
@@ -73,6 +78,48 @@ struct BootstrapCommand: LockedCommand {
             UpdateChecker.syncHook(config: config, env: ctx.env, output: ctx.output)
             UpdateChecker.checkAndPrint(env: ctx.env, shell: ctx.shell, output: ctx.output)
         }
+    }
+
+    // MARK: - File identity
+
+    /// Who owns the global packs this file installs. In a git repo it is the remote plus the file's
+    /// path in the repo, so every clone of an org config repo is one owner; otherwise the
+    /// canonical path. If either changes, the file stops recognising its packs and they stay —
+    /// the safe direction.
+    static func fileIdentity(of fileURL: URL, shell: any ShellRunning) -> String {
+        let canonical = fileURL.resolvingSymlinksInPath()
+        let dir = canonical.deletingLastPathComponent().path
+        let git = shell.environment.gitPath
+        let top = shell.run(git, arguments: ["rev-parse", "--show-toplevel"], workingDirectory: dir)
+        let remote = shell.run(git, arguments: ["remote", "get-url", "origin"], workingDirectory: dir)
+        guard top.succeeded, remote.succeeded, let normalized = normalizedRemote(remote.stdout) else {
+            return canonical.path
+        }
+        let root = URL(fileURLWithPath: top.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+            .resolvingSymlinksInPath().path
+        let relative = canonical.path.hasPrefix(root + "/") ? String(canonical.path.dropFirst(root.count + 1)) : canonical.lastPathComponent
+        return "\(normalized)/\(relative)"
+    }
+
+    /// `git@host:org/repo.git`, `https://user:token@host/org/repo.git` and `ssh://git@host/org/repo`
+    /// all become `host/org/repo`, so the same repo is one owner however it was cloned.
+    static func normalizedRemote(_ raw: String) -> String? {
+        var url = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return nil }
+        if let scheme = url.range(of: "://") {
+            url = String(url[scheme.upperBound...])
+        } else if let colon = url.firstIndex(of: ":"), !url[..<colon].contains("/") {
+            url.replaceSubrange(colon ... colon, with: "/")
+        }
+        if let at = url.firstIndex(of: "@"), !url[..<at].contains("/") {
+            url = String(url[url.index(after: at)...])
+        }
+        while url.hasSuffix("/") {
+            url.removeLast()
+        }
+        url = url.strippingGitSuffix
+        guard let slash = url.firstIndex(of: "/") else { return url.lowercased() }
+        return url[..<slash].lowercased() + url[slash...]
     }
 
     // MARK: - Guards
@@ -132,116 +179,124 @@ struct BootstrapCommand: LockedCommand {
         // the first checkout and registry entry silently. Track identifiers so the
         // second one errors instead of shadowing the first.
         var seenIdentifiers: Set<String> = []
-        for pack in file.packs {
-            let displaySource = redactSourceForDisplay(pack.source)
-            let packSource: PackSource
-            do {
-                packSource = try resolver.resolve(pack.source)
-            } catch {
-                ctx.output.error("Failed to resolve '\(displaySource)': \(error.localizedDescription)")
-                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
-                throw ExitCode.failure
-            }
-
-            let sourceURL = packSource.referenceURL
-            if !seenCanonicalURLs.insert(sourceURL).inserted {
-                ctx.output.error(
-                    "Pack '\(displaySource)' resolves to '\(redactSourceForDisplay(sourceURL))'"
-                        + ", already declared in this file."
-                )
-                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
-                throw ExitCode.failure
-            }
-            let existing = bySourceURL[sourceURL]
-
-            // Every existing-pack path (dry-run/existing, local/existing, git/reconcile)
-            // knows the identifier before any mutation, so run the collision check once,
-            // upfront. The new-pack path can only know the identifier after PackAdder
-            // fetches and reads the manifest, so it runs a second check post-add.
-            if let existing {
-                try trackIdentifier(
-                    existing.identifier,
-                    source: pack.source,
-                    seen: &seenIdentifiers,
-                    installed: installedThisRun,
-                    ctx: ctx
-                )
-            }
-
-            if dryRun {
-                printDryRunLine(
-                    existing: existing,
-                    packSource: packSource,
-                    pack: pack,
-                    packsDirectory: ctx.env.packsDirectory,
-                    output: ctx.output
-                )
-                if let existing { declared.append(DeclaredPack(identifier: existing.identifier, ref: pack)) }
-                continue
-            }
-
-            // Local packs stay in-place; nothing to fetch or refresh when re-declared.
-            // PackAdder emits the "--ref is ignored" warning on fresh local adds; the
-            // already-registered branch handles it here since PackAdder never sees it.
-            if case .localPath = packSource, let existing {
-                if pack.ref != nil {
-                    ctx.output.warn("'\(displaySource)': --ref is ignored for local packs")
+        // Every failure below throws; the status lines are printed once, here, so a scheduled
+        // wrapper sees each entry that ran plus the one that failed, keyed by its source.
+        var current: String?
+        do {
+            for pack in file.packs {
+                let displaySource = redactSourceForDisplay(pack.source)
+                current = displaySource
+                let packSource: PackSource
+                do {
+                    packSource = try resolver.resolve(pack.source)
+                } catch {
+                    ctx.output.error("Failed to resolve '\(displaySource)': \(error.localizedDescription)")
+                    reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
+                    throw ExitCode.failure
                 }
-                ctx.output.dimmed("  \(displaySource) already registered (local pack)")
-                declared.append(DeclaredPack(identifier: existing.identifier, ref: pack))
-                statuses.append((existing.identifier, .unchanged))
-                continue
-            }
 
-            do {
+                let sourceURL = packSource.referenceURL
+                if !seenCanonicalURLs.insert(sourceURL).inserted {
+                    ctx.output.error(
+                        "Pack '\(displaySource)' resolves to '\(redactSourceForDisplay(sourceURL))'"
+                            + ", already declared in this file."
+                    )
+                    reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
+                    throw ExitCode.failure
+                }
+                let existing = bySourceURL[sourceURL]
+
+                // Every existing-pack path (dry-run/existing, local/existing, git/reconcile)
+                // knows the identifier before any mutation, so run the collision check once,
+                // upfront. The new-pack path can only know the identifier after PackAdder
+                // fetches and reads the manifest, so it runs a second check post-add.
                 if let existing {
-                    let reconciled = try reconcileExistingGitPack(
-                        existing: existing,
-                        pack: pack,
+                    try trackIdentifier(
+                        existing.identifier,
+                        source: pack.source,
+                        seen: &seenIdentifiers,
+                        installed: installedThisRun,
                         ctx: ctx
                     )
-                    declared.append(DeclaredPack(identifier: reconciled.identifier, ref: pack))
-                    installedThisRun.append(reconciled.identifier)
-                    statuses.append((reconciled.identifier, PackStatus(existing: existing, reconciled: reconciled)))
-                } else {
-                    let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
-                    switch outcome {
-                    case let .installed(entry):
-                        // Post-add check: the identifier isn't knowable without a fetch,
-                        // so if two entries with different sources produce the same
-                        // manifest identifier, the second one has already overwritten
-                        // the first by the time we detect it. The error tells the user
-                        // to fix mcs.yaml and re-run.
-                        try trackIdentifier(
-                            entry.identifier,
-                            source: pack.source,
-                            seen: &seenIdentifiers,
-                            installed: installedThisRun,
+                }
+
+                if dryRun {
+                    printDryRunLine(
+                        existing: existing,
+                        packSource: packSource,
+                        pack: pack,
+                        packsDirectory: ctx.env.packsDirectory,
+                        output: ctx.output
+                    )
+                    if let existing { declared.append(DeclaredPack(identifier: existing.identifier, ref: pack)) }
+                    continue
+                }
+
+                // Local packs stay in-place; nothing to fetch or refresh when re-declared.
+                // PackAdder emits the "--ref is ignored" warning on fresh local adds; the
+                // already-registered branch handles it here since PackAdder never sees it.
+                if case .localPath = packSource, let existing {
+                    if pack.ref != nil {
+                        ctx.output.warn("'\(displaySource)': --ref is ignored for local packs")
+                    }
+                    ctx.output.dimmed("  \(displaySource) already registered (local pack)")
+                    declared.append(DeclaredPack(identifier: existing.identifier, ref: pack))
+                    statuses.append((displaySource, .unchanged))
+                    continue
+                }
+
+                do {
+                    if let existing {
+                        let reconciled = try reconcileExistingGitPack(
+                            existing: existing,
+                            pack: pack,
                             ctx: ctx
                         )
-                        declared.append(DeclaredPack(identifier: entry.identifier, ref: pack))
-                        installedThisRun.append(entry.identifier)
-                        statuses.append((entry.identifier, .added))
-                    case .declined:
-                        // Bootstrap auto-accepts duplicates and collisions, so trust is the
-                        // only thing `.declined` can mean here.
-                        ctx.output.error("Bootstrap aborted: pack '\(displaySource)' was not added.")
-                        trust.hintIfUnattended(output: ctx.output, subject: "declared packs")
-                        throw ExitCode.failure
-                    case .previewed:
-                        // PackAdder only returns .previewed when Options.preview is true;
-                        // bootstrap never sets that flag. Belt-and-suspenders: crash in debug
-                        // if that assumption ever changes so the miss is caught in tests.
-                        assertionFailure("PackAdder returned .previewed but bootstrap never sets Options.preview")
-                        ctx.output.error("Unexpected preview outcome for '\(displaySource)'.")
-                        throw ExitCode.failure
+                        declared.append(DeclaredPack(identifier: reconciled.identifier, ref: pack))
+                        installedThisRun.append(reconciled.identifier)
+                        statuses.append((displaySource, PackStatus(existing: existing, reconciled: reconciled)))
+                    } else {
+                        let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
+                        switch outcome {
+                        case let .installed(entry):
+                            // Post-add check: the identifier isn't knowable without a fetch,
+                            // so if two entries with different sources produce the same
+                            // manifest identifier, the second one has already overwritten
+                            // the first by the time we detect it. The error tells the user
+                            // to fix mcs.yaml and re-run.
+                            try trackIdentifier(
+                                entry.identifier,
+                                source: pack.source,
+                                seen: &seenIdentifiers,
+                                installed: installedThisRun,
+                                ctx: ctx
+                            )
+                            declared.append(DeclaredPack(identifier: entry.identifier, ref: pack))
+                            installedThisRun.append(entry.identifier)
+                            statuses.append((displaySource, .added))
+                        case .declined:
+                            // Bootstrap auto-accepts duplicates and collisions, so trust is the
+                            // only thing `.declined` can mean here.
+                            ctx.output.error("Bootstrap aborted: pack '\(displaySource)' was not added.")
+                            trust.hintIfUnattended(output: ctx.output, subject: "declared packs")
+                            throw ExitCode.failure
+                        case .previewed:
+                            // PackAdder only returns .previewed when Options.preview is true;
+                            // bootstrap never sets that flag. Belt-and-suspenders: crash in debug
+                            // if that assumption ever changes so the miss is caught in tests.
+                            assertionFailure("PackAdder returned .previewed but bootstrap never sets Options.preview")
+                            ctx.output.error("Unexpected preview outcome for '\(displaySource)'.")
+                            throw ExitCode.failure
+                        }
                     }
+                } catch {
+                    reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
+                    throw error
                 }
-            } catch {
-                printStatuses(statuses + [(displaySource, .failed)], output: ctx.output)
-                reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
-                throw error
             }
+        } catch {
+            printStatuses(statuses + (current.map { [($0, .failed)] } ?? []), output: ctx.output)
+            throw error
         }
 
         printStatuses(statuses, output: ctx.output)
@@ -461,9 +516,10 @@ struct BootstrapCommand: LockedCommand {
         output: CLIOutput
     ) {
         let context = strategy.makeConfigContext(output: output, resolvedValues: [:], priorValues: [:])
+        // Templates count in both scopes: global sync never prompts for a template placeholder,
+        // but it does apply a seeded value for one.
         for key in Self.unmatchedSeedKeys(
-            refs: refs, packs: packs, context: context,
-            includeTemplates: strategy.scope.includeTemplatesInScan
+            refs: refs, packs: packs, context: context, includeTemplates: true
         ) {
             output.warn(
                 "'\(key)' in \(BootstrapFile.defaultFilename) values matches no prompt or placeholder"
@@ -539,10 +595,12 @@ struct BootstrapCommand: LockedCommand {
         output: CLIOutput,
         shell: any ShellRunning,
         registry: TechPackRegistry,
-        claudeCLI: (any ClaudeCLI)? = nil
+        claudeCLI: (any ClaudeCLI)? = nil,
+        fileIdentity: String? = nil
     ) throws {
         let fileName = BootstrapFile.defaultFilename
         let fileScope = file.fileScope
+        let owner = "file:" + (fileIdentity ?? projectRoot.appendingPathComponent(fileName).standardizedFileURL.path)
         let routed = try partitionByScope(declared, fileScope: fileScope, registry: registry, output: output)
 
         guard !declared.isEmpty else {
@@ -559,7 +617,7 @@ struct BootstrapCommand: LockedCommand {
 
         let prunesGlobal = prune && fileScope == .global
         let runsGlobal = !routed.global.isEmpty || prunesGlobal
-        let runsProject = fileScope != .global && (!routed.project.isEmpty || prune)
+        let runsProject = fileScope != .global && (file.routesToProject || prune)
 
         let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
         var projectState: ProjectState?
@@ -575,15 +633,16 @@ struct BootstrapCommand: LockedCommand {
 
         // A blocked scope skips the whole run: converging only the other one would leave the
         // file half-applied. Under prune the unloadable pack is what the run exists to remove.
+        // An unattended rollout must not read this as success, so the skip exits non-zero.
         if runsGlobal, !prunesGlobal, SyncCommand.scopeIsBlockedByUnloadablePack(
             configured: globalState.configuredPacks, registry: registry, output: output
         ) {
-            return
+            throw ExitCode.failure
         }
         if runsProject, !prune, let projectState, SyncCommand.scopeIsBlockedByUnloadablePack(
             configured: projectState.configuredPacks, registry: registry, output: output
         ) {
-            return
+            throw ExitCode.failure
         }
 
         // Installing globally what this project also holds is the state `ScopeDuplicationCheck`
@@ -602,11 +661,12 @@ struct BootstrapCommand: LockedCommand {
             state: ProjectState,
             prune: Bool,
             strategy: any SyncStrategy,
+            keeping: Set<String>? = nil,
             narrow: ([any TechPack]) throws -> [any TechPack] = { $0 }
         ) throws -> ScopePlan {
             let desired = try ConfiguratorSupport.additivePackSet(
                 requested: entries.map(\.pack),
-                previouslyConfigured: state.configuredPacks,
+                previouslyConfigured: keeping ?? state.configuredPacks,
                 prune: prune,
                 pruneCommand: "mcs bootstrap --prune",
                 registry: registry,
@@ -632,14 +692,21 @@ struct BootstrapCommand: LockedCommand {
 
         var plans: [ScopePlan] = []
         if runsGlobal {
+            // A global file never owns the whole scope: its prune drops only packs this file was
+            // the sole owner of, and keeps the user's own and other files' packs additively.
+            let declaredGlobal = Set(routed.global.map(\.pack.identifier))
+            let released = prunesGlobal
+                ? globalState.configuredPacks.filter { !declaredGlobal.contains($0) && globalState.owners(of: $0) == [owner] }
+                : []
             try plans.append(makePlan(
-                routed.global, state: globalState, prune: prunesGlobal,
-                strategy: GlobalSyncStrategy(environment: env)
+                routed.global, state: globalState, prune: false,
+                strategy: GlobalSyncStrategy(environment: env),
+                keeping: globalState.configuredPacks.subtracting(released)
             ))
         }
         if runsProject, let projectState {
-            // Under --prune the list only has to exclude what should go, so an empty result is
-            // legitimate: the extras converge away as removals.
+            // An empty result is legitimate: under --prune the extras converge away as removals,
+            // and otherwise every project entry already applies globally.
             try plans.append(makePlan(
                 routed.project, state: projectState, prune: prune,
                 strategy: ProjectSyncStrategy(projectPath: projectRoot, environment: env)
@@ -649,10 +716,12 @@ struct BootstrapCommand: LockedCommand {
                     globallyInstalled: globalState.configuredPacks,
                     previouslyConfigured: projectState.configuredPacks,
                     output: output,
-                    allowEmpty: prune
+                    allowEmpty: true
                 )
             })
         }
+        // A plan with nothing to add or remove would only print an empty block.
+        plans.removeAll { $0.packs.isEmpty && $0.removals.isEmpty }
 
         if !dryRun {
             for index in plans.indices {
@@ -670,15 +739,26 @@ struct BootstrapCommand: LockedCommand {
 
         for plan in plans {
             try converge(plan, projectRoot: projectRoot, env: env, output: output)
+            if plan.scope == .global, !dryRun {
+                try recordOwnership(
+                    owner: owner, declared: Set(routed.global.map(\.pack.identifier)),
+                    before: plan.state, releasingUndeclared: prunesGlobal, env: env
+                )
+            }
         }
         if !dryRun {
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }
 
+        // Global extras are divergence only when this file installed them; anything else there
+        // is the user's own or another file's.
         for plan in plans {
+            let extras = plan.scope == .project
+                ? plan.keptExtras
+                : plan.keptExtras.filter { plan.state.owners(of: $0).contains(owner) }
             ConfiguratorSupport.reportKeptExtras(
-                plan.keptExtras,
+                extras,
                 notIn: "in \(fileName)\(plan.scope == .global ? " (global)" : "")",
                 remedy: plan.scope == .global && fileScope != .global
                     ? "Add them to \(fileName), or deselect them with 'mcs sync --global'."
@@ -699,16 +779,15 @@ struct BootstrapCommand: LockedCommand {
     ) throws -> (global: [RoutedEntry], project: [RoutedEntry]) {
         var routed: (global: [RoutedEntry], project: [RoutedEntry]) = ([], [])
         var unloaded: [String] = []
-        var unsupported: [PackScope: [any TechPack]] = [:]
+        var unsupported: [(pack: any TechPack, target: PackScope)] = []
         for entry in declared {
             guard let pack = registry.pack(for: entry.identifier) else {
                 unloaded.append(entry.identifier)
                 continue
             }
-            let single = pack.supportedScopes.count == 1 ? pack.supportedScopes.first : nil
-            let target = entry.ref.packScope ?? fileScope ?? single ?? .project
+            let target = entry.ref.route(fileScope: fileScope)
             guard pack.supportedScopes.contains(target) else {
-                unsupported[target, default: []].append(pack)
+                unsupported.append((pack, target))
                 continue
             }
             switch target {
@@ -720,14 +799,49 @@ struct BootstrapCommand: LockedCommand {
             for id in unloaded {
                 output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
             }
-            for scope in PackScope.allCases {
-                if let packs = unsupported[scope], let message = PackScopeError(packs: packs, scope: scope).errorDescription {
-                    output.error(message)
-                }
+            for (pack, target) in unsupported {
+                output.error(Self.misroutedMessage(pack: pack, target: target))
             }
             throw ExitCode.failure
         }
         return routed
+    }
+
+    /// Claim the packs this file declared for global scope and, under a global `--prune`, release
+    /// its claim on the ones it no longer declares. Read after `configure` saved, so the claims
+    /// land on the state it wrote.
+    private func recordOwnership(
+        owner: String,
+        declared: Set<String>,
+        before: ProjectState,
+        releasingUndeclared: Bool,
+        env: Environment
+    ) throws {
+        var state = try ProjectState(stateFile: env.globalStateFile)
+        for packID in declared {
+            state.claim(packID, by: owner, wasConfigured: before.configuredPacks.contains(packID))
+        }
+        if releasingUndeclared {
+            for packID in state.configuredPacks.subtracting(declared) where state.owners(of: packID).contains(owner) {
+                state.releaseClaim(on: packID, by: owner)
+            }
+        }
+        try state.save()
+    }
+
+    /// Bootstrap re-asserts the file every run, so unlike `mcs update` it fails on a pack whose
+    /// `scopes:` no longer allows its entry's scope, and the remedy is an edit to the file.
+    static func misroutedMessage(pack: any TechPack, target: PackScope) -> String {
+        let supported = PackScope.allCases.filter(pack.supportedScopes.contains)
+        let file = BootstrapFile.defaultFilename
+        guard let only = supported.first else {
+            return "Pack '\(pack.displayName)' declares no valid `scopes:` value — remove it from \(file)"
+        }
+        let remedy = supported.count == 1
+            ? "set this entry's `scope: \(only.rawValue)` or remove it from \(file)"
+            : "remove it from \(file)"
+        return "Pack '\(pack.displayName)' supports only \(supported.map(\.rawValue).joined(separator: ", "))"
+            + " but \(file) routes it to \(target.rawValue) scope — \(remedy)"
     }
 
     private func converge(_ plan: ScopePlan, projectRoot: URL, env: Environment, output: CLIOutput) throws {
@@ -751,7 +865,8 @@ struct BootstrapCommand: LockedCommand {
                 confirmRemovals: false,
                 reusePriorValuesSilently: true,
                 seededValues: plan.seededValues,
-                preflighted: plan.preflight
+                preflighted: plan.preflight,
+                warnFileOwnedRemovals: false
             )
         }
     }

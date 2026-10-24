@@ -243,6 +243,8 @@ struct Configurator {
     ///   Pass `false` for non-interactive paths (`--pack`, `--all`).
     /// - Parameter preflighted: The result of `preflight` for these same packs and seeds, so the
     ///   state and built-in values are not read twice.
+    /// - Parameter warnFileOwnedRemovals: `false` for bootstrap, whose own prune removes only packs
+    ///   its file owns.
     /// - Parameter reusePriorValuesSilently: When `true`, skip the interactive
     ///   "Reuse these values?" gate even when stdin is a TTY — used by
     ///   `mcs update`, where re-asking only makes sense for genuinely new prompts.
@@ -252,7 +254,8 @@ struct Configurator {
         confirmRemovals: Bool = true,
         reusePriorValuesSilently: Bool = false,
         seededValues: [String: String] = [:],
-        preflighted: Preflight? = nil
+        preflighted: Preflight? = nil,
+        warnFileOwnedRemovals: Bool = true
     ) throws {
         let checked = try preflighted ?? preflight(
             packs: packs, seededValues: seededValues, reusePriorValuesSilently: reusePriorValuesSilently
@@ -296,6 +299,12 @@ struct Configurator {
             output: output
         )
 
+        // The user's choice wins, but a file that installed the pack will put it back.
+        if warnFileOwnedRemovals {
+            for packID in removals.sorted() where !state.owners(of: packID).subtracting([ProjectState.userOwner]).isEmpty {
+                output.warn("'\(packID)' was installed by \(BootstrapFile.defaultFilename); its next 'mcs bootstrap' reinstalls it.")
+            }
+        }
         for packID in removals.sorted() {
             unconfigurePack(packID, state: &state)
         }
@@ -464,9 +473,12 @@ struct Configurator {
         }
         remaining.plugins = unremovedPlugins
 
-        // Remove MCP servers
+        // Remove MCP servers. A `user`-scope server is one registration shared by every scope, so a
+        // project copy leaving must not take the one the global record of the same pack still holds
+        // (a pack moving from project to global installs globally first).
+        let globallyHeld = globallyHeldMCPServers(packID: packID)
         for server in artifacts.mcpServers
-            where removeMCPServerArtifact(server, exec: exec) {
+            where globallyHeld.contains(server) || removeMCPServerArtifact(server, exec: exec) {
             removedServers.insert(server)
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
@@ -721,6 +733,12 @@ struct Configurator {
         )
         if seedFromPriors {
             allValues.merge(plan.reusableValues) { existing, _ in existing }
+        }
+        // Global scope never prompts for template placeholders — a global template may name a
+        // project-only key — but a value stored or seeded for one (mcs.yaml `values:`) still applies.
+        if !scope.includeTemplatesInScan {
+            let templateKeys = ConfiguratorSupport.referencedPlaceholderKeys(packs: packs, includeTemplates: true)
+            allValues.merge(priorValues.filter { templateKeys.contains($0.key) }) { existing, _ in existing }
         }
         // The preflight replayed every stage below, so off-TTY no executor reaches a reader.
         allValues.merge(nonInteractiveValues) { existing, _ in existing }
@@ -1245,6 +1263,19 @@ struct Configurator {
         case stillNeeded
         /// Removal was attempted but failed.
         case failed
+    }
+
+    /// `user`-scope servers the global record of `packID` claims; empty in global scope itself.
+    private func globallyHeldMCPServers(packID: String) -> Set<MCPServerRef> {
+        guard !scope.isGlobalScope else { return [] }
+        let globalState: ProjectState
+        do {
+            globalState = try ProjectState(stateFile: environment.globalStateFile)
+        } catch {
+            output.warn("  Could not read global state: \(error.localizedDescription) — removing MCP servers anyway")
+            return []
+        }
+        return Set((globalState.artifacts(for: packID)?.mcpServers ?? []).filter { $0.scope == Constants.MCPScope.user })
     }
 
     /// Remove a single MCP server. The executor logs the outcome.
