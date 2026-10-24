@@ -170,4 +170,51 @@ struct BootstrapReconcileMissingCheckoutTests {
         #expect(persisted.first?.commitSHA == fix.tipSHA)
         #expect(persisted.first?.ref == nil)
     }
+
+    @Test("An mcs.yaml ref pinned to a commit SHA moves the checkout there, then stays put")
+    func commitSHARefPinsCheckout() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let command = try BootstrapCommand.parse([])
+        let source = fix.remoteDir.path
+
+        let atTip = try command.reconcileExistingGitPack(
+            existing: fix.entry, pack: BootstrapFile.PackRef(source: source, ref: nil), ctx: fix.ctx
+        )
+        #expect(atTip.commitSHA == fix.tipSHA)
+
+        let pinned = try command.reconcileExistingGitPack(
+            existing: atTip, pack: BootstrapFile.PackRef(source: source, ref: fix.taggedSHA), ctx: fix.ctx
+        )
+        #expect(pinned.commitSHA == fix.taggedSHA)
+        #expect(BootstrapCommand.PackStatus(existing: atTip, reconciled: pinned) == .moved(to: fix.taggedSHA))
+        let persisted = try fix.ctx.loadRegistry().packs.first
+        #expect(persisted?.ref == fix.taggedSHA)
+        #expect(persisted?.commitSHA == fix.taggedSHA)
+
+        let again = try command.reconcileExistingGitPack(
+            existing: pinned, pack: BootstrapFile.PackRef(source: source, ref: fix.taggedSHA), ctx: fix.ctx
+        )
+        #expect(BootstrapCommand.PackStatus(existing: pinned, reconciled: again) == .unchanged)
+    }
+
+    @Test("A pack first added from mcs.yaml at a commit SHA is checked out at that commit")
+    func commitSHARefOnFirstAdd() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        try fix.ctx.registry.save(PackRegistryFile.RegistryData(packs: []))
+
+        let outcome = try PackAdder(ctx: fix.ctx).add(
+            source: .gitURL(fix.remoteDir.path),
+            ref: fix.taggedSHA,
+            options: PackAdder.Options(duplicatePolicy: .autoAccept, showNextSteps: false, trustPolicy: .autoAccept)
+        )
+
+        guard case let .installed(entry) = outcome else {
+            Issue.record("expected the pack to be installed, got \(outcome)")
+            return
+        }
+        #expect(entry.commitSHA == fix.taggedSHA)
+        #expect(entry.ref == fix.taggedSHA)
+    }
 }

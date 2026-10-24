@@ -59,7 +59,7 @@ schemaVersion: 1
 # scope: global                      # optional: default scope for every entry (see below)
 packs:
   - source: mcs-cli/dev              # git URL, GitHub shorthand, or local path
-    ref: main                        # optional (git only)
+    ref: main                        # optional (git only): tag, branch, or full commit SHA
     values:                          # optional: seeds prompt priors
       BRANCH_PREFIX: feature
   - source: mcs-cli/memory
@@ -91,6 +91,16 @@ Each declared pack goes to the first of: its entry's `scope`, the file's `scope`
 - **Fail fast.** A fetch, validate, trust, or sync error stops bootstrap immediately with the failing pack and reason. When bootstrap aborts partway through, an epilogue lists which packs already registered — re-run after fixing the failing entry to continue.
 - **Trust prompts need a TTY unless `--trust-all` is passed.** Both trust surfaces bootstrap can reach — adding a pack it has never seen, and advancing a pack's `ref:` to a revision with changed scripts — end at an interactive confirmation. Without a terminal that confirmation reads as "no" and bootstrap aborts, so any unattended run against a fresh pack needs `--trust-all`.
 - **`--trust-all` grants code execution without review.** It approves everything the declared packs can execute: install shell commands, MCP servers, hook files and the interpreters they run under, command files, configure and prompt scripts, and doctor check/fix commands. All run with your privileges; hooks and MCP servers run on every Claude Code session. Brew packages and plugins are outside the trust surface entirely, with or without this flag — see [Architecture](architecture.md) for that boundary. Each auto-trusted pack logs a warning naming what it was granted, and the approval persists: `~/.mcs/registry.yaml` records the hashes, so later interactive runs treat that content as reviewed. Point `mcs.yaml` at sources you control or have already reviewed, and prefer a `ref:` naming a tag over a branch so the content a run trusts is not a moving target.
+
+**Scheduled runs**
+
+A file with `scope: global` in an org config repo, pulled and re-applied by a scheduled job (launchd, cron), keeps every machine on the same reviewed pack revision:
+
+- **Pin `ref` to a full commit SHA.** Tags and branches can be moved by anyone who can push to the pack repo; a SHA cannot.
+- **`--trust-all` in a scheduled job lets whoever can merge to the config repo run code on every machine that pulls it.** Protect that repo's default branch accordingly.
+- **Give the job a `PATH` that includes Homebrew** (`/opt/homebrew/bin` on Apple silicon, `/usr/local/bin` on Intel). launchd starts with a minimal `PATH`, and bootstrap runs `git`, `claude`, and `brew`.
+- **Exit status 75 means "try again later".** Every command that changes state takes a machine-wide lock; when another `mcs` process holds it, the command exits 75 (`EX_TEMPFAIL`) and prints a line starting with `mcs: lock held:` on stderr. Any other non-zero status is a real failure.
+- **A repeated run is a no-op.** Nothing is rewritten and no backups are created when nothing changed.
 
 **Duplicate identifier handling**
 
@@ -153,13 +163,13 @@ Add a tech pack from a git URL, GitHub shorthand, or local path.
 mcs pack add <source>            # Git URL, GitHub shorthand, or local path
 mcs pack add user/repo           # GitHub shorthand → https://github.com/user/repo.git
 mcs pack add /path/to/pack       # Local pack (read in-place, no clone)
-mcs pack add <url> --ref <tag>   # Pin to a specific tag or branch
+mcs pack add <url> --ref <tag>   # Pin to a tag, branch, or full commit SHA
 mcs pack add <url> --preview     # Preview pack contents without installing
 ```
 
 | Flag | Description |
 |------|-------------|
-| `-r, --ref <tag>` | Pin to a specific git tag or branch (git packs only). Commit SHAs are not supported — the pack is cloned with `git clone --branch`, which only resolves branch and tag names. |
+| `-r, --ref <tag>` | Pin to a git tag, branch, or full 40-character commit SHA (git packs only). A SHA is the only ref that cannot move, so prefer it for unattended runs. Abbreviated SHAs are not supported. |
 | `-p, --preview` | Preview the pack's contents without installing. |
 
 Source resolution order: URL schemes → filesystem paths → GitHub shorthand.
@@ -196,7 +206,7 @@ With `--json`, each array element has these fields:
 |-------|------|-------------|
 | `identifier` | string | Pack identifier. |
 | `source` | string | Git clone URL, or the original path for a local pack. |
-| `ref` | string or `null` | Tag or branch as declared with `--ref`; `null` when none was given (always for local packs). |
+| `ref` | string or `null` | Tag, branch, or commit SHA as declared with `--ref`; `null` when none was given (always for local packs). |
 | `commitSHA` | string | Checked-out commit, or `"local"` for a local pack. |
 | `isLocal` | boolean | Whether the pack is read in-place from a local path. |
 | `status` | string | `"ok"`, `"missing"` (checkout or local directory not on disk), or `"invalid"` (path escapes the packs directory, or a git checkout has no `techpack.yaml`; local packs are not checked for a manifest). |

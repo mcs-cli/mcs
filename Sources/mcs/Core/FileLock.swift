@@ -48,10 +48,27 @@ extension LockedCommand {
         if skipLock {
             try cmd.perform()
         } else {
-            try withFileLock(at: env.lockFile) {
+            try runHoldingLock(at: env.lockFile) {
                 try cmd.perform()
             }
         }
+    }
+}
+
+/// `EX_TEMPFAIL` from sysexits(3): another `mcs` process holds the lock, so a scheduled caller
+/// can retry later instead of treating the run as a failure.
+let lockContentionExitCode: Int32 = 75
+
+/// Run `body` under the process lock, turning contention into `lockContentionExitCode` and a
+/// stable `mcs: lock held:` stderr line rather than a generic failure.
+func runHoldingLock(at lockFile: URL, body: () throws -> Void) throws {
+    do {
+        try withFileLock(at: lockFile, body: body)
+    } catch let FileLockError.acquireFailed(path) {
+        FileHandle.standardError.write(Data(
+            "mcs: lock held: another mcs process is running (lock file: \(path))\n".utf8
+        ))
+        throw ExitCode(lockContentionExitCode)
     }
 }
 
