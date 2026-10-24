@@ -15,7 +15,7 @@ struct PackFetcher {
     // MARK: - Fetch (Clone)
 
     /// Clone a pack repo to `~/.mcs/packs/<identifier>/`.
-    /// If `ref` is specified, clone at that ref (tag or branch — `--branch` cannot resolve a commit SHA).
+    /// If `ref` is specified, clone at that tag, branch, or full commit SHA.
     /// If the pack directory already exists, it is removed first for a clean state.
     func fetch(url: String, identifier: String, ref: String?) throws -> FetchResult {
         try validateIdentifier(identifier)
@@ -47,16 +47,19 @@ struct PackFetcher {
             try fm.removeItem(at: packPath)
         }
 
-        // Clone
-        var args = ["clone", "--depth", "1"]
-        if let ref {
-            args += ["--branch", ref]
-        }
-        args += [url, packPath.path]
+        if let ref, Self.isCommitSHA(ref) {
+            try cloneAtCommit(url: url, into: packPath, sha: ref)
+        } else {
+            var args = ["clone", "--depth", "1"]
+            if let ref {
+                args += ["--branch", ref]
+            }
+            args += [url, packPath.path]
 
-        let result = shell.run(shell.environment.gitPath, arguments: args)
-        guard result.succeeded else {
-            throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
+            let result = shell.run(shell.environment.gitPath, arguments: args)
+            guard result.succeeded else {
+                throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
+            }
         }
 
         let commitSHA = try currentCommit(at: packPath)
@@ -66,6 +69,29 @@ struct PackFetcher {
             commitSHA: commitSHA,
             ref: ref
         )
+    }
+
+    /// A full 40-hex commit SHA, the one ref shape `clone --branch` cannot resolve.
+    static func isCommitSHA(_ ref: String) -> Bool {
+        ref.count == 40 && ref.allSatisfy(\.isHexDigit)
+    }
+
+    /// `clone --branch` rejects a SHA, so build the same detached, depth-1 checkout by hand.
+    private func cloneAtCommit(url: String, into packPath: URL, sha: String) throws {
+        let steps: [(arguments: [String], workingDirectory: String?)] = [
+            (["init", "--quiet", packPath.path], nil),
+            (["remote", "add", "origin", url], packPath.path),
+            (["fetch", "--depth", "1", "origin", sha], packPath.path),
+            (["checkout", "--quiet", "FETCH_HEAD"], packPath.path),
+        ]
+        for step in steps {
+            let result = shell.run(
+                shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
+            )
+            guard result.succeeded else {
+                throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
+            }
+        }
     }
 
     // MARK: - Update

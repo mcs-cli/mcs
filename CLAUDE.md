@@ -87,7 +87,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ClaudePrerequisite.swift` — Claude Code CLI availability check with optional Homebrew auto-install
 - `Homebrew.swift` — brew detection, package install/uninstall, and `provides(_:)` — the one availability predicate shared by `ComponentExecutor` and `BrewPackageCheck` (PATH under `bareName(of:)`, falling back to `brew list`)
 - `FileHasher.swift` — SHA-256 file and directory hashing via CryptoKit (used by `PackTrustManager` and `ComponentExecutor`)
-- `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands
+- `FileLock.swift` — POSIX `flock()` process lock and `LockedCommand` protocol for mutually exclusive CLI commands; contention exits `LockContention.exitCode` (75) with a `mcs: lock held:` stderr line so scheduled callers can retry
 - `PathContainment.swift` — centralized path-boundary checks and relative-path utilities (symlink-safe containment, traversal prevention)
 - `PluginRef.swift` — parsed `name@repo` plugin references; resolves the `name@<marketplace-name>` id Claude Code keys plugins by (`@org/repo` needs a `marketplace list` lookup), plus the `plugin list` / `marketplace list` JSON models
 - `ProjectDetector.swift` — walk-up project root detection (`.git/` or `CLAUDE.local.md`)
@@ -109,7 +109,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `ExternalPackManifest.swift` — YAML `techpack.yaml` schema (Codable models for components, templates, hooks, doctor checks, configure scripts). Supports **shorthand syntax** (`brew:`, `mcp:`, `plugin:`, `hook:`, `command:`, `skill:`, `agent:`, `settingsFile:`, `gitignore:`, `shell:`) that infers `type` + `installAction` from a single key. `shellInteractive: true` alongside `shell:` allocates a PTY for commands needing terminal access (e.g. `sudo`)
 - `ExternalPackAdapter.swift` — bridges `ExternalPackManifest` to the `TechPack` protocol
 - `ExternalPackLoader.swift` — discovers and loads packs from `~/.mcs/packs/` (git) or absolute paths (local)
-- `PackFetcher.swift` — Git clone/pull for pack repositories
+- `PackFetcher.swift` — Git clone/pull for pack repositories; a full 40-hex `ref` clones via `init` + `fetch --depth 1 origin <sha>` + `checkout FETCH_HEAD`, since `clone --branch` cannot resolve a SHA
 - `PackSourceResolver.swift` — resolves user input into git URL or local path (URL schemes, filesystem, GitHub shorthand)
 - `PackRegistryFile.swift` — YAML registry of installed external packs (`~/.mcs/registry.yaml`)
 - `PackTrustManager.swift` — pack trust verification
