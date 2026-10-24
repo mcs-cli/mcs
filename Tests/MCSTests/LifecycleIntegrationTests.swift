@@ -3792,6 +3792,30 @@ struct BootstrapIntegrationTests {
         #expect(try bed.globalState().configuredPacks == ["other"])
     }
 
+    @Test("A pack the user names with sync --global --pack survives the file that installed it pruning it")
+    func namedGlobalPackGainsUserClaim() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let shared = MockTechPack(identifier: "shared", displayName: "Shared")
+        let other = MockTechPack(identifier: "other", displayName: "Other")
+        let registry = TechPackRegistry(packs: [shared, other])
+        try bootstrap([entry("shared")], fileScope: .global, bed: bed, registry: registry)
+
+        try SyncCommand.parse(["--global", "--pack", "shared"]).syncRequestedPacks(
+            configurator: bed.makeGlobalSyncConfigurator(registry: registry),
+            registry: registry,
+            previouslyConfigured: bed.globalState().configuredPacks,
+            globallyInstalled: nil,
+            scopeLabel: "Global",
+            targetPath: bed.env.claudeDirectory.path,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+        try bootstrap(["--prune", "--yes"], [entry("other")], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["other", "shared"])
+        #expect(try bed.globalState().owners(of: "shared") == [ProjectState.userOwner])
+    }
+
     @Test("A configured pack that fails to load fails the run instead of reporting success")
     func unloadablePackFailsTheRun() throws {
         let bed = try LifecycleTestBed()
