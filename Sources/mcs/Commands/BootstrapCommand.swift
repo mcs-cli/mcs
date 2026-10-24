@@ -618,6 +618,9 @@ struct BootstrapCommand: LockedCommand {
         let prunesGlobal = prune && fileScope == .global
         let runsGlobal = !routed.global.isEmpty || prunesGlobal
         let runsProject = fileScope != .global && (file.routesToProject || prune)
+        if runsProject, !file.routesToProject {
+            output.warn("\(fileName) routes no packs to this project, so --prune removes every pack configured here.")
+        }
 
         let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
         var projectState: ProjectState?
@@ -768,9 +771,8 @@ struct BootstrapCommand: LockedCommand {
         }
     }
 
-    /// Split declared packs by the scope they route to — the entry's `scope`, then the file's,
-    /// then the pack's only declared scope, then project — failing on any pack that can't load
-    /// or doesn't support its scope, before either scope is touched.
+    /// Split declared packs by the scope they route to (`PackRef.route`), failing on any pack that
+    /// can't load or doesn't support its scope, before either scope is touched.
     private func partitionByScope(
         _ declared: [DeclaredPack],
         fileScope: PackScope?,
