@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 @testable import mcs
 import Testing
@@ -118,6 +119,25 @@ struct FileLockTests {
         #expect(throws: FileLockError.self) {
             try withFileLock(at: lockFile) {}
         }
+    }
+
+    @Test("A held lock exits with the retry-later code instead of a generic failure")
+    func heldLockExitsWithRetryCode() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let lockFile = tmpDir.appendingPathComponent("lock")
+        let fd = open(lockFile.path, O_CREAT | O_RDWR, 0o644)
+        #expect(fd >= 0)
+        defer { close(fd) }
+        #expect(flock(fd, LOCK_EX | LOCK_NB) == 0)
+
+        var ran = false
+        let error = #expect(throws: ExitCode.self) {
+            try runHoldingLock(at: lockFile) { ran = true }
+        }
+        #expect(error?.rawValue == LockContention.exitCode)
+        #expect(!ran)
     }
 
     @Test("FileLockError.acquireFailed has descriptive message")
