@@ -3339,6 +3339,13 @@ struct BootstrapIntegrationTests {
         options: nil, detectPatterns: nil, scriptCommand: nil
     )
 
+    /// Every identifier as an entry with no scope, carrying `values` on the first.
+    private func declare(_ identifiers: [String], values: [String: String]? = nil) -> [BootstrapCommand.DeclaredPack] {
+        identifiers.enumerated().map { index, id in
+            entry(id, values: index == 0 ? values : nil)
+        }
+    }
+
     /// Build a pair of packs, seed both into the project's configured set via a first
     /// `Configurator.configure`, and hand back everything BootstrapCommand.runSync needs.
     private func seedTwoPackProject(
@@ -3377,10 +3384,9 @@ struct BootstrapIntegrationTests {
         let registry = TechPackRegistry(packs: [seeded.packA, seeded.packB, incoming])
 
         try BootstrapCommand.parse(["--prune", "--yes"]).runSync(
+            file: Self.file(declare([incoming.identifier], values: ["API_TOKEN": "seeded"])),
+            declared: declare([incoming.identifier], values: ["API_TOKEN": "seeded"]),
             projectRoot: bed.project,
-            desiredIdentifiers: [incoming.identifier],
-            projectState: bed.projectState(),
-            seededValues: ["API_TOKEN": "seeded"],
             env: bed.env,
             output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
             shell: ShellRunner(environment: bed.env),
@@ -3402,10 +3408,9 @@ struct BootstrapIntegrationTests {
         func warnings(seededValues: [String: String]) throws -> Int {
             let counter = WarningCounter()
             try BootstrapCommand.parse(["--dry-run"]).runSync(
+                file: Self.file(declare([pack.identifier], values: seededValues)),
+                declared: declare([pack.identifier], values: seededValues),
                 projectRoot: bed.project,
-                desiredIdentifiers: [pack.identifier],
-                projectState: bed.projectState(),
-                seededValues: seededValues,
                 env: bed.env,
                 output: CLIOutput(colorsEnabled: false, warningCounter: counter, interactiveStdin: false),
                 shell: ShellRunner(environment: bed.env),
@@ -3427,11 +3432,10 @@ struct BootstrapIntegrationTests {
         // Bootstrap declares only pack-a; pack-b is an extra.
         let command = try BootstrapCommand.parse([])
 
-        let projectState = try bed.projectState()
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
+            declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
-            desiredIdentifiers: [seeded.packA.identifier],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3455,11 +3459,10 @@ struct BootstrapIntegrationTests {
 
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
 
-        let projectState = try bed.projectState()
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
+            declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
-            desiredIdentifiers: [seeded.packA.identifier],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3483,11 +3486,10 @@ struct BootstrapIntegrationTests {
 
         let command = try BootstrapCommand.parse([])
 
-        let projectState = try bed.projectState()
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier, seeded.packB.identifier])),
+            declared: declare([seeded.packA.identifier, seeded.packB.identifier]),
             projectRoot: bed.project,
-            desiredIdentifiers: [seeded.packA.identifier, seeded.packB.identifier],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3508,16 +3510,15 @@ struct BootstrapIntegrationTests {
         // ran out of band). pack-b is still in projectState.configuredPacks as an extra.
         let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
         let command = try BootstrapCommand.parse([])
-        let projectState = try bed.projectState()
 
         // Additive default must NOT silently unconfigure pack-b just because the
         // registry cannot resolve it — that is the exact "filter-then-configure
         // uninstalls" pattern the guard defends against.
         #expect(throws: (any Error).self) {
             try command.runSync(
+                file: Self.file(declare([seeded.packA.identifier])),
+                declared: declare([seeded.packA.identifier]),
                 projectRoot: bed.project,
-                desiredIdentifiers: [seeded.packA.identifier],
-                projectState: projectState,
                 env: bed.env,
                 output: CLIOutput(colorsEnabled: false),
                 shell: ShellRunner(environment: bed.env),
@@ -3541,12 +3542,11 @@ struct BootstrapIntegrationTests {
 
         let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
-        let projectState = try bed.projectState()
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
+            declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
-            desiredIdentifiers: [seeded.packA.identifier],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3567,15 +3567,14 @@ struct BootstrapIntegrationTests {
         // Fresh project — no packs configured, no packs in `desiredIdentifiers`
         // (installPacks in dry-run mode does not append IDs for new packs).
         let command = try BootstrapCommand.parse(["--dry-run"])
-        let projectState = try bed.projectState()
         let emptyRegistry = TechPackRegistry(packs: [])
 
         // Must not throw. Prior behavior threw "No packs could be loaded", defeating
         // the preview flow on a fresh manifest.
         try command.runSync(
+            file: Self.file(declare([])),
+            declared: declare([]),
             projectRoot: bed.project,
-            desiredIdentifiers: [],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3598,12 +3597,11 @@ struct BootstrapIntegrationTests {
         // clean it up instead.
         let strippedRegistry = TechPackRegistry(packs: [seeded.packA])
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
-        let projectState = try bed.projectState()
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
+            declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
-            desiredIdentifiers: [seeded.packA.identifier],
-            projectState: projectState,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false),
             shell: ShellRunner(environment: bed.env),
@@ -3612,6 +3610,162 @@ struct BootstrapIntegrationTests {
 
         let after = try bed.projectState()
         #expect(!after.configuredPacks.contains(seeded.packB.identifier))
+    }
+
+    // MARK: - Scope routing
+
+    private func bootstrap(
+        _ arguments: [String],
+        _ declared: [BootstrapCommand.DeclaredPack],
+        fileScope: PackScope? = nil,
+        bed: LifecycleTestBed,
+        registry: TechPackRegistry
+    ) throws {
+        try BootstrapCommand.parse(arguments).runSync(
+            file: Self.file(declared, scope: fileScope),
+            declared: declared,
+            projectRoot: bed.project,
+            env: bed.env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: bed.env),
+            registry: registry,
+            claudeCLI: bed.mockCLI
+        )
+    }
+
+    private func bootstrap(
+        _ declared: [BootstrapCommand.DeclaredPack],
+        fileScope: PackScope? = nil,
+        bed: LifecycleTestBed,
+        registry: TechPackRegistry
+    ) throws {
+        try bootstrap([], declared, fileScope: fileScope, bed: bed, registry: registry)
+    }
+
+    private static func file(_ declared: [BootstrapCommand.DeclaredPack], scope: PackScope? = nil) -> BootstrapFile {
+        BootstrapFile(schemaVersion: BootstrapFile.currentSchemaVersion, packs: declared.map(\.ref), scope: scope?.rawValue)
+    }
+
+    private func entry(
+        _ identifier: String,
+        scope: PackScope? = nil,
+        values: [String: String]? = nil
+    ) -> BootstrapCommand.DeclaredPack {
+        BootstrapCommand.DeclaredPack(
+            identifier: identifier,
+            ref: BootstrapFile.PackRef(source: "local/\(identifier)", values: values, scope: scope?.rawValue)
+        )
+    }
+
+    @Test("A mixed file converges each pack in the scope it routes to")
+    func mixedFileRoutesBothScopes() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let local = MockTechPack(identifier: "local", displayName: "Local")
+        let tagged = MockTechPack(identifier: "tagged", displayName: "Tagged")
+        let machine = MockTechPack(identifier: "machine", displayName: "Machine", supportedScopes: [.global])
+        let registry = TechPackRegistry(packs: [local, tagged, machine])
+
+        try bootstrap(
+            [entry("local"), entry("tagged", scope: .global), entry("machine")],
+            bed: bed, registry: registry
+        )
+
+        #expect(try bed.projectState().configuredPacks == ["local"])
+        #expect(try bed.globalState().configuredPacks == ["tagged", "machine"])
+    }
+
+    @Test("A file-level global file writes nothing under the project")
+    func globalFileLeavesProjectUntouched() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = MockTechPack(identifier: "machine", displayName: "Machine")
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bootstrap([entry("machine")], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["machine"])
+        let projectState = bed.project.appendingPathComponent(Constants.FileNames.claudeDirectory)
+            .appendingPathComponent(Constants.FileNames.mcsProject)
+        #expect(!FileManager.default.fileExists(atPath: projectState.path))
+        #expect(try ProjectIndex(path: bed.env.projectsIndexFile).load().projects.allSatisfy(\.isGlobal))
+    }
+
+    @Test("Routing a pack to a scope it does not support fails before any install")
+    func routingMismatchFailsEarly() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let fine = MockTechPack(identifier: "fine", displayName: "Fine")
+        let projectOnly = MockTechPack(identifier: "project-only", displayName: "Project Only", supportedScopes: [.project])
+        let registry = TechPackRegistry(packs: [fine, projectOnly])
+
+        #expect(throws: (any Error).self) {
+            try bootstrap([entry("fine"), entry("project-only", scope: .global)], bed: bed, registry: registry)
+        }
+
+        #expect(try bed.globalState().configuredPacks.isEmpty)
+        #expect(try bed.projectState().configuredPacks.isEmpty)
+    }
+
+    @Test("A pack routed to global but configured in the project errors, and moves under --prune")
+    func moveToGlobalRequiresPrune() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = MockTechPack(identifier: "mover", displayName: "Mover")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(throws: (any Error).self) {
+            try bootstrap([entry("mover", scope: .global)], bed: bed, registry: registry)
+        }
+        #expect(try bed.globalState().configuredPacks.isEmpty)
+
+        try bootstrap(["--prune", "--yes"], [entry("mover", scope: .global)], bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["mover"])
+        #expect(try bed.projectState().configuredPacks.isEmpty)
+    }
+
+    @Test("--prune removes global extras only when the file-level scope is global")
+    func globalPruneNeedsGlobalFile() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let extra = MockTechPack(identifier: "extra", displayName: "Extra")
+        let declared = MockTechPack(identifier: "declared", displayName: "Declared")
+        let registry = TechPackRegistry(packs: [extra, declared])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [extra], confirmRemovals: false)
+
+        try bootstrap(["--prune", "--yes"], [entry("declared", scope: .global)], bed: bed, registry: registry)
+        #expect(try bed.globalState().configuredPacks == ["extra", "declared"])
+
+        try bootstrap(["--prune", "--yes"], [entry("declared")], fileScope: .global, bed: bed, registry: registry)
+        #expect(try bed.globalState().configuredPacks == ["declared"])
+    }
+
+    @Test("A second identical global run rewrites no CLAUDE.md and leaves no backups")
+    func repeatedGlobalRunIsIdempotent() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = MockTechPack(
+            identifier: "machine",
+            displayName: "Machine",
+            templates: [TemplateContribution(sectionIdentifier: "machine", templateContent: "## Machine\nRules.", placeholders: [])]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        try FileManager.default.createDirectory(at: bed.env.claudeDirectory, withIntermediateDirectories: true)
+        try "# My own notes\n".write(to: bed.env.globalClaudeMD, atomically: true, encoding: .utf8)
+
+        try bootstrap([entry("machine")], fileScope: .global, bed: bed, registry: registry)
+        let afterFirst = try String(contentsOf: bed.env.globalClaudeMD, encoding: .utf8)
+        let firstModified = try FileManager.default.attributesOfItem(atPath: bed.env.globalClaudeMD.path)[.modificationDate] as? Date
+        let firstBackups = Backup.findBackups(in: bed.env.claudeDirectory)
+
+        try bootstrap([entry("machine")], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try String(contentsOf: bed.env.globalClaudeMD, encoding: .utf8) == afterFirst)
+        let secondModified = try FileManager.default.attributesOfItem(atPath: bed.env.globalClaudeMD.path)[.modificationDate] as? Date
+        #expect(secondModified == firstModified)
+        #expect(Backup.findBackups(in: bed.env.claudeDirectory) == firstBackups)
     }
 }
 
