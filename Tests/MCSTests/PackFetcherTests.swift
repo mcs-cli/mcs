@@ -373,3 +373,49 @@ struct PackFetcherOperationTests {
         #expect(sha == "abc123def456789")
     }
 }
+
+struct PackFetcherCommitRefTests {
+    private func git(_ arguments: [String], in dir: URL, shell: ShellRunner) throws -> String {
+        let result = shell.run(
+            shell.environment.gitPath,
+            arguments: ["-c", "user.email=test@example.com", "-c", "user.name=Test"] + arguments,
+            workingDirectory: dir.path
+        )
+        #expect(result.succeeded, "git \(arguments.joined(separator: " ")): \(result.stderr)")
+        return result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @Test("Recognizes only a full 40-hex SHA as a commit ref", arguments: [
+        ("0123456789abcdef0123456789abcdef01234567", true),
+        ("0123456", false),
+        ("v1.0.0", false),
+        ("0123456789abcdef0123456789abcdef0123456g", false),
+    ])
+    func commitSHAShape(ref: String, expected: Bool) {
+        #expect(PackFetcher.isCommitSHA(ref) == expected)
+    }
+
+    @Test("fetch at a full commit SHA checks out that commit, not the branch tip")
+    func fetchAtCommitSHA() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let shell = ShellRunner(environment: env)
+        let remote = tmpDir.appendingPathComponent("remote")
+        try FileManager.default.createDirectory(at: remote, withIntermediateDirectories: true)
+        _ = try git(["init", "--quiet"], in: remote, shell: shell)
+        _ = try git(["commit", "--quiet", "--allow-empty", "-m", "first"], in: remote, shell: shell)
+        let pinned = try git(["rev-parse", "HEAD"], in: remote, shell: shell)
+        _ = try git(["commit", "--quiet", "--allow-empty", "-m", "second"], in: remote, shell: shell)
+
+        let fetcher = PackFetcher(
+            shell: shell,
+            output: CLIOutput(colorsEnabled: false),
+            packsDirectory: tmpDir.appendingPathComponent("packs")
+        )
+        let result = try fetcher.fetch(url: remote.path, identifier: "pinned", ref: pinned)
+        #expect(result.commitSHA == pinned)
+
+        #expect(try fetcher.update(packPath: result.localPath, ref: pinned) == nil)
+    }
+}
