@@ -265,13 +265,7 @@ struct ProjectSyncStrategy: SyncStrategy {
             output.warn(warning)
         }
 
-        // An unchanged file is left alone: a scheduled re-run must not pile up backups of user content.
-        if result.content != existingContent {
-            if existingContent != nil {
-                var backup = Backup()
-                try backup.backupFile(at: scope.claudeFilePath)
-            }
-            try result.content.write(to: scope.claudeFilePath, atomically: true, encoding: .utf8)
+        if try ConfiguratorSupport.writeIfChanged(result.content, existing: existingContent, to: scope.claudeFilePath) {
             output.success("Generated \(scope.claudeFilePath.lastPathComponent)")
         }
 

@@ -230,6 +230,8 @@ struct Configurator {
     ///
     /// - Parameter confirmRemovals: When `true`, prompt the user before removing packs.
     ///   Pass `false` for non-interactive paths (`--pack`, `--all`).
+    /// - Parameter preflighted: The result of `preflight` for these same packs and seeds, so the
+    ///   state and built-in values are not read twice.
     /// - Parameter reusePriorValuesSilently: When `true`, skip the interactive
     ///   "Reuse these values?" gate even when stdin is a TTY — used by
     ///   `mcs update`, where re-asking only makes sense for genuinely new prompts.
@@ -238,10 +240,15 @@ struct Configurator {
         packs: [any TechPack],
         confirmRemovals: Bool = true,
         reusePriorValuesSilently: Bool = false,
-        seededValues: [String: String] = [:]
+        seededValues: [String: String] = [:],
+        preflighted: Preflight? = nil
     ) throws {
-        var state = try ProjectState(stateFile: scope.stateFile)
-        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
+        let checked = try preflighted ?? preflight(
+            packs: packs, seededValues: seededValues, reusePriorValuesSilently: reusePriorValuesSilently
+        )
+        var state = checked.state
+        let builtInValues = checked.builtInValues
+        let nonInteractiveValues = checked.nonInteractiveValues
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -252,32 +259,10 @@ struct Configurator {
         let removals = previousIDs.subtracting(selectedIDs)
         let additions = selectedIDs.subtracting(previousIDs)
 
-        let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
-        var nonInteractiveValues: [String: String] = [:]
-        if !output.hasInteractiveStdin {
-            // Template-read warnings are left to resolveAllValues, which reports them once.
-            let resolution = resolveNonInteractively(
-                packs: packs, state: state, removals: removals, seededValues: seededValues,
-                builtInValues: builtInValues,
-                reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
-            )
-            guard resolution.unresolved.isEmpty else {
-                throw PromptResolutionError(unresolved: resolution.unresolved, isGlobalScope: scope.isGlobalScope)
-            }
-            nonInteractiveValues = resolution.resolved
-        }
-
         // 1. Confirm and unconfigure removed packs
         if confirmRemovals, !removals.isEmpty {
             output.plain("")
-            let suffix = scope.labelSuffix
-            output.warn("The following packs will be removed\(suffix):")
-            for packID in removals.sorted() {
-                output.plain("  - \(packID)")
-                if let artifacts = state.artifacts(for: packID) {
-                    strategy.printRemovalSummary(artifacts, output: output)
-                }
-            }
+            printRemovals(removals, state: state)
             output.plain("")
             guard output.askYesNo("Proceed with removal?", default: true) else {
                 output.info("Sync cancelled.")
@@ -764,6 +749,52 @@ struct Configurator {
 
         state.setResolvedValues(allValues)
         return allValues
+    }
+
+    /// The removal listing `configure` confirms, exposed so a caller converging several scopes can
+    /// ask once for all of them.
+    func printRemovals(_ removals: Set<String>, state: ProjectState) {
+        output.warn("The following packs will be removed\(scope.labelSuffix):")
+        for packID in removals.sorted() {
+            output.plain("  - \(packID)")
+            if let artifacts = state.artifacts(for: packID) {
+                strategy.printRemovalSummary(artifacts, output: output)
+            }
+        }
+    }
+
+    /// What `preflight` read and resolved, so `configure` can start from it.
+    struct Preflight {
+        fileprivate let state: ProjectState
+        fileprivate let builtInValues: [String: String]
+        fileprivate let nonInteractiveValues: [String: String]
+    }
+
+    /// The checks `configure` runs before touching the scope — scope support, then off-TTY prompt
+    /// resolution against the post-removal priors — so a caller converging several scopes can
+    /// reject the whole run before any of them changes.
+    func preflight(
+        packs: [any TechPack],
+        seededValues: [String: String] = [:],
+        reusePriorValuesSilently: Bool = false
+    ) throws -> Preflight {
+        let state = try ProjectState(stateFile: scope.stateFile)
+        let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
+        guard !output.hasInteractiveStdin else {
+            return Preflight(state: state, builtInValues: builtInValues, nonInteractiveValues: [:])
+        }
+        // Template-read warnings are left to resolveAllValues, which reports them once.
+        let resolution = resolveNonInteractively(
+            packs: packs, state: state,
+            removals: state.configuredPacks.subtracting(packs.map(\.identifier)),
+            seededValues: seededValues, builtInValues: builtInValues,
+            reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
+        )
+        guard resolution.unresolved.isEmpty else {
+            throw PromptResolutionError(unresolved: resolution.unresolved, isGlobalScope: scope.isGlobalScope)
+        }
+        return Preflight(state: state, builtInValues: builtInValues, nonInteractiveValues: resolution.resolved)
     }
 
     private func checkScopeSupport(packs: [any TechPack], previouslyConfigured: Set<String>) throws {
