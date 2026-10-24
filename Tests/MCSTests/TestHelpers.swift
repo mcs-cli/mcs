@@ -271,6 +271,7 @@ struct MockTechPack: TechPack {
     let description: String = "Mock pack for testing"
     let components: [ComponentDefinition]
     let templates: [TemplateContribution]
+    let supportedScopes: Set<PackScope>
     private let storedChecks: [any DoctorCheck]
 
     init(
@@ -278,12 +279,14 @@ struct MockTechPack: TechPack {
         displayName: String,
         components: [ComponentDefinition] = [],
         templates: [TemplateContribution] = [],
-        supplementaryDoctorChecks: [any DoctorCheck] = []
+        supplementaryDoctorChecks: [any DoctorCheck] = [],
+        supportedScopes: Set<PackScope> = Set(PackScope.allCases)
     ) {
         self.identifier = identifier
         self.displayName = displayName
         self.components = components
         self.templates = templates
+        self.supportedScopes = supportedScopes
         storedChecks = supplementaryDoctorChecks
     }
 

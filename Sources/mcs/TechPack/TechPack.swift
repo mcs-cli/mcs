@@ -37,6 +37,12 @@ struct TemplateContribution {
     let placeholders: [String] // Required placeholder names (e.g., ["__PROJECT__"])
 }
 
+/// A scope a pack can be installed into.
+enum PackScope: String, CaseIterable, Sendable {
+    case project
+    case global
+}
+
 /// Protocol that all tech packs must conform to.
 /// Packs are applied to projects via `mcs sync`.
 /// Doctor and configure only run pack-specific logic for installed packs.
@@ -49,6 +55,8 @@ protocol TechPack: Sendable {
     /// Section identifiers for template contributions, available without reading
     /// content files from disk. Used for artifact tracking and display.
     var templateSectionIdentifiers: [String] { get }
+    /// Scopes this pack may be installed into.
+    var supportedScopes: Set<PackScope> { get }
     /// Doctor checks that cannot be auto-derived from components.
     /// For pack-level or project-level concerns (e.g. Xcode CLT, config files).
     func supplementaryDoctorChecks(projectRoot: URL?) -> [any DoctorCheck]
@@ -64,6 +72,10 @@ protocol TechPack: Sendable {
 }
 
 extension TechPack {
+    var supportedScopes: Set<PackScope> {
+        Set(PackScope.allCases)
+    }
+
     /// NOTE: This default calls `try? templates` which performs disk I/O and silently
     /// drops errors. Concrete conformers with throwing `templates` should override this
     /// with a lightweight implementation (e.g., ExternalPackAdapter reads from manifest).

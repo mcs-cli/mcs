@@ -167,11 +167,12 @@ struct ExternalPackLoader {
             )
         }
 
-        // Runtime safety guard: strip forbidden `ignore:` entries and unusable hook
-        // interpreters before strict validation.
+        // Runtime safety guard: strip forbidden `ignore:` entries, unusable hook
+        // interpreters and unknown scopes before strict validation.
         if let sanitizeOutput {
             manifest = manifest.sanitizedIgnoreEntries(output: sanitizeOutput)
             manifest = manifest.sanitizedHookInterpreters(output: sanitizeOutput)
+            manifest = manifest.sanitizedScopes(output: sanitizeOutput)
         }
 
         // Validate manifest structure
