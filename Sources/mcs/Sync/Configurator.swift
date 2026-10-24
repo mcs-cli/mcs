@@ -36,6 +36,10 @@ struct Configurator {
         strategy.scope
     }
 
+    var packScope: PackScope {
+        scope.packScope
+    }
+
     // MARK: - Interactive Flow
 
     /// Full interactive configure flow — multi-select of registered packs.
@@ -81,9 +85,9 @@ struct Configurator {
             globallyInstalled: globallyInstalledPacks,
             previouslyConfigured: previousPacks
         )
-        let unsupported = ConfiguratorSupport.scopeUnsupportedIDs(
-            candidates: packs, scope: scope.packScope, previouslyConfigured: previousPacks
-        )
+        let unsupported = Set(ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previousPacks
+        ).map(\.identifier))
         let selectablePacks = packs.filter { !blocked.contains($0.identifier) && !unsupported.contains($0.identifier) }
         let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
 
@@ -762,38 +766,12 @@ struct Configurator {
         return allValues
     }
 
-    /// The checks `configure` runs before touching the scope, without running it, so a caller
-    /// converging several scopes can reject the whole run before any of them changes.
-    func preflight(
-        packs: [any TechPack],
-        seededValues: [String: String] = [:],
-        reusePriorValuesSilently: Bool = false
-    ) throws {
-        let state = try ProjectState(stateFile: scope.stateFile)
-        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
-        guard !output.hasInteractiveStdin else { return }
-        let unresolved = resolveNonInteractively(
-            packs: packs, state: state,
-            removals: state.configuredPacks.subtracting(packs.map(\.identifier)),
-            seededValues: seededValues,
-            builtInValues: strategy.resolveBuiltInValues(shell: shell, output: output),
-            reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
-        ).unresolved
-        guard unresolved.isEmpty else {
-            throw PromptResolutionError(unresolved: unresolved, isGlobalScope: scope.isGlobalScope)
-        }
-    }
-
     private func checkScopeSupport(packs: [any TechPack], previouslyConfigured: Set<String>) throws {
-        let rejected = ConfiguratorSupport.scopeUnsupportedIDs(
-            candidates: packs, scope: scope.packScope, previouslyConfigured: previouslyConfigured
+        let rejected = ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previouslyConfigured
         )
         guard !rejected.isEmpty else { return }
-        throw PackScopeError(
-            packs: packs.filter { rejected.contains($0.identifier) }
-                .map { UnsupportedScopePack(displayName: $0.displayName, supported: $0.supportedScopes) },
-            scope: scope.packScope
-        )
+        throw PackScopeError(packs: rejected, scope: scope.packScope)
     }
 
     /// The non-interactive preflight over the values `configure` will resolve against:

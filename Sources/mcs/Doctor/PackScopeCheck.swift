@@ -2,7 +2,7 @@ import Foundation
 
 /// Reports a pack configured in a scope its manifest no longer supports.
 ///
-/// Sync only rejects a pack *entering* an unsupported scope (`ConfiguratorSupport.scopeUnsupportedIDs`),
+/// Sync only rejects a pack *entering* an unsupported scope (`ConfiguratorSupport.scopeUnsupported`),
 /// so one installed before it declared `scopes:` stays and keeps being re-applied. Removing it is
 /// the user's call, so there is no fix.
 struct PackScopeCheck: DoctorCheck {

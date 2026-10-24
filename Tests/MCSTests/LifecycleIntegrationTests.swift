@@ -245,8 +245,8 @@ private struct LifecycleTestBed {
     }
 
     /// Every hook command composed into the project's settings under `event`.
-    func hookCommands(event: String) throws -> [String] {
-        let settings = try Settings.load(from: settingsLocalPath)
+    func hookCommands(event: String, in settingsPath: URL? = nil) throws -> [String] {
+        let settings = try Settings.load(from: settingsPath ?? settingsLocalPath)
         return (settings.hooks?[event] ?? []).flatMap { $0.hooks ?? [] }.compactMap(\.command)
     }
 
@@ -4018,6 +4018,7 @@ struct BootstrapMigrationPersistenceTests {
 }
 
 private struct TemplateFailingPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String = "Template Failing Pack"
     let description: String = "A pack whose templates throw"
@@ -5087,9 +5088,7 @@ struct PluginScopeLifecycleTests {
 
 struct PackScopeLifecycleTests {
     private func globalHookCommands(_ bed: LifecycleTestBed) throws -> [String] {
-        let settings = try Settings.load(from: bed.env.claudeSettings)
-        return (settings.hooks?[Constants.HookEvent.preToolUse.rawValue] ?? [])
-            .flatMap { $0.hooks ?? [] }.compactMap(\.command)
+        try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue, in: bed.env.claudeSettings)
     }
 
     private func hookedPack(

@@ -83,15 +83,12 @@ enum ConfiguratorSupport {
         )
         guard !blocked.isEmpty else { return packs }
 
-        // Display names, matching the picker's "Already installed globally" section.
-        // The same packs must not be named differently depending on the flag used.
-        let blockedNames = packs
-            .filter { blocked.contains($0.identifier) }
-            .map(\.displayName)
-            .sorted()
-        output.warn("Skipping \(blocked.count) pack(s) already installed globally:")
-        output.plain("  \(blockedNames.joined(separator: ", "))")
-        output.plain("  Run 'mcs sync --global' to manage them.")
+        reportSkipped(
+            packs.filter { blocked.contains($0.identifier) },
+            heading: "already installed globally",
+            hint: "Run 'mcs sync --global' to manage them.",
+            output: output
+        )
 
         let remaining = packs.filter { !blocked.contains($0.identifier) }
         // Callers guarantee `packs` is non-empty, but filtering can leave it empty.
@@ -133,14 +130,43 @@ enum ConfiguratorSupport {
     /// Same transition rule as `globallyBlockedIDs`: a pack already configured in the scope is
     /// never rejected, so re-applying a scope (`mcs update`, `doctor --fix`) cannot fail on — or
     /// drop and uninstall — a pack that predates its `scopes:` declaration. Doctor reports those.
-    static func scopeUnsupportedIDs(
-        candidates: [any TechPack],
+    static func scopeUnsupported(
+        _ candidates: [any TechPack],
         scope: PackScope,
         previouslyConfigured: Set<String>
-    ) -> Set<String> {
-        Set(candidates.filter {
+    ) -> [any TechPack] {
+        candidates.filter {
             !$0.supportedScopes.contains(scope) && !previouslyConfigured.contains($0.identifier)
-        }.map(\.identifier))
+        }
+    }
+
+    /// `--all`'s view of `scopeUnsupported`: drop those packs with a warning. Safe for the same
+    /// reason as `filterGloballyBlocked` — none of them is configured here.
+    static func filterScopeUnsupported(
+        _ packs: [any TechPack],
+        scope: PackScope,
+        previouslyConfigured: Set<String>,
+        output: CLIOutput
+    ) -> [any TechPack] {
+        let rejected = Set(scopeUnsupported(packs, scope: scope, previouslyConfigured: previouslyConfigured)
+            .map(\.identifier))
+        guard !rejected.isEmpty else { return packs }
+        reportSkipped(
+            packs.filter { rejected.contains($0.identifier) },
+            heading: "that do not support \(scope.rawValue) scope",
+            hint: nil,
+            output: output
+        )
+        return packs.filter { !rejected.contains($0.identifier) }
+    }
+
+    /// The shared skip notice, by display name to match the picker's locked section.
+    private static func reportSkipped(_ skipped: [any TechPack], heading: String, hint: String?, output: CLIOutput) {
+        output.warn("Skipping \(skipped.count) pack(s) \(heading):")
+        output.plain("  \(skipped.map(\.displayName).sorted().joined(separator: ", "))")
+        if let hint {
+            output.plain("  \(hint)")
+        }
     }
 
     /// Warning lines naming the tracked projects that already configure packs newly entering
