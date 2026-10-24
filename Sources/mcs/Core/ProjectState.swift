@@ -24,13 +24,16 @@ struct PackArtifactRecord: Codable, Equatable {
     /// SHA-256 hash of the pack's contributed settings key-value pairs, for drift detection.
     /// Nil for state files written by older MCS versions (backward compat).
     var settingsHash: String?
+    /// SHA-256 hash of each owned settings value (key path → hash) as mcs last wrote it, so sync and
+    /// removal can tell a user's edit apart. Arrays and records from older MCS versions have none.
+    var settingsValueHashes: [String: String] = [:]
     /// Whether `fileHashes` covers only files a pack ships. Nil for records written before
     /// that held, whose hashes can include files a user added inside a copied directory.
     var fileHashesShippedOnly: Bool?
 
     /// Whether all artifact lists are empty (cleanup is complete).
-    /// Note: `settingsHash` is intentionally excluded — it is derived metadata
-    /// tied to `settingsKeys` and has no independent cleanup semantics.
+    /// Note: `settingsHash` and `settingsValueHashes` are intentionally excluded — they are derived
+    /// metadata tied to `settingsKeys` and have no independent cleanup semantics.
     var isEmpty: Bool {
         mcpServers.isEmpty && files.isEmpty && templateSections.isEmpty
             && hookCommands.isEmpty && settingsKeys.isEmpty
@@ -57,6 +60,7 @@ struct PackArtifactRecord: Codable, Equatable {
         gitignoreEntries = try container.decodeIfPresent([String].self, forKey: .gitignoreEntries) ?? []
         fileHashes = try container.decodeIfPresent([String: String].self, forKey: .fileHashes) ?? [:]
         settingsHash = try container.decodeIfPresent(String.self, forKey: .settingsHash)
+        settingsValueHashes = try container.decodeIfPresent([String: String].self, forKey: .settingsValueHashes) ?? [:]
         fileHashesShippedOnly = try container.decodeIfPresent(Bool.self, forKey: .fileHashesShippedOnly)
     }
 

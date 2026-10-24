@@ -4327,18 +4327,18 @@ struct PackRemoveCleanupFailureTests {
 
 // MARK: - Settings sub-key ownership
 
+private func readJSON(_ url: URL) throws -> [String: Any] {
+    try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+}
+
+private func writeJSON(_ json: [String: Any], to url: URL) throws {
+    try FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+    )
+    try JSONSerialization.data(withJSONObject: json).write(to: url)
+}
+
 struct SettingsSubKeyOwnershipTests {
-    private func readJSON(_ url: URL) throws -> [String: Any] {
-        try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
-    }
-
-    private func writeJSON(_ json: [String: Any], to url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try JSONSerialization.data(withJSONObject: json).write(to: url)
-    }
-
     private func envPack(_ bed: LifecycleTestBed) throws -> MockTechPack {
         let source = try bed.makeSettingsSource(content: """
         { "env": { "PACK_VAR": "from-pack", "SHARED": "pack-value" } }
@@ -4468,6 +4468,177 @@ struct SettingsSubKeyOwnershipTests {
         record.settingsKeys = ["env"]
         state.setArtifacts(record, for: "env-pack")
         return state
+    }
+}
+
+// MARK: - User edits to pack-owned settings keys (Issue #458)
+
+struct SettingsUserEditTests {
+    private func settingsPath(_ bed: LifecycleTestBed, global: Bool) -> URL {
+        global ? bed.env.claudeSettings : bed.settingsLocalPath
+    }
+
+    private func configurator(
+        _ bed: LifecycleTestBed, global: Bool, registry: TechPackRegistry, counter: WarningCounter? = nil
+    ) -> Configurator {
+        global
+            ? bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: counter)
+            : bed.makeConfigurator(registry: registry, warningCounter: counter)
+    }
+
+    private func state(_ bed: LifecycleTestBed, global: Bool) throws -> ProjectState {
+        global ? try bed.globalState() : try bed.projectState()
+    }
+
+    private func env(_ bed: LifecycleTestBed, global: Bool) throws -> [String: String] {
+        try readJSON(settingsPath(bed, global: global))["env"] as? [String: String] ?? [:]
+    }
+
+    private func editEnv(_ bed: LifecycleTestBed, global: Bool, _ edit: (inout [String: String]) -> Void) throws {
+        let url = settingsPath(bed, global: global)
+        var json = try readJSON(url)
+        var env = json["env"] as? [String: String] ?? [:]
+        edit(&env)
+        json["env"] = env
+        try writeJSON(json, to: url)
+    }
+
+    private func pack(_ bed: LifecycleTestBed, settings: String = #"{ "env": { "FOO": "pack", "BAR": "pack" } }"#)
+        throws -> MockTechPack {
+        let source = try bed.makeSettingsSource(content: settings)
+        return MockTechPack(
+            identifier: "edit-pack",
+            displayName: "Edit Pack",
+            components: [bed.settingsComponent(pack: "edit-pack", id: "settings", source: source)]
+        )
+    }
+
+    @Test("Removing a pack keeps a key the user edited, drops it from the record, and warns once", arguments: [false, true])
+    func removalKeepsEditedKey(global: Bool) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configurator(bed, global: global, registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try editEnv(bed, global: global) { $0["FOO"] = "mine" }
+
+        let counter = WarningCounter()
+        try configurator(bed, global: global, registry: registry, counter: counter)
+            .configure(packs: [], confirmRemovals: false)
+
+        #expect(try env(bed, global: global) == ["FOO": "mine"])
+        #expect(try state(bed, global: global).artifacts(for: "edit-pack") == nil)
+        #expect(counter.count == 1)
+    }
+
+    @Test("Re-sync restores the pack's value over a user's edit and warns once", arguments: [false, true])
+    func resyncRestoresEditedKey(global: Bool) throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try configurator(bed, global: global, registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try editEnv(bed, global: global) { $0["FOO"] = "mine" }
+
+        let counter = WarningCounter()
+        try configurator(bed, global: global, registry: registry, counter: counter)
+            .configure(packs: [pack], confirmRemovals: false)
+
+        #expect(try env(bed, global: global) == ["FOO": "pack", "BAR": "pack"])
+        #expect(try state(bed, global: global).artifacts(for: "edit-pack")?.settingsKeys.sorted() == ["env.BAR", "env.FOO"])
+        #expect(counter.count == 1)
+    }
+
+    @Test("An unedited key is restored and removed without a warning")
+    func uneditedKeyIsSilent() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let counter = WarningCounter()
+        try bed.makeConfigurator(registry: registry, warningCounter: counter).configure(packs: [pack], confirmRemovals: false)
+        #expect(try env(bed, global: false) == ["FOO": "pack", "BAR": "pack"])
+        try bed.makeConfigurator(registry: registry, warningCounter: counter).configure(packs: [], confirmRemovals: false)
+
+        #expect(!FileManager.default.fileExists(atPath: bed.settingsLocalPath.path))
+        #expect(counter.count == 0)
+    }
+
+    @Test("Removing a pack whose record has no value hashes deletes an edited key without a warning")
+    func legacyRecordWithoutValueHashes() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        var state = try bed.globalState()
+        var record = try #require(state.artifacts(for: "edit-pack"))
+        #expect(!record.settingsValueHashes.isEmpty)
+        record.settingsValueHashes = [:]
+        state.setArtifacts(record, for: "edit-pack")
+        try state.save()
+        try editEnv(bed, global: true) { $0["FOO"] = "mine" }
+
+        let counter = WarningCounter()
+        var legacy = try bed.globalState()
+        bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: counter).unconfigurePack("edit-pack", state: &legacy)
+
+        #expect(try env(bed, global: true).isEmpty)
+        #expect(counter.count == 0)
+    }
+
+    @Test("A pack update that stops declaring an edited key keeps it and lets go of it")
+    func droppedDeclarationKeepsEditedKey() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let original = try pack(bed)
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [original]))
+            .configure(packs: [original], confirmRemovals: false)
+        try editEnv(bed, global: false) { $0["FOO"] = "mine" }
+
+        let updated = try pack(bed, settings: #"{ "env": { "BAR": "pack" } }"#)
+        let counter = WarningCounter()
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [updated]), warningCounter: counter)
+            .configure(packs: [updated], confirmRemovals: false)
+
+        #expect(try env(bed, global: false) == ["FOO": "mine", "BAR": "pack"])
+        #expect(try bed.projectState().artifacts(for: "edit-pack")?.settingsKeys == ["env.BAR"])
+        #expect(counter.count == 1)
+    }
+
+    @Test("An owned array the user or Claude Code appended to is not reported as edited")
+    func arrayValuesAreNotChecked() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed, settings: #"{ "permissions": { "allow": ["Bash(ls)"] } }"#)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        var json = try readJSON(bed.settingsLocalPath)
+        json["permissions"] = ["allow": ["Bash(ls)", "Bash(git status)"]]
+        try writeJSON(json, to: bed.settingsLocalPath)
+
+        let counter = WarningCounter()
+        try bed.makeConfigurator(registry: registry, warningCounter: counter).configure(packs: [pack], confirmRemovals: false)
+        #expect(counter.count == 0)
+    }
+
+    @Test("Dry run lists an edited key without touching it")
+    func dryRunListsEditedKey() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try pack(bed)
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try editEnv(bed, global: false) { $0["FOO"] = "mine" }
+
+        let counter = WarningCounter()
+        try bed.makeConfigurator(registry: registry, warningCounter: counter).dryRun(packs: [pack])
+
+        #expect(try env(bed, global: false)["FOO"] == "mine")
+        #expect(counter.count == 1)
     }
 }
 

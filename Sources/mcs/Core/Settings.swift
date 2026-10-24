@@ -331,6 +331,11 @@ struct Settings: Codable {
         return jsonEqual(left, right)
     }
 
+    /// `extraJSON` as one JSON object, the shape `SettingsHasher` reads owned values from.
+    var extraJSONObject: [String: Any] {
+        extraJSON.compactMapValues { try? JSONSerialization.jsonObject(with: $0, options: .fragmentsAllowed) }
+    }
+
     // MARK: - Stale key removal
 
     /// Remove settings keys that mcs previously owned but are no longer in the template.

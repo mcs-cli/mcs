@@ -186,6 +186,7 @@ struct Configurator {
             removalSummary: { strategy.printRemovalSummary($0, output: output) }
         )
         announceFormerExclusions(packs: packs, state: state)
+        previewEditedSettingsKeys(packs: packs, state: state)
 
         if !output.hasInteractiveStdin {
             let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
@@ -326,7 +327,7 @@ struct Configurator {
         let preloadedTemplates = preloadTemplates(for: packs)
 
         // 5. Install artifacts per pack and reconcile stale artifacts
-        let (previousSettingsKeys, previousTemplateSections) = installAndReconcileArtifacts(
+        let (previousSettingsKeys, previousTemplateSections, editedKeysToRestore) = installAndReconcileArtifacts(
             packs: packs,
             additions: additions,
             allValues: allValues,
@@ -338,11 +339,12 @@ struct Configurator {
         try state.save()
 
         // 6. Compose settings file from ALL selected packs
-        let (contributedKeys, settingsHashes) = try strategy.composeSettings(
+        let (contributedKeys, settingsHashes, valueHashes) = try strategy.composeSettings(
             packs: packs,
             previousSettingsKeys: previousSettingsKeys,
             resolvedValues: allValues, output: output
         )
+        warnEditedKeysRestored(editedKeysToRestore, landed: contributedKeys)
 
         // 6b. Record contributed settings keys and value hashes in artifact records. Every pack is
         // reset, not just the ones that landed a key: a pack whose values were all already set
@@ -351,6 +353,7 @@ struct Configurator {
             guard var artifacts = state.artifacts(for: pack.identifier) else { continue }
             artifacts.settingsKeys = contributedKeys[pack.identifier] ?? []
             artifacts.settingsHash = settingsHashes[pack.identifier]
+            artifacts.settingsValueHashes = valueHashes[pack.identifier] ?? [:]
             state.setArtifacts(artifacts, for: pack.identifier)
         }
 
@@ -490,9 +493,11 @@ struct Configurator {
                 output.warn("Some artifacts for \(packID) could not be removed. Re-run '\(retryHint)' to retry.")
                 return false
             }
-            let settingsKeys = expandedSettingsKeys(
+            var settingsKeys = expandedSettingsKeys(
                 artifacts.settingsKeys, pack: registry.pack(for: packID), packID: packID, onDisk: settings
             )
+            let keptKeys = editedKeysToKeep(settingsKeys, recorded: artifacts.settingsValueHashes, in: settings)
+            settingsKeys.removeAll(where: keptKeys.contains)
             if hasHooksToRemove {
                 let commandsToRemove = Set(artifacts.hookCommands)
                 if var hooks = settings.hooks {
@@ -515,12 +520,14 @@ struct Configurator {
                 remaining.hookCommands = []
                 remaining.settingsKeys = []
                 remaining.settingsHash = nil
+                remaining.settingsValueHashes = [:]
                 for cmd in artifacts.hookCommands {
                     output.dimmed("  Removed hook: \(cmd)")
                 }
                 for key in settingsKeys {
                     output.dimmed("  Removed setting: \(key)")
                 }
+                keptKeys.forEach { warnEditedKeyKept($0, packID: packID) }
             } catch {
                 output.warn("Could not write \(scope.settingsPath.lastPathComponent): \(error.localizedDescription)")
             }
@@ -867,31 +874,57 @@ struct Configurator {
     /// scope changes).
     ///
     /// - Returns: Tuple of previous settings keys and template sections, needed by
-    ///   steps 6 (settings composition) and 7b (template section reconciliation).
+    ///   steps 6 (settings composition) and 7b (template section reconciliation), and the keys
+    ///   the user edited that composition will restore. An edited key the pack no longer declares
+    ///   is kept as the user left it and left out of the previous keys, so composition won't strip it.
     private func installAndReconcileArtifacts(
         packs: [any TechPack],
         additions: Set<String>,
         allValues: [String: String],
         preloadedTemplates: [String: [TemplateContribution]],
         state: inout ProjectState
-    ) -> (previousSettingsKeys: [String: [String]], previousTemplateSections: [String: [String]]) {
+    ) -> (
+        previousSettingsKeys: [String: [String]],
+        previousTemplateSections: [String: [String]],
+        editedKeysToRestore: [String: [String]]
+    ) {
         var previousSettingsKeys: [String: [String]] = [:]
         var previousTemplateSections: [String: [String]] = [:]
+        var editedKeysToRestore: [String: [String]] = [:]
 
         // Composition reloads this and reports a parse failure; an unreadable file simply leaves
-        // legacy records unexpanded here.
+        // legacy records unexpanded and edits unchecked here.
         var onDiskSettings = Settings()
-        do {
-            onDiskSettings = try Settings.load(from: scope.settingsPath)
-        } catch {}
+        var onDiskJSON: [String: Any]?
+        if FileManager.default.fileExists(atPath: scope.settingsPath.path) {
+            do {
+                onDiskSettings = try Settings.load(from: scope.settingsPath)
+                onDiskJSON = onDiskSettings.extraJSONObject
+            } catch {}
+        }
 
         for pack in packs {
             let previousArtifacts = state.artifacts(for: pack.identifier)
 
             // Snapshot previous metadata before overwriting (needed by steps 6-7)
-            previousSettingsKeys[pack.identifier] = expandedSettingsKeys(
+            var settingsKeys = expandedSettingsKeys(
                 previousArtifacts?.settingsKeys ?? [], pack: pack, packID: pack.identifier, onDisk: onDiskSettings
             )
+            if let onDiskJSON, let recorded = previousArtifacts?.settingsValueHashes, !recorded.isEmpty {
+                let edited = ConfiguratorSupport.classifyEditedSettingsKeys(
+                    settingsKeys, recorded: recorded, in: onDiskJSON,
+                    declared: Set(ConfiguratorSupport.declaredSettingsKeyPaths(
+                        pack: pack, packID: pack.identifier, output: output
+                    ))
+                )
+                let kept = Set(edited.keep)
+                settingsKeys.removeAll { kept.contains($0) }
+                edited.keep.forEach { warnEditedKeyKept($0, packID: pack.identifier) }
+                if !edited.restore.isEmpty {
+                    editedKeysToRestore[pack.identifier] = edited.restore
+                }
+            }
+            previousSettingsKeys[pack.identifier] = settingsKeys
             previousTemplateSections[pack.identifier] = previousArtifacts?.templateSections ?? []
 
             let isNew = additions.contains(pack.identifier)
@@ -917,7 +950,7 @@ struct Configurator {
             state.recordPack(pack.identifier)
         }
 
-        return (previousSettingsKeys, previousTemplateSections)
+        return (previousSettingsKeys, previousTemplateSections, editedKeysToRestore)
     }
 
     /// Save final project state and update the cross-project index.
@@ -1263,6 +1296,56 @@ struct Configurator {
             output.warn("  Could not remove gitignore entry '\(entry)': \(error.localizedDescription)")
             return .failed
         }
+    }
+
+    /// Dry-run counterpart of the edit check in `installAndReconcileArtifacts` and `unconfigurePack`.
+    private func previewEditedSettingsKeys(packs: [any TechPack], state: ProjectState) {
+        guard FileManager.default.fileExists(atPath: scope.settingsPath.path) else { return }
+        let json: [String: Any]
+        do {
+            json = try Settings.load(from: scope.settingsPath).extraJSONObject
+        } catch {
+            return
+        }
+
+        let selected = Dictionary(uniqueKeysWithValues: packs.map { ($0.identifier, $0) })
+        var lines: [String] = []
+        for packID in state.configuredPacks.sorted() {
+            guard let record = state.artifacts(for: packID), !record.settingsValueHashes.isEmpty else { continue }
+            let edited = ConfiguratorSupport.classifyEditedSettingsKeys(
+                record.settingsKeys, recorded: record.settingsValueHashes, in: json,
+                declared: selected[packID].map {
+                    Set(ConfiguratorSupport.declaredSettingsKeyPaths(pack: $0, packID: packID, output: output))
+                } ?? []
+            )
+            lines += edited.restore.map { "\($0) (\(packID)) — would be restored" }
+            lines += edited.keep.map { "\($0) (\(packID)) — would be kept, no longer managed" }
+        }
+        guard !lines.isEmpty else { return }
+        output.warn("Settings modified since mcs set them:")
+        for line in lines {
+            output.plain("  \(line)")
+        }
+    }
+
+    /// Removal declares nothing, so every edited key still set is kept rather than restored.
+    private func editedKeysToKeep(_ keyPaths: [String], recorded: [String: String], in settings: Settings) -> [String] {
+        ConfiguratorSupport.classifyEditedSettingsKeys(
+            keyPaths, recorded: recorded, in: settings.extraJSONObject, declared: []
+        ).keep
+    }
+
+    private func warnEditedKeysRestored(_ editedKeys: [String: [String]], landed: [String: [String]]) {
+        for (packID, keyPaths) in editedKeys.sorted(by: { $0.key < $1.key }) {
+            let landedKeys = Set(landed[packID] ?? [])
+            for keyPath in keyPaths where landedKeys.contains(keyPath) {
+                output.warn("\(keyPath) was modified since mcs set it — restored \(packID)'s value")
+            }
+        }
+    }
+
+    private func warnEditedKeyKept(_ keyPath: String, packID: String) {
+        output.warn("\(keyPath) was modified since mcs set it — kept, no longer managed by \(packID)")
     }
 
     private func expandedSettingsKeys(
