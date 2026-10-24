@@ -177,7 +177,8 @@ struct ScopeDuplicationCheck: DoctorCheck {
 
         // First obstacle wins — each gate names something the user must resolve before the
         // project copy can be removed without losing anything.
-        let blocked = incompleteGlobalObstacle(inputs)
+        let blocked = unsupportedGlobalObstacle(inputs)
+            ?? incompleteGlobalObstacle(inputs)
             ?? divergentPromptObstacle(inputs)
             ?? editedFileObstacle(inputs)
 
@@ -228,6 +229,13 @@ struct ScopeDuplicationCheck: DoctorCheck {
     }
 
     // MARK: - Obstacles to a lossless removal
+
+    /// Removing the project copy would keep only the one in a scope the pack excludes.
+    private static func unsupportedGlobalObstacle(_ inputs: Inputs) -> String? {
+        guard !inputs.pack.supportedScopes.contains(.global) else { return nil }
+        return "'\(inputs.packID)' no longer supports global scope — keep the project copy and"
+            + " deselect the global one with 'mcs sync --global'"
+    }
 
     /// Components an older release excluded globally stay uninstalled there until a global sync,
     /// so the project copy may be the only one.

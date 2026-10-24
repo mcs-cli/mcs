@@ -85,21 +85,32 @@ struct Configurator {
             globallyInstalled: globallyInstalledPacks,
             previouslyConfigured: previousPacks
         )
-        let unsupported = Set(ConfiguratorSupport.scopeUnsupported(
+        let unsupportedPacks = ConfiguratorSupport.scopeUnsupported(
             packs, scope: scope.packScope, previouslyConfigured: previousPacks
-        ).map(\.identifier))
+        )
+        let unsupported = Set(unsupportedPacks.map(\.identifier))
         let selectablePacks = packs.filter { !blocked.contains($0.identifier) && !unsupported.contains($0.identifier) }
         let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
 
-        // Every registered pack is global, so the picker would have no selectable rows —
-        // and `interactiveMultiSelect` returns before rendering when it has none, hiding
-        // the locked section entirely. Explain here, where the reason is known.
-        // `previousPacks.isEmpty` keeps stale configured packs converging as before.
-        if selectablePacks.isEmpty, !lockedNames.isEmpty, previousPacks.isEmpty {
+        if !unsupportedPacks.isEmpty {
             output.plain("")
-            output.info("All registered packs are already installed globally:")
-            output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
-            output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            output.info("Not available in \(scope.packScope.rawValue) scope:")
+            output.plain("  \(unsupportedPacks.map(\.displayName).sorted().joined(separator: ", "))")
+        }
+
+        // The picker would have no selectable rows — and `interactiveMultiSelect` returns
+        // before rendering when it has none, hiding the locked section entirely. Explain here,
+        // where the reason is known. `previousPacks.isEmpty` keeps stale configured packs
+        // converging as before.
+        if selectablePacks.isEmpty, previousPacks.isEmpty {
+            output.plain("")
+            if lockedNames.isEmpty {
+                output.info("No registered pack can be installed in \(scope.packScope.rawValue) scope.")
+            } else {
+                output.info("All registered packs are already installed globally:")
+                output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
+                output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            }
             return
         }
 

@@ -328,13 +328,20 @@ struct SyncCommand: LockedCommand {
         output: CLIOutput
     ) throws {
         var requested = try resolvePacks(from: registry, output: output)
-        // `--all` means every pack that fits this scope; a named `--pack` reaches the
-        // Configurator's scope gate instead and fails there.
+        // `--all` means every pack that fits this scope. A named `--pack` that doesn't fit fails
+        // here, ahead of the global-block filter, so the error names the real conflict.
         if all {
             requested = ConfiguratorSupport.filterScopeUnsupported(
                 requested, scope: configurator.packScope,
                 previouslyConfigured: previouslyConfigured, output: output
             )
+        } else {
+            let rejected = ConfiguratorSupport.scopeUnsupported(
+                requested, scope: configurator.packScope, previouslyConfigured: previouslyConfigured
+            )
+            if !rejected.isEmpty {
+                throw PackScopeError(packs: rejected, scope: configurator.packScope)
+            }
         }
         let desired = try ConfiguratorSupport.additivePackSet(
             requested: requested,
