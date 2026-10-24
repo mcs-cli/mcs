@@ -38,7 +38,7 @@ struct BootstrapUnmatchedSeedKeysTests {
         )
 
         let unmatched = BootstrapCommand.unmatchedSeedKeys(
-            file: file, packs: [pack], context: context, includeTemplates: true
+            refs: file.packs, packs: [pack], context: context, includeTemplates: true
         )
 
         #expect(unmatched == ["API_TOKNE"])

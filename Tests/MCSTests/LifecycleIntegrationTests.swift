@@ -3430,10 +3430,7 @@ struct BootstrapIntegrationTests {
     /// Every identifier as an entry with no scope, carrying `values` on the first.
     private func declare(_ identifiers: [String], values: [String: String]? = nil) -> [BootstrapCommand.DeclaredPack] {
         identifiers.enumerated().map { index, id in
-            BootstrapCommand.DeclaredPack(
-                identifier: id,
-                ref: BootstrapFile.PackRef(source: "local/\(id)", values: index == 0 ? values : nil)
-            )
+            entry(id, values: index == 0 ? values : nil)
         }
     }
 
@@ -3475,6 +3472,7 @@ struct BootstrapIntegrationTests {
         let registry = TechPackRegistry(packs: [seeded.packA, seeded.packB, incoming])
 
         try BootstrapCommand.parse(["--prune", "--yes"]).runSync(
+            file: Self.file(declare([incoming.identifier], values: ["API_TOKEN": "seeded"])),
             declared: declare([incoming.identifier], values: ["API_TOKEN": "seeded"]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3498,6 +3496,7 @@ struct BootstrapIntegrationTests {
         func warnings(seededValues: [String: String]) throws -> Int {
             let counter = WarningCounter()
             try BootstrapCommand.parse(["--dry-run"]).runSync(
+                file: Self.file(declare([pack.identifier], values: seededValues)),
                 declared: declare([pack.identifier], values: seededValues),
                 projectRoot: bed.project,
                 env: bed.env,
@@ -3522,6 +3521,7 @@ struct BootstrapIntegrationTests {
         let command = try BootstrapCommand.parse([])
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
             declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3548,6 +3548,7 @@ struct BootstrapIntegrationTests {
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
             declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3574,6 +3575,7 @@ struct BootstrapIntegrationTests {
         let command = try BootstrapCommand.parse([])
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier, seeded.packB.identifier])),
             declared: declare([seeded.packA.identifier, seeded.packB.identifier]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3602,6 +3604,7 @@ struct BootstrapIntegrationTests {
         // uninstalls" pattern the guard defends against.
         #expect(throws: (any Error).self) {
             try command.runSync(
+                file: Self.file(declare([seeded.packA.identifier])),
                 declared: declare([seeded.packA.identifier]),
                 projectRoot: bed.project,
                 env: bed.env,
@@ -3629,6 +3632,7 @@ struct BootstrapIntegrationTests {
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
             declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3656,6 +3660,7 @@ struct BootstrapIntegrationTests {
         // Must not throw. Prior behavior threw "No packs could be loaded", defeating
         // the preview flow on a fresh manifest.
         try command.runSync(
+            file: Self.file(declare([])),
             declared: declare([]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3682,6 +3687,7 @@ struct BootstrapIntegrationTests {
         let command = try BootstrapCommand.parse(["--prune", "--yes"])
 
         try command.runSync(
+            file: Self.file(declare([seeded.packA.identifier])),
             declared: declare([seeded.packA.identifier]),
             projectRoot: bed.project,
             env: bed.env,
@@ -3704,8 +3710,8 @@ struct BootstrapIntegrationTests {
         registry: TechPackRegistry
     ) throws {
         try BootstrapCommand.parse(arguments).runSync(
+            file: Self.file(declared, scope: fileScope),
             declared: declared,
-            fileScope: fileScope,
             projectRoot: bed.project,
             env: bed.env,
             output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
@@ -3724,10 +3730,18 @@ struct BootstrapIntegrationTests {
         try bootstrap([], declared, fileScope: fileScope, bed: bed, registry: registry)
     }
 
-    private func entry(_ identifier: String, scope: PackScope? = nil) -> BootstrapCommand.DeclaredPack {
+    private static func file(_ declared: [BootstrapCommand.DeclaredPack], scope: PackScope? = nil) -> BootstrapFile {
+        BootstrapFile(schemaVersion: BootstrapFile.currentSchemaVersion, packs: declared.map(\.ref), scope: scope?.rawValue)
+    }
+
+    private func entry(
+        _ identifier: String,
+        scope: PackScope? = nil,
+        values: [String: String]? = nil
+    ) -> BootstrapCommand.DeclaredPack {
         BootstrapCommand.DeclaredPack(
             identifier: identifier,
-            ref: BootstrapFile.PackRef(source: "local/\(identifier)", scope: scope?.rawValue)
+            ref: BootstrapFile.PackRef(source: "local/\(identifier)", values: values, scope: scope?.rawValue)
         )
     }
 
