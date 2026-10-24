@@ -369,7 +369,7 @@ struct CrossPackPromptResolverTests {
         ])
         // Bootstrap can't seed the global scope, so it must not be offered there.
         #expect(PromptResolutionError(unresolved: unresolved, isGlobalScope: true).lines == listing + [
-            "Re-run 'mcs sync --global' from a terminal to answer them; later unattended runs reuse the answers.",
+            "Declare them under 'values:' on a global entry in mcs.yaml and run 'mcs bootstrap', or re-run 'mcs sync --global' from a terminal.",
         ])
     }
 
