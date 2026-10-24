@@ -64,24 +64,15 @@ enum PackHeuristics {
         if manifest.prompts?.contains(where: { $0.type == .fileDetect }) == true {
             features.append("`fileDetect` prompts")
         }
-        var placeholders = Set<String>()
-        for template in manifest.templates ?? [] {
-            let content: String
-            do {
-                content = try String(contentsOf: packPath.appendingPathComponent(template.contentFile), encoding: .utf8)
-            } catch {
-                findings.append(Finding(
-                    severity: .warning,
-                    message: "Could not read template '\(template.contentFile)' to check for project-only"
-                        + " placeholders: \(error.localizedDescription)"
-                ))
-                continue
-            }
-            placeholders.formUnion(TemplateEngine.findUnreplacedPlaceholders(in: content))
-        }
-        let projectOnly = ProjectSyncStrategy.builtInKeys.map { "__\($0)__" }.filter(placeholders.contains)
+        // Same scan sync uses to find placeholders, so every file a pack ships is covered.
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
+            packs: [ExternalPackAdapter(manifest: manifest, packPath: packPath)],
+            includeTemplates: true,
+            onWarning: { findings.append(Finding(severity: .warning, message: $0)) }
+        )
+        let projectOnly = ProjectSyncStrategy.builtInKeys.filter(referenced.contains)
         if !projectOnly.isEmpty {
-            features.append(projectOnly.map { "`\($0)`" }.joined(separator: " / ") + " in templates")
+            features.append(projectOnly.map { "`__\($0)__`" }.joined(separator: " / "))
         }
 
         if !features.isEmpty {

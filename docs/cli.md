@@ -29,7 +29,7 @@ mcs sync --global                # Install to global scope (~/.claude/)
 
 A selected pack always installs every component it declares. Components that an older release's `--customize` excluded are installed on the next sync, which names them before installing them.
 
-**Pack scopes.** A pack can declare which scopes it supports (`scopes:` in `techpack.yaml`). Naming one with `--pack` for a scope it doesn't support fails before anything changes, and `--dry-run` exits non-zero the same way. `--all` skips such packs with a warning, and the interactive picker hides them. A pack that was already installed there before it declared `scopes:` is kept and re-applied; `mcs doctor` warns about it.
+**Pack scopes.** A pack can declare which scopes it supports (`scopes:` in `techpack.yaml`). Naming one with `--pack` for a scope it doesn't support fails before anything changes, and `--dry-run` exits non-zero the same way. `--all` skips such packs with a warning, and the interactive picker lists them as not available. A pack that was already installed there before it declared `scopes:` is kept and re-applied; `mcs doctor` warns about it.
 
 **`--pack` is additive.** Naming a pack adds or updates it and leaves every other configured pack in place; a footer lists the packs that were kept. A configured pack that is missing from the registry stops the run rather than being removed — re-add it with `mcs pack add`, or pass `--prune` to remove it. With `--prune`, the named packs become the exact set, matching `mcs bootstrap --prune`.
 

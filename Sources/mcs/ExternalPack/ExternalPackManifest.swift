@@ -176,14 +176,17 @@ extension ExternalPackManifest {
         // `techpack.yaml` is always material; any path referenced by a component/template
         // is required for install — silencing it would produce a broken pack.
         try validateIgnoreEntries()
+    }
 
-        if let scopes {
-            guard !scopes.isEmpty else {
-                throw ManifestError.invalidScopes(reason: "the list is empty — omit `scopes` to support both")
-            }
-            for value in scopes where PackScope(rawValue: value) == nil {
-                throw ManifestError.invalidScopes(reason: Self.unknownScopeReason(value))
-            }
+    /// Publish-time check for `scopes:`, kept out of `validate()` so a user's sync never fails on
+    /// an author's typo — `reportInvalidScopes(output:)` is its runtime counterpart.
+    func validateScopes() throws {
+        guard let scopes else { return }
+        guard !scopes.isEmpty else {
+            throw ManifestError.invalidScopes(reason: "the list is empty — omit `scopes` to support both")
+        }
+        for value in scopes where PackScope(rawValue: value) == nil {
+            throw ManifestError.invalidScopes(reason: Self.unknownScopeReason(value))
         }
     }
 
@@ -191,10 +194,11 @@ extension ExternalPackManifest {
         "unknown scope '\(value)' — expected \(PackScope.allCases.map(\.rawValue).joined(separator: " or "))"
     }
 
-    /// The scopes this manifest allows; both when `scopes` is absent, empty, or has no known value.
+    /// Both scopes when `scopes` is absent; otherwise only its known values. A list with none
+    /// supports no scope, so a typo fails closed instead of widening into the scope it forbade.
     var supportedScopes: Set<PackScope> {
-        let declared = Set((scopes ?? []).compactMap(PackScope.init(rawValue:)))
-        return declared.isEmpty ? Set(PackScope.allCases) : declared
+        guard let scopes else { return Set(PackScope.allCases) }
+        return Set(scopes.compactMap(PackScope.init(rawValue:)))
     }
 
     /// Why an `ignore:` entry is forbidden. Both `validateIgnoreEntries` (publish-strict)
@@ -355,22 +359,19 @@ extension ExternalPackManifest {
     }
 }
 
-// MARK: - Scope sanitization (runtime safety guard)
+// MARK: - Scope reporting (runtime safety guard)
 
 extension ExternalPackManifest {
-    /// Return a copy with unknown `scopes:` values dropped, warning for each. An empty result
-    /// collapses to nil (both scopes), so an author's typo never blocks a user's sync —
-    /// `mcs pack validate` rejects the same values at publish time.
-    func sanitizedScopes(output: CLIOutput) -> ExternalPackManifest {
-        guard let scopes else { return self }
-        var copy = self
-        let kept = scopes.filter { value in
-            guard PackScope(rawValue: value) == nil else { return true }
-            output.warn("Pack '\(identifier)': dropping `scopes:` value — \(Self.unknownScopeReason(value))")
-            return false
+    /// Warn about each unknown `scopes:` value, which `supportedScopes` ignores, and about a list
+    /// left with none: that pack can no longer be added to any scope.
+    func reportInvalidScopes(output: CLIOutput) {
+        guard let scopes else { return }
+        for value in scopes where PackScope(rawValue: value) == nil {
+            output.warn("Pack '\(identifier)': ignoring `scopes:` value — \(Self.unknownScopeReason(value))")
         }
-        copy.scopes = kept.isEmpty ? nil : kept
-        return copy
+        if supportedScopes.isEmpty {
+            output.warn("Pack '\(identifier)' declares no valid scope, so it cannot be installed anywhere")
+        }
     }
 }
 

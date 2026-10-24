@@ -2739,26 +2739,26 @@ struct ExternalPackManifestTests {
         #expect(manifest.supportedScopes == [.project])
     }
 
-    @Test("Validation rejects an empty or unknown scopes list", arguments: ["scopes: []", "scopes: [project, machine]"])
+    @Test("Publish validation rejects an empty or unknown scopes list", arguments: ["scopes: []", "scopes: [project, machine]"])
     func scopesRejectInvalid(line: String) throws {
         let manifest = try scopedManifest(line)
         #expect(throws: ManifestError.self) {
-            try manifest.validate()
+            try manifest.validateScopes()
         }
     }
 
-    @Test("Runtime sanitizing drops unknown scopes and falls back to both")
-    func scopesSanitize() throws {
+    @Test("Unknown scopes are ignored at runtime, and a list with none supports no scope")
+    func scopesFailClosed() throws {
         let counter = WarningCounter()
         let output = CLIOutput(colorsEnabled: false, warningCounter: counter)
 
-        let partial = try scopedManifest("scopes: [global, machine]").sanitizedScopes(output: output)
-        #expect(partial.scopes == ["global"])
-        try partial.validate()
+        let partial = try scopedManifest("scopes: [global, machine]")
+        partial.reportInvalidScopes(output: output)
+        #expect(partial.supportedScopes == [.global])
 
-        let none = try scopedManifest("scopes: [machine]").sanitizedScopes(output: output)
-        #expect(none.scopes == nil)
-        #expect(none.supportedScopes == [.project, .global])
-        #expect(counter.count == 2)
+        let none = try scopedManifest("scopes: [machine]")
+        none.reportInvalidScopes(output: output)
+        #expect(none.supportedScopes.isEmpty)
+        #expect(counter.count == 3)
     }
 }

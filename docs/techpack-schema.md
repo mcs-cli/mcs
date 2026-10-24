@@ -626,7 +626,8 @@ The engine validates manifests on load. These rules are enforced:
   `mcs sync` drops it with a warning so one pack cannot block your sync
 - Prompt `key` values must be unique
 - `scopes` must list at least one of `project` / `global` and nothing else. `mcs pack validate` fails on
-  a bad value; `mcs sync` drops unknown values with a warning and treats an empty result as both scopes
+  a bad value; at sync time an unknown value is ignored with a warning, and a list left with no valid
+  value supports **no** scope — a typo fails closed instead of widening the pack into both
 - Doctor check required fields must be present and non-empty
 
 ### Heuristic Checks
@@ -650,7 +651,7 @@ The engine validates manifests on load. These rules are enforced:
 | MCP dependency gap | MCP server uses `python`/`node` command but no brew component installs that runtime |
 | Missing python module | MCP server uses `python -m <module>` but `<module>/` directory not found in the pack |
 | Deprecated key | A component or template declares `dependencies` or `isRequired`, which are ignored |
-| Project-only features | The pack allows global scope but uses `configureProject`, `__REPO_NAME__` / `__PROJECT_DIR_NAME__` in a template, or `fileDetect` prompts — global sync skips or leaves those unresolved. Declare `scopes: [project]` |
+| Project-only features | The pack allows global scope but uses `configureProject`, `__REPO_NAME__` / `__PROJECT_DIR_NAME__` in any file it installs, or `fileDetect` prompts — global sync skips or leaves those unresolved. Declare `scopes: [project]` |
 
 Infrastructure directories (`.git`, `.github`, `.gitlab`, `.vscode`, `node_modules`, `__pycache__`, `.build`) and common root-level files (`techpack.yaml`, `README.md`, `LICENSE`, `Makefile`, etc.) are excluded from unreferenced-file checks.
 
@@ -673,10 +674,17 @@ How `mcs` enforces it:
 
 - Adding the pack to an unsupported scope fails before anything changes — `mcs sync --pack`,
   `mcs sync --global --pack`, and `--dry-run` all exit non-zero, naming the pack and the scope it supports.
-- `mcs sync --all` skips such packs with a warning, and the interactive picker hides them.
+- `mcs sync --all` skips such packs with a warning, and the interactive picker lists them as not
+  available instead of offering them.
 - A pack already installed in a scope it no longer supports (it declared `scopes:` in a later version)
   is left in place and re-applied as before. `mcs doctor` warns about it with the remedy: deselect it in
-  that scope, or `mcs pack remove` it.
+  that scope, or `mcs pack remove` it. `mcs doctor --fix` never removes the copy in the scope the pack
+  still supports to keep one it doesn't.
+
+`scopes:` is the pack's *capability*. It is not placement: where a pack goes is chosen by the user
+(`mcs sync` / `mcs sync --global`, or `scope:` in `mcs.yaml`), and that choice must be one of the
+pack's scopes or `mcs` stops with an error. Doctor checks have their own unrelated `scope` key, which
+picks the base directory for a `path`.
 
 ---
 
