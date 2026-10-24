@@ -73,14 +73,15 @@ struct BootstrapFileTests {
     }
 
     @Test("Rejects malformed bootstrap files with a specific error", arguments: [
-        ("schemaVersion: 99\npacks:\n  - source: user/repo", BootstrapFileError.unsupportedSchemaVersion(found: 99, expected: 1)),
+        ("schemaVersion: 99\npacks:\n  - source: user/repo", BootstrapFileError.unsupportedSchemaVersion(found: 99, expected: 2)),
         ("schemaVersion: 1\npacks: []", .emptyPackList),
         ("schemaVersion: 1\npacks:\n  - source: user/repo\n  - source: user/repo", .duplicateSource("user/repo")),
         ("schemaVersion: 1\npacks:\n  - source: \"   \"", .blankSource),
         ("schemaVersion: 1\npacks:\n  - source: user/repo\n    scope: machine", .invalidScope(source: "user/repo", scope: "machine")),
-        ("schemaVersion: 1\nscope: machine\npacks:\n  - source: user/repo", .invalidScope(source: nil, scope: "machine")),
+        ("schemaVersion: 2\nscope: machine\npacks:\n  - source: user/repo", .invalidScope(source: nil, scope: "machine")),
+        ("schemaVersion: 1\nscope: global\npacks:\n  - source: user/repo", .fileScopeNeedsSchemaVersion(found: 1)),
         (
-            "schemaVersion: 1\nscope: global\npacks:\n  - source: user/repo\n    scope: project",
+            "schemaVersion: 2\nscope: global\npacks:\n  - source: user/repo\n    scope: project",
             .projectEntryInGlobalFile(source: "user/repo")
         ),
     ])
@@ -111,7 +112,7 @@ struct BootstrapFileTests {
         #expect(mixed.packs.map(\.packScope) == [nil, .global])
 
         let machine = try BootstrapFile.load(from: write("""
-        schemaVersion: 1
+        schemaVersion: 2
         scope: global
         packs:
           - source: user/a

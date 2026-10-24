@@ -142,6 +142,9 @@ struct ProjectState {
         /// Template placeholder values resolved during the last sync.
         /// Used by doctor to re-render expected sections for content-hash comparison.
         var resolvedValues: [String: String]?
+        /// Who asked for each pack, so a file's `--prune` removes only what that file installed.
+        /// A configured pack with no entry is the user's own.
+        var packOwners: [String: [String]]?
     }
 
     init(projectRoot: URL) throws {
@@ -182,6 +185,32 @@ struct ProjectState {
         storage.configuredPacks.removeAll { $0 == identifier }
         storage.packArtifacts.removeValue(forKey: identifier)
         storage.excludedComponents?.removeValue(forKey: identifier)
+        storage.packOwners?.removeValue(forKey: identifier)
+    }
+
+    // MARK: - Pack Owners
+
+    /// The owner of every pack a user selected by hand, which no file's `--prune` may remove.
+    static let userOwner = "user"
+
+    /// Who asked for a configured pack: the user, `mcs.yaml` files (by identity), or both.
+    func owners(of packID: String) -> Set<String> {
+        storage.packOwners?[packID].map(Set.init) ?? [Self.userOwner]
+    }
+
+    /// Add `owner`'s claim. `wasConfigured` is whether the pack was here before this run: a pack
+    /// the user already held keeps the user as an owner, a new one belongs to `owner` alone.
+    mutating func claim(_ packID: String, by owner: String, wasConfigured: Bool) {
+        let current = wasConfigured ? owners(of: packID) : []
+        storage.packOwners = storage.packOwners ?? [:]
+        storage.packOwners?[packID] = current.union([owner]).sorted()
+    }
+
+    /// Drop `owner`'s claim; the pack stays configured for whoever else owns it.
+    mutating func releaseClaim(on packID: String, by owner: String) {
+        let remaining = owners(of: packID).subtracting([owner])
+        storage.packOwners = storage.packOwners ?? [:]
+        storage.packOwners?[packID] = remaining.sorted()
     }
 
     /// The MCS version that last wrote this file.

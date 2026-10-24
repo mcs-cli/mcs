@@ -3,8 +3,11 @@ import Foundation
 /// Declarative bootstrap manifest at a fixed location (`./mcs.yaml` at cwd). Each declared pack
 /// is routed to project or global scope; the project is always the folder holding the file.
 struct BootstrapFile: Codable, Equatable {
-    /// Bumped when the on-disk schema gains a breaking change.
-    static let currentSchemaVersion = 1
+    /// Bumped when the on-disk schema gains a key an older mcs would silently ignore.
+    static let currentSchemaVersion = 2
+    /// The first version with a file-level `scope`. Older mcs ignores unknown keys, so a
+    /// machine-only file read as schema 1 would install everything into cwd as a project.
+    static let fileScopeSchemaVersion = 2
 
     static let defaultFilename = "mcs.yaml"
 
@@ -28,10 +31,21 @@ struct BootstrapFile: Codable, Equatable {
         var packScope: PackScope? {
             scope.flatMap(PackScope.init(rawValue:))
         }
+
+        /// Where this entry converges: its own `scope`, then the file's, then project. The pack's
+        /// own `scopes:` never decides placement — reading the file must show what touches `~/.claude`.
+        func route(fileScope: PackScope?) -> PackScope {
+            packScope ?? fileScope ?? .project
+        }
     }
 
     var fileScope: PackScope? {
         scope.flatMap(PackScope.init(rawValue:))
+    }
+
+    /// Whether any entry lands in the project, which makes cwd a project.
+    var routesToProject: Bool {
+        packs.contains { $0.route(fileScope: fileScope) == .project }
     }
 }
 
@@ -41,6 +55,7 @@ enum BootstrapFileError: Error, LocalizedError, Equatable {
     case notFound(path: String)
     case parseFailed(underlying: String)
     case unsupportedSchemaVersion(found: Int, expected: Int)
+    case fileScopeNeedsSchemaVersion(found: Int)
     case emptyPackList
     case duplicateSource(String)
     case invalidScope(source: String?, scope: String)
@@ -54,7 +69,10 @@ enum BootstrapFileError: Error, LocalizedError, Equatable {
         case let .parseFailed(reason):
             "Failed to parse \(BootstrapFile.defaultFilename): \(reason)"
         case let .unsupportedSchemaVersion(found, expected):
-            "Unsupported schemaVersion \(found); this version of mcs expects \(expected)"
+            "Unsupported schemaVersion \(found); this version of mcs supports up to \(expected)"
+        case let .fileScopeNeedsSchemaVersion(found):
+            "A file-level 'scope' needs schemaVersion \(BootstrapFile.fileScopeSchemaVersion) (found \(found)),"
+                + " so an older mcs refuses the file instead of treating it as a project"
         case .emptyPackList:
             "\(BootstrapFile.defaultFilename) declares no packs"
         case let .duplicateSource(source):
@@ -105,7 +123,7 @@ extension BootstrapFile {
 
     /// Structural checks that YAML decoding cannot express.
     func validate() throws {
-        guard schemaVersion == Self.currentSchemaVersion else {
+        guard (1 ... Self.currentSchemaVersion).contains(schemaVersion) else {
             throw BootstrapFileError.unsupportedSchemaVersion(
                 found: schemaVersion,
                 expected: Self.currentSchemaVersion
@@ -116,8 +134,13 @@ extension BootstrapFile {
             throw BootstrapFileError.emptyPackList
         }
 
-        if let scope, fileScope == nil {
-            throw BootstrapFileError.invalidScope(source: nil, scope: scope)
+        if let scope {
+            guard fileScope != nil else {
+                throw BootstrapFileError.invalidScope(source: nil, scope: scope)
+            }
+            guard schemaVersion >= Self.fileScopeSchemaVersion else {
+                throw BootstrapFileError.fileScopeNeedsSchemaVersion(found: schemaVersion)
+            }
         }
 
         var seen: Set<String> = []
