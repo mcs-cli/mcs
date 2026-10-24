@@ -1,7 +1,7 @@
 import Foundation
 
-/// Declarative bootstrap manifest whose fixed location (`./mcs.yaml` at cwd) keeps
-/// project scope unambiguous — bootstrap always applies to the folder holding the file.
+/// Declarative bootstrap manifest at a fixed location (`./mcs.yaml` at cwd). Each declared pack
+/// is routed to project or global scope; the project is always the folder holding the file.
 struct BootstrapFile: Codable, Equatable {
     /// Bumped when the on-disk schema gains a breaking change.
     static let currentSchemaVersion = 1
@@ -10,6 +10,9 @@ struct BootstrapFile: Codable, Equatable {
 
     var schemaVersion: Int
     var packs: [PackRef]
+    /// Default scope for entries without their own. `global` makes the file machine-only:
+    /// cwd is not treated as a project.
+    var scope: String?
 
     struct PackRef: Codable, Equatable {
         /// Git URL, GitHub shorthand (`user/repo`), or an absolute/relative local path.
@@ -19,9 +22,16 @@ struct BootstrapFile: Codable, Equatable {
         /// Prompt priors keyed by prompt `key`. Seeded into `ProjectState.resolvedValues`
         /// so the sync engine reuses them silently without re-prompting.
         var values: [String: String]?
-        /// Reserved. v1 accepts only `"project"` (or omitted); the field exists so a future
-        /// `global` scope can land as a non-breaking schema addition.
+        /// `project` or `global`; overrides the file-level `scope`.
         var scope: String?
+
+        var packScope: PackScope? {
+            scope.flatMap(PackScope.init(rawValue:))
+        }
+    }
+
+    var fileScope: PackScope? {
+        scope.flatMap(PackScope.init(rawValue:))
     }
 }
 
@@ -33,7 +43,8 @@ enum BootstrapFileError: Error, LocalizedError, Equatable {
     case unsupportedSchemaVersion(found: Int, expected: Int)
     case emptyPackList
     case duplicateSource(String)
-    case reservedScope(source: String, scope: String)
+    case invalidScope(source: String?, scope: String)
+    case projectEntryInGlobalFile(source: String)
     case blankSource
 
     var errorDescription: String? {
@@ -48,8 +59,10 @@ enum BootstrapFileError: Error, LocalizedError, Equatable {
             "\(BootstrapFile.defaultFilename) declares no packs"
         case let .duplicateSource(source):
             "\(BootstrapFile.defaultFilename) lists source '\(source)' more than once"
-        case let .reservedScope(source, scope):
-            "'\(source)': scope '\(scope)' is reserved for a future version — only 'project' is supported"
+        case let .invalidScope(source, scope):
+            "\(source.map { "'\($0)': " } ?? "")unknown scope '\(scope)' — expected 'project' or 'global'"
+        case let .projectEntryInGlobalFile(source):
+            "'\(source)': scope 'project' is not allowed in a file whose scope is 'global'"
         case .blankSource:
             "\(BootstrapFile.defaultFilename) contains a pack entry with an empty source"
         }
@@ -103,6 +116,10 @@ extension BootstrapFile {
             throw BootstrapFileError.emptyPackList
         }
 
+        if let scope, fileScope == nil {
+            throw BootstrapFileError.invalidScope(source: nil, scope: scope)
+        }
+
         var seen: Set<String> = []
         for pack in packs {
             guard !pack.source.isEmpty else {
@@ -111,8 +128,11 @@ extension BootstrapFile {
             if !seen.insert(pack.source).inserted {
                 throw BootstrapFileError.duplicateSource(pack.source)
             }
-            if let scope = pack.scope, scope != "project" {
-                throw BootstrapFileError.reservedScope(source: pack.source, scope: scope)
+            if let scope = pack.scope, pack.packScope == nil {
+                throw BootstrapFileError.invalidScope(source: pack.source, scope: scope)
+            }
+            if fileScope == .global, pack.packScope == .project {
+                throw BootstrapFileError.projectEntryInGlobalFile(source: pack.source)
             }
         }
     }

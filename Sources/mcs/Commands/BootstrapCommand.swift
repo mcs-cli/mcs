@@ -29,7 +29,18 @@ struct BootstrapCommand: LockedCommand {
         let ctx = PackCommandContext()
 
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
-        try guardCwd(cwd: cwd, env: ctx.env, output: ctx.output)
+        let filePath = cwd.appendingPathComponent(BootstrapFile.defaultFilename)
+        let file: BootstrapFile
+        do {
+            file = try BootstrapFile.load(from: filePath)
+        } catch let error as BootstrapFileError {
+            ctx.output.error(error.localizedDescription)
+            throw ExitCode.failure
+        }
+        // A machine-only file never treats cwd as a project, so it may live anywhere.
+        if file.fileScope != .global {
+            try guardCwd(cwd: cwd, env: ctx.env, output: ctx.output)
+        }
 
         // Dry-run must not trigger the Homebrew install prompt for Claude Code — that
         // would violate the no-changes contract on a preview.
@@ -39,42 +50,18 @@ struct BootstrapCommand: LockedCommand {
             }
         }
 
-        let filePath = cwd.appendingPathComponent(BootstrapFile.defaultFilename)
-        let file: BootstrapFile
-        do {
-            file = try BootstrapFile.load(from: filePath)
-        } catch let error as BootstrapFileError {
-            ctx.output.error(error.localizedDescription)
-            throw ExitCode.failure
-        }
-
         ctx.output.header("Bootstrap")
         ctx.output.plain("")
         ctx.output.info(label: "File", filePath.path)
         ctx.output.info(label: "Packs", file.packs.map { redactSourceForDisplay($0.source) }.joined(separator: ", "))
 
-        let desiredIdentifiers = try installPacks(file: file, ctx: ctx)
-
-        let projectState: ProjectState
-        do {
-            projectState = try ProjectState(projectRoot: cwd)
-        } catch {
-            ctx.output.error("Corrupt .mcs-project: \(error.localizedDescription)")
-            ctx.output.error("Delete .claude/.mcs-project and re-run 'mcs bootstrap'.")
-            throw ExitCode.failure
-        }
-
+        let declared = try installPacks(file: file, ctx: ctx)
         let registry = TechPackRegistry.loadWithExternalPacks(environment: ctx.env, output: ctx.output)
-        warnUnmatchedSeedKeys(
-            file: file, desiredIdentifiers: desiredIdentifiers,
-            registry: registry, cwd: cwd, env: ctx.env, output: ctx.output
-        )
-        let seededValues = seedValues(from: file, output: ctx.output)
         try runSync(
+            declared: declared,
+            fileScope: file.fileScope,
+            allDeclaredResolved: declared.count == file.packs.count,
             projectRoot: cwd,
-            desiredIdentifiers: desiredIdentifiers,
-            projectState: projectState,
-            seededValues: seededValues,
             env: ctx.env,
             output: ctx.output,
             shell: ctx.shell,
@@ -102,8 +89,8 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Install packs
 
-    /// Reconcile each declared pack with the registry and return the resolved identifier list
-    /// in the file's order. Uses the smallest operation that fits:
+    /// Reconcile each declared pack with the registry and return the resolved entries in the
+    /// file's order, then print one status line per pack. Uses the smallest operation that fits:
     /// - No-op when the pack is already registered from the same source + ref.
     /// - `PackUpdater.updateGitPack` when only the ref differs (git packs).
     /// - `PackAdder` (auto-accept) when the identifier is registered from a different source.
@@ -111,7 +98,7 @@ struct BootstrapCommand: LockedCommand {
     private func installPacks(
         file: BootstrapFile,
         ctx: PackCommandContext
-    ) throws -> [String] {
+    ) throws -> [DeclaredPack] {
         let resolver = PackSourceResolver()
         let adder = PackAdder(ctx: ctx)
         // Bootstrap is non-interactive by design: mcs.yaml already expresses the user's
@@ -133,7 +120,8 @@ struct BootstrapCommand: LockedCommand {
             throw ExitCode.failure
         }
 
-        var identifiers: [String] = []
+        var declared: [DeclaredPack] = []
+        var statuses: [(identifier: String, status: String)] = []
         var installedThisRun: [String] = []
         // `BootstrapFile.validate` dedups on raw source strings, but PackSourceResolver
         // canonicalizes (`user/repo` → `https://github.com/user/repo.git`, `file://…` →
@@ -189,7 +177,7 @@ struct BootstrapCommand: LockedCommand {
                     packsDirectory: ctx.env.packsDirectory,
                     output: ctx.output
                 )
-                if let existing { identifiers.append(existing.identifier) }
+                if let existing { declared.append(DeclaredPack(identifier: existing.identifier, ref: pack)) }
                 continue
             }
 
@@ -201,7 +189,8 @@ struct BootstrapCommand: LockedCommand {
                     ctx.output.warn("'\(displaySource)': --ref is ignored for local packs")
                 }
                 ctx.output.dimmed("  \(displaySource) already registered (local pack)")
-                identifiers.append(existing.identifier)
+                declared.append(DeclaredPack(identifier: existing.identifier, ref: pack))
+                statuses.append((existing.identifier, "unchanged"))
                 continue
             }
 
@@ -212,8 +201,9 @@ struct BootstrapCommand: LockedCommand {
                         pack: pack,
                         ctx: ctx
                     )
-                    identifiers.append(reconciled.identifier)
+                    declared.append(DeclaredPack(identifier: reconciled.identifier, ref: pack))
                     installedThisRun.append(reconciled.identifier)
+                    statuses.append((reconciled.identifier, Self.reconcileStatus(existing: existing, reconciled: reconciled)))
                 } else {
                     let outcome = try adder.add(source: packSource, ref: pack.ref, options: bootstrapOptions)
                     switch outcome {
@@ -230,8 +220,9 @@ struct BootstrapCommand: LockedCommand {
                             installed: installedThisRun,
                             ctx: ctx
                         )
-                        identifiers.append(entry.identifier)
+                        declared.append(DeclaredPack(identifier: entry.identifier, ref: pack))
                         installedThisRun.append(entry.identifier)
+                        statuses.append((entry.identifier, "added"))
                     case .declined:
                         // Bootstrap auto-accepts duplicates and collisions, so trust is the
                         // only thing `.declined` can mean here.
@@ -248,12 +239,33 @@ struct BootstrapCommand: LockedCommand {
                     }
                 }
             } catch {
+                printStatuses(statuses + [(displaySource, "failed")], output: ctx.output)
                 reportPartialInstall(installed: installedThisRun, failedAt: pack.source, output: ctx.output)
                 throw error
             }
         }
 
-        return identifiers
+        printStatuses(statuses, output: ctx.output)
+        return declared
+    }
+
+    /// Stable one-word outcomes a scheduled wrapper can parse from the log.
+    private func printStatuses(_ statuses: [(identifier: String, status: String)], output: CLIOutput) {
+        guard !statuses.isEmpty else { return }
+        output.plain("")
+        for entry in statuses {
+            output.plain("  \(entry.identifier): \(entry.status)")
+        }
+    }
+
+    static func reconcileStatus(
+        existing: PackRegistryFile.PackEntry,
+        reconciled: PackRegistryFile.PackEntry
+    ) -> String {
+        if existing.ref != reconciled.ref {
+            return "moved to \(reconciled.ref ?? "default branch")"
+        }
+        return existing.commitSHA == reconciled.commitSHA ? "unchanged" : "updated"
     }
 
     /// Render the per-pack dry-run line. Existing packs get a dimmed "already
@@ -392,19 +404,23 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Prompt priors
 
-    /// The bootstrap file's `values`, folded in manifest order. Sync merges them into
-    /// `state.resolvedValues` and reuses them silently for keys a resolved pack declares as a
-    /// prompt or references as a `__PLACEHOLDER__`; any other key is dropped.
+    /// The `values` of the entries routed to one scope, folded in manifest order. Sync merges them
+    /// into that scope's `resolvedValues` and reuses them silently for keys a resolved pack declares
+    /// as a prompt or references as a `__PLACEHOLDER__`; any other key is dropped.
     ///
     /// Returned rather than saved: sync merges them only after its removals,
     /// so pruning a removed pack's values can't take seeds meant for a pack being added.
-    private func seedValues(from file: BootstrapFile, output: CLIOutput) -> [String: String] {
+    private func seedValues(
+        from refs: [BootstrapFile.PackRef],
+        scopeLabel: String,
+        output: CLIOutput
+    ) -> [String: String] {
         // Warn when a later pack overrides an earlier pack's value for the same key so the
         // divergence is visible. Values themselves stay out of the log: bootstrap `values`
         // commonly hold MCP env vars (API keys, tokens), and a CI log is a common secret-exfil path.
         var merged: [String: String] = [:]
         var seedCount = 0
-        for pack in file.packs {
+        for pack in refs {
             for (key, value) in pack.values ?? [:] {
                 seedCount += 1
                 if let previous = merged[key], previous != value {
@@ -418,7 +434,7 @@ struct BootstrapCommand: LockedCommand {
             }
         }
         if dryRun, !merged.isEmpty {
-            output.dimmed("  would seed \(seedCount) prompt value(s) into project state")
+            output.dimmed("  would seed \(seedCount) prompt value(s) into \(scopeLabel) state")
         }
         return merged
     }
@@ -426,18 +442,12 @@ struct BootstrapCommand: LockedCommand {
     /// A seeded key nothing consumes is most likely a typo, and sync drops it without a
     /// trace while prompting for the key the pack actually expects.
     private func warnUnmatchedSeedKeys(
-        file: BootstrapFile,
-        desiredIdentifiers: [String],
-        registry: TechPackRegistry,
-        cwd: URL,
-        env: Environment,
+        refs: [BootstrapFile.PackRef],
+        packs: [any TechPack],
+        strategy: any SyncStrategy,
         output: CLIOutput
     ) {
-        // A dry run skips fetching new packs, and their keys would read as unmatched.
-        let packs = desiredIdentifiers.compactMap { registry.pack(for: $0) }
-        guard packs.count == file.packs.count else { return }
-
-        let strategy = ProjectSyncStrategy(projectPath: cwd, environment: env)
+        let file = BootstrapFile(schemaVersion: BootstrapFile.currentSchemaVersion, packs: refs)
         let context = strategy.makeConfigContext(output: output, resolvedValues: [:], priorValues: [:])
         for key in Self.unmatchedSeedKeys(
             file: file, packs: packs, context: context,
@@ -474,130 +484,291 @@ struct BootstrapCommand: LockedCommand {
 
     // MARK: - Sync
 
-    /// Run project sync for the declared pack set.
+    /// A declared entry and the registered pack identifier it resolved to.
+    struct DeclaredPack {
+        let identifier: String
+        let ref: BootstrapFile.PackRef
+    }
+
+    /// The scope a declared pack converges in: the entry's `scope`, then the file's, then the
+    /// pack's only declared scope, then project.
+    static func route(_ ref: BootstrapFile.PackRef, fileScope: PackScope?, pack: any TechPack) -> PackScope {
+        if let explicit = ref.packScope ?? fileScope {
+            return explicit
+        }
+        if pack.supportedScopes.count == 1, let only = pack.supportedScopes.first {
+            return only
+        }
+        return .project
+    }
+
+    private struct ScopePlan {
+        let scope: PackScope
+        let packs: [any TechPack]
+        let refs: [BootstrapFile.PackRef]
+        let keptExtras: [String]
+        let state: ProjectState
+        let configurator: Configurator
+        let strategy: any SyncStrategy
+
+        var removals: [String] {
+            state.configuredPacks.subtracting(packs.map(\.identifier)).sorted()
+        }
+    }
+
+    /// Converge every scope the declared packs route to, global first.
     ///
-    /// **Default is additive**: any pack configured in the project but absent from
-    /// `mcs.yaml` is preserved (its identifier is unioned into the desired set).
-    /// `--prune` opts into authoritative behavior — declared IDs become the exact
-    /// desired set, and `Configurator.configure(confirmRemovals: !yes)` prompts
-    /// before removing anything.
+    /// Each scope is **additive by default**: packs configured there but absent from the file are
+    /// kept. `--prune` makes the file authoritative for the project, and for global only when the
+    /// file's own scope is `global` — one repo's file is never the full list of a user's global
+    /// packs. Every check runs against both scopes before either changes.
     ///
-    /// Exposed as `internal` so integration tests can exercise the additive-vs-prune
-    /// branching without spinning up the whole command via ArgumentParser + cwd.
+    /// `allDeclaredResolved` is false on a dry run that skipped fetching new packs.
+    /// Exposed as `internal` so integration tests can drive it without ArgumentParser + cwd.
     func runSync(
+        declared: [DeclaredPack],
+        fileScope: PackScope? = nil,
+        allDeclaredResolved: Bool = true,
         projectRoot: URL,
-        desiredIdentifiers: [String],
-        projectState: ProjectState,
-        seededValues: [String: String] = [:],
         env: Environment,
         output: CLIOutput,
-        shell: ShellRunner,
-        registry: TechPackRegistry
+        shell: any ShellRunning,
+        registry: TechPackRegistry,
+        claudeCLI: (any ClaudeCLI)? = nil
     ) throws {
-        // --prune is the authoritative-removal path: the user has explicitly asked to
-        // converge the scope, so an unloadable configured pack is what --prune exists
-        // to clean up. The downstream `declaredUnresolved` check still blocks a
-        // declared pack that fails to load, so bad declarations don't sneak through.
-        if !prune, SyncCommand.scopeIsBlockedByUnloadablePack(
+        let fileName = BootstrapFile.defaultFilename
+        let routed = try route(declared, fileScope: fileScope, registry: registry, output: output)
+
+        guard !declared.isEmpty else {
+            if dryRun {
+                // `installPacks` doesn't fetch on a dry run, so a file of only new packs has
+                // nothing registered to preview beyond its "would fetch:" lines. Not a failure.
+                output.plain("")
+                output.info("No previously-registered packs to preview. Run without --dry-run to fetch and sync.")
+                return
+            }
+            output.error("No packs from \(fileName) could be loaded.")
+            throw ExitCode.failure
+        }
+
+        let globalEntries = routed[.global] ?? []
+        let projectEntries = routed[.project] ?? []
+        let prunesGlobal = prune && fileScope == .global
+        let runsGlobal = !globalEntries.isEmpty || prunesGlobal
+        let runsProject = fileScope != .global && (!projectEntries.isEmpty || prune)
+
+        let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
+        var projectState: ProjectState?
+        if fileScope != .global {
+            do {
+                projectState = try ProjectState(projectRoot: projectRoot)
+            } catch {
+                output.error("Corrupt .mcs-project: \(error.localizedDescription)")
+                output.error("Delete .claude/.mcs-project and re-run 'mcs bootstrap'.")
+                throw ExitCode.failure
+            }
+        }
+
+        // A blocked scope skips the whole run: converging only the other one would leave the
+        // file half-applied. Under prune the unloadable pack is what the run exists to remove.
+        if runsGlobal, !prunesGlobal, SyncCommand.scopeIsBlockedByUnloadablePack(
+            configured: globalState.configuredPacks, registry: registry, output: output
+        ) {
+            return
+        }
+        if runsProject, !prune, let projectState, SyncCommand.scopeIsBlockedByUnloadablePack(
             configured: projectState.configuredPacks, registry: registry, output: output
         ) {
             return
         }
 
-        let globalState = try SyncCommand.loadGlobalState(env: env, output: output)
-
-        let previouslyConfigured = projectState.configuredPacks
-
-        // `declaredPacks` needs no dedup: `BootstrapFile.validate()` rejects duplicate sources and
-        // `installPacks` emits one identifier per source.
-        var declaredPacks: [any TechPack] = []
-        var declaredUnresolved: [String] = []
-        for id in desiredIdentifiers {
-            if let pack = registry.pack(for: id) {
-                declaredPacks.append(pack)
-            } else {
-                declaredUnresolved.append(id)
-            }
-        }
-        if !declaredUnresolved.isEmpty {
-            for id in declaredUnresolved {
-                output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
-            }
+        // Installing globally what this project also holds is the state `ScopeDuplicationCheck`
+        // fails on. Under --prune the project run drops it, so the pack moves instead.
+        let moving = globalEntries.map(\.pack)
+            .filter { projectState?.configuredPacks.contains($0.identifier) == true }
+        if !moving.isEmpty, !prune {
+            output.error("\(fileName) routes these packs to global scope, but this project already configures them:")
+            output.plain("  \(moving.map(\.displayName).sorted().joined(separator: ", "))")
+            output.plain("  Run 'mcs bootstrap --prune' to move them, or remove them from this project first.")
             throw ExitCode.failure
         }
 
-        let desired = try ConfiguratorSupport.additivePackSet(
-            requested: declaredPacks,
-            previouslyConfigured: previouslyConfigured,
-            prune: prune,
-            pruneCommand: "mcs bootstrap --prune",
-            registry: registry,
-            output: output
-        )
-        let resolvedPacks = desired.packs
+        func makeConfigurator(_ strategy: any SyncStrategy) -> Configurator {
+            Configurator(
+                environment: env, output: output, shell: shell,
+                registry: registry, strategy: strategy, claudeCLI: claudeCLI
+            )
+        }
 
-        guard !resolvedPacks.isEmpty else {
-            if dryRun {
-                // Fresh project whose manifest is only new packs — `installPacks` in
-                // dry-run mode does not fetch, so there are no registered identifiers
-                // to preview beyond the "would fetch:" lines already printed. Not a
-                // failure.
-                output.plain("")
-                output.info("No previously-registered packs to preview. Run without --dry-run to fetch and sync.")
+        var plans: [ScopePlan] = []
+        if runsGlobal {
+            let desired = try ConfiguratorSupport.additivePackSet(
+                requested: globalEntries.map(\.pack),
+                previouslyConfigured: globalState.configuredPacks,
+                prune: prunesGlobal,
+                pruneCommand: "mcs bootstrap --prune",
+                registry: registry,
+                output: output
+            )
+            let strategy = GlobalSyncStrategy(environment: env)
+            plans.append(ScopePlan(
+                scope: .global, packs: desired.packs, refs: globalEntries.map(\.ref),
+                keptExtras: desired.keptExtras, state: globalState,
+                configurator: makeConfigurator(strategy), strategy: strategy
+            ))
+        }
+        if runsProject, let projectState {
+            let desired = try ConfiguratorSupport.additivePackSet(
+                requested: projectEntries.map(\.pack),
+                previouslyConfigured: projectState.configuredPacks,
+                prune: prune,
+                pruneCommand: "mcs bootstrap --prune",
+                registry: registry,
+                output: output
+            )
+            // Under --prune the list only has to exclude what should go, so an empty result is
+            // legitimate: the extras converge away as removals.
+            let packs = try ConfiguratorSupport.filterGloballyBlocked(
+                desired.packs,
+                globallyInstalled: globalState.configuredPacks,
+                previouslyConfigured: projectState.configuredPacks,
+                output: output,
+                allowEmpty: prune
+            )
+            let strategy = ProjectSyncStrategy(projectPath: projectRoot, environment: env)
+            plans.append(ScopePlan(
+                scope: .project, packs: packs, refs: projectEntries.map(\.ref),
+                keptExtras: desired.keptExtras, state: projectState,
+                configurator: makeConfigurator(strategy), strategy: strategy
+            ))
+        }
+
+        var seeds: [PackScope: [String: String]] = [:]
+        for plan in plans {
+            if allDeclaredResolved {
+                warnUnmatchedSeedKeys(refs: plan.refs, packs: plan.packs, strategy: plan.strategy, output: output)
+            }
+            seeds[plan.scope] = seedValues(from: plan.refs, scopeLabel: plan.scope.rawValue, output: output)
+        }
+
+        if !dryRun {
+            for plan in plans {
+                try plan.configurator.preflight(
+                    packs: plan.packs, seededValues: seeds[plan.scope] ?? [:], reusePriorValuesSilently: true
+                )
+            }
+            guard confirmRemovals(plans: plans, output: output) else {
+                output.info("Bootstrap cancelled.")
                 return
             }
-            output.error("No packs from \(BootstrapFile.defaultFilename) could be loaded.")
-            throw ExitCode.failure
         }
 
-        // Under --prune, the sync's `packs` argument doesn't have to hold the
-        // "keep" set — it just has to *not* hold anything we want removed. If every
-        // declared pack is already globally installed and the project still has
-        // extras, filterGloballyBlocked would normally refuse; here we want the
-        // prune pass to run against the empty declared set so the extras converge
-        // away as Configurator.configure removals.
-        let filteredPacks = try ConfiguratorSupport.filterGloballyBlocked(
-            resolvedPacks,
-            globallyInstalled: globalState.configuredPacks,
-            previouslyConfigured: previouslyConfigured,
-            output: output,
-            allowEmpty: prune
-        )
-
-        let configurator = Configurator(
-            environment: env,
-            output: output,
-            shell: shell,
-            registry: registry,
-            strategy: ProjectSyncStrategy(projectPath: projectRoot, environment: env)
-        )
-
-        output.header("Sync Project")
-        output.plain("")
-        output.info(label: "Project", projectRoot.path)
-        output.info(label: "Packs", filteredPacks.map(\.displayName).joined(separator: ", "))
-
-        if dryRun {
-            try configurator.dryRun(packs: filteredPacks, seededValues: seededValues)
-        } else {
-            // Seeded and stored values must not re-prompt behind the interactive Y/n gate;
-            // prompts nothing answers still execute.
-            try configurator.configure(
-                packs: filteredPacks,
-                confirmRemovals: !yes,
-                reusePriorValuesSilently: true,
-                seededValues: seededValues
-            )
+        for plan in plans {
+            try converge(plan, seededValues: seeds[plan.scope] ?? [:], projectRoot: projectRoot, env: env, output: output)
+        }
+        if !dryRun {
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }
 
-        ConfiguratorSupport.reportKeptExtras(
-            desired.keptExtras,
-            notIn: "in \(BootstrapFile.defaultFilename)",
-            remedy: "Add them to \(BootstrapFile.defaultFilename), or run 'mcs bootstrap --prune' to remove them.",
-            output: output
-        )
+        for plan in plans {
+            ConfiguratorSupport.reportKeptExtras(
+                plan.keptExtras,
+                notIn: "in \(fileName)\(plan.scope == .global ? " (global)" : "")",
+                remedy: plan.scope == .global && fileScope != .global
+                    ? "Add them to \(fileName), or deselect them with 'mcs sync --global'."
+                    : "Add them to \(fileName), or run 'mcs bootstrap --prune' to remove them.",
+                output: output
+            )
+        }
+    }
+
+    private typealias RoutedEntry = (pack: any TechPack, ref: BootstrapFile.PackRef)
+
+    /// Group declared packs by the scope they route to, failing on any pack that can't load or
+    /// doesn't support its scope — before either scope is touched.
+    private func route(
+        _ declared: [DeclaredPack],
+        fileScope: PackScope?,
+        registry: TechPackRegistry,
+        output: CLIOutput
+    ) throws -> [PackScope: [RoutedEntry]] {
+        var routed: [PackScope: [RoutedEntry]] = [:]
+        var failures: [String] = []
+        for entry in declared {
+            guard let pack = registry.pack(for: entry.identifier) else {
+                failures.append("Pack '\(entry.identifier)' declared in \(BootstrapFile.defaultFilename) failed to load.")
+                continue
+            }
+            let target = Self.route(entry.ref, fileScope: fileScope, pack: pack)
+            guard pack.supportedScopes.contains(target) else {
+                let supported = PackScope.allCases.filter(pack.supportedScopes.contains).map(\.rawValue)
+                failures.append(
+                    "Pack '\(pack.displayName)' is routed to \(target.rawValue) scope"
+                        + " but supports \(supported.joined(separator: ", ")) only."
+                )
+                continue
+            }
+            routed[target, default: []].append((pack, entry.ref))
+        }
+        guard failures.isEmpty else {
+            for failure in failures {
+                output.error(failure)
+            }
+            throw ExitCode.failure
+        }
+        return routed
+    }
+
+    private func converge(
+        _ plan: ScopePlan,
+        seededValues: [String: String],
+        projectRoot: URL,
+        env: Environment,
+        output: CLIOutput
+    ) throws {
+        output.header(plan.scope == .global ? "Sync Global" : "Sync Project")
+        output.plain("")
+        if plan.scope == .global {
+            output.info(label: "Target", env.claudeDirectory.path)
+            output.warn("Global scope applies to every project on this machine.")
+        } else {
+            output.info(label: "Project", projectRoot.path)
+        }
+        output.info(label: "Packs", plan.packs.map(\.displayName).joined(separator: ", "))
+
+        if dryRun {
+            try plan.configurator.dryRun(packs: plan.packs, seededValues: seededValues)
+        } else {
+            // Seeded and stored values must not re-prompt behind the interactive Y/n gate;
+            // prompts nothing answers still execute.
+            try plan.configurator.configure(
+                packs: plan.packs,
+                confirmRemovals: false,
+                reusePriorValuesSilently: true,
+                seededValues: seededValues
+            )
+        }
+    }
+
+    /// One confirmation for every scope's removals, asked before any scope changes so declining
+    /// never leaves one scope converged and the other not. `true` when there is nothing to confirm.
+    private func confirmRemovals(plans: [ScopePlan], output: CLIOutput) -> Bool {
+        let withRemovals = plans.filter { !$0.removals.isEmpty }
+        guard prune, !yes, !withRemovals.isEmpty else { return true }
+
+        output.plain("")
+        for plan in withRemovals {
+            output.warn("The following packs will be removed\(plan.strategy.scope.labelSuffix):")
+            for packID in plan.removals {
+                output.plain("  - \(packID)")
+                if let artifacts = plan.state.artifacts(for: packID) {
+                    plan.strategy.printRemovalSummary(artifacts, output: output)
+                }
+            }
+        }
+        output.plain("")
+        return output.askYesNo("Proceed with removal?", default: true)
     }
 }
 

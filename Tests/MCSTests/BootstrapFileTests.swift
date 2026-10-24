@@ -77,7 +77,12 @@ struct BootstrapFileTests {
         ("schemaVersion: 1\npacks: []", .emptyPackList),
         ("schemaVersion: 1\npacks:\n  - source: user/repo\n  - source: user/repo", .duplicateSource("user/repo")),
         ("schemaVersion: 1\npacks:\n  - source: \"   \"", .blankSource),
-        ("schemaVersion: 1\npacks:\n  - source: user/repo\n    scope: global", .reservedScope(source: "user/repo", scope: "global")),
+        ("schemaVersion: 1\npacks:\n  - source: user/repo\n    scope: machine", .invalidScope(source: "user/repo", scope: "machine")),
+        ("schemaVersion: 1\nscope: machine\npacks:\n  - source: user/repo", .invalidScope(source: nil, scope: "machine")),
+        (
+            "schemaVersion: 1\nscope: global\npacks:\n  - source: user/repo\n    scope: project",
+            .projectEntryInGlobalFile(source: "user/repo")
+        ),
     ])
     func rejectsInvalidFile(yaml: String, expected: BootstrapFileError) throws {
         let tmp = try makeDir()
@@ -88,6 +93,30 @@ struct BootstrapFileTests {
         #expect(throws: expected) {
             _ = try BootstrapFile.load(from: path)
         }
+    }
+
+    @Test("A file-level scope and per-entry global scope are accepted")
+    func acceptsGlobalScopes() throws {
+        let tmp = try makeDir()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let mixed = try BootstrapFile.load(from: write("""
+        schemaVersion: 1
+        packs:
+          - source: user/a
+          - source: user/b
+            scope: global
+        """, to: tmp))
+        #expect(mixed.fileScope == nil)
+        #expect(mixed.packs.map(\.packScope) == [nil, .global])
+
+        let machine = try BootstrapFile.load(from: write("""
+        schemaVersion: 1
+        scope: global
+        packs:
+          - source: user/a
+        """, to: tmp))
+        #expect(machine.fileScope == .global)
     }
 
     @Test("Explicit 'project' scope is accepted")

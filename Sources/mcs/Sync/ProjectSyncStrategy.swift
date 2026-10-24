@@ -265,12 +265,15 @@ struct ProjectSyncStrategy: SyncStrategy {
             output.warn(warning)
         }
 
-        if fm.fileExists(atPath: scope.claudeFilePath.path) {
-            var backup = Backup()
-            try backup.backupFile(at: scope.claudeFilePath)
+        // An unchanged file is left alone: a scheduled re-run must not pile up backups of user content.
+        if result.content != existingContent {
+            if existingContent != nil {
+                var backup = Backup()
+                try backup.backupFile(at: scope.claudeFilePath)
+            }
+            try result.content.write(to: scope.claudeFilePath, atomically: true, encoding: .utf8)
+            output.success("Generated \(scope.claudeFilePath.lastPathComponent)")
         }
-        try result.content.write(to: scope.claudeFilePath, atomically: true, encoding: .utf8)
-        output.success("Generated \(scope.claudeFilePath.lastPathComponent)")
 
         return Set(allContributions.map(\.sectionIdentifier))
     }
