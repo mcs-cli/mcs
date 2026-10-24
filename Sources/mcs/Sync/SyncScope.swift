@@ -47,11 +47,11 @@ struct SyncScope {
     /// Whether to run `pack.configureProject(at:context:)` hooks after artifact installation.
     let runConfigureProjectHooks: Bool
 
-    /// Whether this is the global scope (affects template value resolution context).
-    let isGlobalScope: Bool
+    let packScope: PackScope
 
-    var packScope: PackScope {
-        isGlobalScope ? .global : .project
+    /// Whether this is the global scope (affects template value resolution context).
+    var isGlobalScope: Bool {
+        packScope == .global
     }
 
     /// The sync hint shown in error/recovery messages (e.g. `"mcs sync"` or `"mcs sync --global"`).
@@ -86,7 +86,7 @@ extension SyncScope {
             mcpWorkingDirectory: projectPath,
             includeTemplatesInScan: true,
             runConfigureProjectHooks: true,
-            isGlobalScope: false,
+            packScope: .project,
             syncHint: "mcs sync",
             labelSuffix: "",
             hookPathPrefix: Constants.HookCommand.projectDirectory,
@@ -108,7 +108,7 @@ extension SyncScope {
             mcpWorkingDirectory: nil,
             includeTemplatesInScan: false,
             runConfigureProjectHooks: false,
-            isGlobalScope: true,
+            packScope: .global,
             syncHint: "mcs sync --global",
             labelSuffix: " (global)",
             hookPathPrefix: Constants.HookCommand.globalDirectory,

@@ -331,16 +331,10 @@ struct SyncCommand: LockedCommand {
         // `--all` means every pack that fits this scope; a named `--pack` reaches the
         // Configurator's scope gate instead and fails there.
         if all {
-            let unsupported = ConfiguratorSupport.scopeUnsupportedIDs(
-                candidates: requested, scope: global ? .global : .project,
-                previouslyConfigured: previouslyConfigured
+            requested = ConfiguratorSupport.filterScopeUnsupported(
+                requested, scope: configurator.packScope,
+                previouslyConfigured: previouslyConfigured, output: output
             )
-            if !unsupported.isEmpty {
-                let names = requested.filter { unsupported.contains($0.identifier) }.map(\.displayName).sorted()
-                output.warn("Skipping \(names.count) pack(s) that do not support \(global ? "global" : "project") scope:")
-                output.plain("  \(names.joined(separator: ", "))")
-                requested = requested.filter { !unsupported.contains($0.identifier) }
-            }
         }
         let desired = try ConfiguratorSupport.additivePackSet(
             requested: requested,

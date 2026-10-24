@@ -240,6 +240,7 @@ struct MockTechPack: TechPack {
 /// so the non-interactive preflight sees the same answer the mock will give. Tests about
 /// unanswerable prompts use a real `ExternalPackAdapter` instead.
 struct MockPromptTechPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String
     let description: String = "Mock pack with prompts"
@@ -305,6 +306,7 @@ struct MockPromptTechPack: TechPack {
 
 /// Mock TechPack that tracks `configureProject` invocations.
 final class TrackingMockTechPack: TechPack, @unchecked Sendable {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String
     let description: String = "Tracking mock pack"

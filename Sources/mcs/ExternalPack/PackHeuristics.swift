@@ -52,9 +52,6 @@ enum PackHeuristics {
 
     // MARK: - Individual Checks
 
-    /// Placeholders only project sync resolves; global sync leaves them verbatim in `CLAUDE.md`.
-    static let projectOnlyPlaceholders = ["__REPO_NAME__", "__PROJECT_DIR_NAME__"]
-
     /// Warns when a pack that allows global scope relies on features global sync skips.
     private static func checkProjectOnlyFeatures(manifest: ExternalPackManifest, packPath: URL) -> [Finding] {
         guard manifest.supportedScopes.contains(.global) else { return [] }
@@ -80,11 +77,11 @@ enum PackHeuristics {
                 ))
                 continue
             }
-            placeholders.formUnion(projectOnlyPlaceholders.filter { content.contains($0) })
+            placeholders.formUnion(TemplateEngine.findUnreplacedPlaceholders(in: content))
         }
-        if !placeholders.isEmpty {
-            features.append(projectOnlyPlaceholders.filter(placeholders.contains).map { "`\($0)`" }
-                .joined(separator: " / ") + " in templates")
+        let projectOnly = ProjectSyncStrategy.builtInKeys.map { "__\($0)__" }.filter(placeholders.contains)
+        if !projectOnly.isEmpty {
+            features.append(projectOnly.map { "`\($0)`" }.joined(separator: " / ") + " in templates")
         }
 
         if !features.isEmpty {

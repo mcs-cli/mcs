@@ -18,12 +18,17 @@ struct ProjectSyncStrategy: SyncStrategy {
 
     // MARK: - Template Values
 
+    static let repoNameKey = "REPO_NAME"
+    static let projectDirNameKey = "PROJECT_DIR_NAME"
+    /// Values only project sync resolves; global sync leaves them verbatim.
+    static let builtInKeys = [repoNameKey, projectDirNameKey]
+
     func resolveBuiltInValues(shell: any ShellRunning, output: CLIOutput) -> [String: String] {
         let repoName = resolveRepoName(shell: shell, output: output)
         let projectDirName = resolveProjectDirName(shell: shell)
         return [
-            "REPO_NAME": repoName,
-            "PROJECT_DIR_NAME": projectDirName,
+            Self.repoNameKey: repoName,
+            Self.projectDirNameKey: projectDirName,
         ]
     }
 
@@ -34,7 +39,7 @@ struct ProjectSyncStrategy: SyncStrategy {
     ) -> ProjectConfigContext {
         ProjectConfigContext(
             projectPath: projectPath,
-            repoName: resolvedValues["REPO_NAME"] ?? projectPath.lastPathComponent,
+            repoName: resolvedValues[Self.repoNameKey] ?? projectPath.lastPathComponent,
             output: output,
             resolvedValues: resolvedValues,
             priorValues: priorValues
