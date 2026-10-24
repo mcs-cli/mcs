@@ -136,7 +136,7 @@ struct FileLockTests {
         let error = #expect(throws: ExitCode.self) {
             try runHoldingLock(at: lockFile) { ran = true }
         }
-        #expect(error?.rawValue == LockContention.exitCode)
+        #expect(error?.rawValue == lockContentionExitCode)
         #expect(!ran)
     }
 
