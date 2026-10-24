@@ -348,7 +348,7 @@ struct UpdateCheckerOrchestratorTests {
         UpdateChecker(environment: Environment(home: home), shell: mock)
     }
 
-    @Test("nil ref: fetch the remote's HEAD, diff against FETCH_HEAD (mirrors PackFetcher.update)")
+    @Test("nil ref: fetch the remote's HEAD into its own ref and diff against it")
     func nilRefUsesOriginHEAD() throws {
         let tmpDir = try makeTmpDir(label: "classify")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -368,10 +368,10 @@ struct UpdateCheckerOrchestratorTests {
 
         let expectedWorkDir = Environment(home: tmpDir).packsDirectory
             .appendingPathComponent("pack-a").path
-        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "HEAD"])
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "+HEAD:refs/mcs/update-check"])
         #expect(mock.runCalls[0].workingDirectory == expectedWorkDir)
         // Diffed from the registry baseline, not HEAD — see `classifyUpstreamChange`.
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "FETCH_HEAD"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "refs/mcs/update-check"])
         #expect(mock.runCalls[1].workingDirectory == expectedWorkDir)
     }
 
@@ -393,7 +393,7 @@ struct UpdateCheckerOrchestratorTests {
         #expect(result == .material(["hooks/session-start.sh"]))
     }
 
-    @Test("Custom entry.ref propagates through fetch + diff against FETCH_HEAD")
+    @Test("Custom entry.ref propagates through fetch + diff against the update-check ref")
     func customRefPropagates() throws {
         let tmpDir = try makeTmpDir(label: "classify")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -408,8 +408,8 @@ struct UpdateCheckerOrchestratorTests {
         let checker = makeChecker(home: tmpDir, mock: mock)
         _ = checker.classifyUpstreamChange(entry: makeEntry(ref: "v2.0"))
 
-        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "v2.0"])
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "FETCH_HEAD"])
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "+v2.0:refs/mcs/update-check"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "refs/mcs/update-check"])
     }
 
     @Test("Invalid entry.ref (argument injection) → .unknown(.fetchFailed); no git invocation")
