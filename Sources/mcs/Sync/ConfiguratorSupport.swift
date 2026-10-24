@@ -409,22 +409,21 @@ enum ConfiguratorSupport {
         // Pass 1: entries derived from component definitions.
         for component in packComponents.map(\.component) {
             if let reg = component.hookRegistration,
-               let command = component.hookCommand(pathPrefix: hookPathPrefix) {
-                if settings.addHookEntry(
-                    event: reg.event,
-                    command: command,
-                    matcher: reg.matcher,
-                    timeout: reg.timeout,
-                    isAsync: reg.isAsync,
-                    statusMessage: reg.statusMessage
-                ) {
-                    hasContent = true
-                    // Echo anything but the default interpreter, so a value that was inferred
-                    // rather than declared is visible rather than magic.
-                    if let invocation = component.hookInvocation,
-                       !HookInterpreter.isDefault(invocation.interpreter) {
-                        output.dimmed("  \(reg.event.rawValue): \(command)")
-                    }
+               let command = component.hookCommand(pathPrefix: hookPathPrefix),
+               settings.addHookEntry(
+                   event: reg.event,
+                   command: command,
+                   matcher: reg.matcher,
+                   timeout: reg.timeout,
+                   isAsync: reg.isAsync,
+                   statusMessage: reg.statusMessage
+               ) {
+                hasContent = true
+                // Echo anything but the default interpreter, so a value that was inferred
+                // rather than declared is visible rather than magic.
+                if let invocation = component.hookInvocation,
+                   !HookInterpreter.isDefault(invocation.interpreter) {
+                    output.dimmed("  \(reg.event.rawValue): \(command)")
                 }
             }
         }
@@ -670,8 +669,8 @@ enum ConfiguratorSupport {
         var results: [String] = []
         for case let fileURL as URL in enumerator {
             guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
-                  values.isRegularFile == true else { continue }
-            guard let data = try? Data(contentsOf: fileURL),
+                  values.isRegularFile == true,
+                  let data = try? Data(contentsOf: fileURL),
                   let text = String(data: data, encoding: .utf8) else { continue }
             results.append(contentsOf: TemplateEngine.findUnreplacedPlaceholders(in: text))
         }
