@@ -52,19 +52,32 @@ struct PackFetcher {
         let steps: [(arguments: [String], workingDirectory: String?)] = [
             (["init", "--quiet", packPath.path], nil),
             (["remote", "add", "origin", url], packPath.path),
-            (["fetch", "--depth", "1", "origin", Self.fetchTarget(ref)], packPath.path),
-            (["checkout", "--quiet", "FETCH_HEAD"], packPath.path),
+            (["fetch", "--depth", "1", "origin", Self.fetchRefspec(ref)], packPath.path),
+            (["checkout", "--quiet", Self.fetchedRef], packPath.path),
         ]
-        for step in steps {
-            let result = shell.run(
-                shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
-            )
-            guard result.succeeded else {
-                throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
+        // Unlike `git clone`, a failed step leaves the initialised directory behind, and a
+        // scheduled retry would pile them up under a fresh temp path each time.
+        let commitSHA: String
+        do {
+            for step in steps {
+                let result = shell.run(
+                    shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
+                )
+                guard result.succeeded else {
+                    throw PackFetchError.cloneFailed(url: url, stderr: result.stderr + Self.refHint(ref))
+                }
             }
+            commitSHA = try currentCommit(at: packPath)
+        } catch {
+            if fm.fileExists(atPath: packPath.path) {
+                do {
+                    try fm.removeItem(at: packPath)
+                } catch let cleanup {
+                    output.warn("Could not remove partial checkout at \(packPath.path): \(cleanup.localizedDescription)")
+                }
+            }
+            throw error
         }
-
-        let commitSHA = try currentCommit(at: packPath)
 
         return FetchResult(
             localPath: packPath,
@@ -85,12 +98,31 @@ struct PackFetcher {
         ref ?? "HEAD"
     }
 
+    /// Where clone and update land a fetch. A private ref rather than the shared `FETCH_HEAD`, so
+    /// the update-check hook fetching in the same checkout can't swap what gets checked out.
+    static let fetchedRef = "refs/mcs/fetch"
+
+    static func fetchRefspec(_ ref: String?, into destination: String = fetchedRef) -> String {
+        "+\(fetchTarget(ref)):\(destination)"
+    }
+
+    /// Appended to a failed fetch's stderr for the two ref shapes git's own message doesn't explain.
+    static func refHint(_ ref: String?) -> String {
+        guard let ref, ref.allSatisfy(\.isHexDigit) else { return "" }
+        if isCommitSHA(ref) {
+            return "\nThe server may not allow fetching a commit by SHA (it needs protocol v2 or"
+                + " uploadpack.allowReachableSHA1InWant); pin a tag instead."
+        }
+        guard (7 ..< 40).contains(ref.count) else { return "" }
+        return "\nIf '\(ref)' is an abbreviated commit SHA, use the full 40-character SHA."
+    }
+
     // MARK: - Update
 
     /// Update an existing pack checkout.
     /// Returns a `FetchResult` if updated, or `nil` if already at the latest commit.
     ///
-    /// Fetches the ref (or the remote's default branch) explicitly and resets to `FETCH_HEAD` —
+    /// Fetches the ref (or the remote's default branch) explicitly and resets to what it fetched —
     /// uniform for every ref type, including none. A plain `checkout <branch>` would not advance
     /// the local branch past whatever was captured at clone time, freezing branch-ref packs.
     func update(packPath: URL, ref: String?) throws -> FetchResult? {
@@ -101,15 +133,15 @@ struct PackFetcher {
         let workDir = packPath.path
 
         let fetchResult = shell.run(
-            shell.environment.gitPath, arguments: ["fetch", "--depth", "1", "origin", Self.fetchTarget(ref)],
+            shell.environment.gitPath, arguments: ["fetch", "--depth", "1", "origin", Self.fetchRefspec(ref)],
             workingDirectory: workDir
         )
         guard fetchResult.succeeded else {
-            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr)
+            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr + Self.refHint(ref))
         }
 
         let resetResult = shell.run(
-            shell.environment.gitPath, arguments: ["reset", "--hard", "FETCH_HEAD"],
+            shell.environment.gitPath, arguments: ["reset", "--hard", Self.fetchedRef],
             workingDirectory: workDir
         )
         guard resetResult.succeeded else {

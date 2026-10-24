@@ -22,6 +22,7 @@ struct UpdateChecker {
     // MARK: - SessionStart Hook (single source of truth)
 
     static let hookCommand = "mcs check-updates --hook"
+    static let checkedRef = "refs/mcs/update-check"
     static let hookTimeout: Int = 30
     static let hookStatusMessage = "Checking for updates..."
 
@@ -285,7 +286,8 @@ struct UpdateChecker {
     /// the file-level "Network failures are silently ignored" design goal).
     ///
     /// Mirrors `PackFetcher.update` for the fetch shape: fetch `PackFetcher.fetchTarget(entry.ref)`
-    /// and diff against `FETCH_HEAD`.
+    /// into its own ref and diff against it. This runs unlocked from the SessionStart hook, so it
+    /// must not write the ref an update in the same checkout resets to.
     ///
     /// - Parameter manifest: when non-nil, the manifest's `ignore:` list extends the built-in
     ///   deny-list. Callers pre-load manifests once per pack so the parallel `concurrentPerform`
@@ -315,7 +317,7 @@ struct UpdateChecker {
 
         let fetchResult = shell.run(
             environment.gitPath,
-            arguments: ["fetch", "--depth", "1", "origin", PackFetcher.fetchTarget(entry.ref)],
+            arguments: ["fetch", "--depth", "1", "origin", PackFetcher.fetchRefspec(entry.ref, into: Self.checkedRef)],
             workingDirectory: workDir,
             additionalEnvironment: Self.gitNoPromptEnv
         )
@@ -331,7 +333,7 @@ struct UpdateChecker {
         guard isValidGitRef(entry.commitSHA) else { return .unknown(.fetchFailed) }
         let diffResult = shell.run(
             environment.gitPath,
-            arguments: ["diff", "--name-only", entry.commitSHA, "FETCH_HEAD"],
+            arguments: ["diff", "--name-only", entry.commitSHA, Self.checkedRef],
             workingDirectory: workDir,
             additionalEnvironment: Self.gitNoPromptEnv
         )

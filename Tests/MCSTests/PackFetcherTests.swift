@@ -115,8 +115,8 @@ struct PackFetcherOperationTests {
         let remoteCall = try #require(shell.runCalls.first { $0.arguments.starts(with: ["remote", "add"]) })
         #expect(remoteCall.arguments.contains("https://github.com/org/repo.git"))
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.first == "fetch" })
-        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "HEAD"])
-        #expect(shell.runCalls.contains { $0.arguments == ["checkout", "--quiet", "FETCH_HEAD"] })
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "+HEAD:refs/mcs/fetch"])
+        #expect(shell.runCalls.contains { $0.arguments == ["checkout", "--quiet", "refs/mcs/fetch"] })
 
         #expect(result.commitSHA == "abc123def456")
         #expect(result.ref == nil)
@@ -142,7 +142,7 @@ struct PackFetcherOperationTests {
         )
 
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.first == "fetch" })
-        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "v1.0.0"])
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "+v1.0.0:refs/mcs/fetch"])
         #expect(result.ref == "v1.0.0")
     }
 
@@ -231,9 +231,9 @@ struct PackFetcherOperationTests {
         #expect(result?.commitSHA == "new-sha")
 
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "HEAD"])
+        #expect(fetchCall.arguments == ["fetch", "--depth", "1", "origin", "+HEAD:refs/mcs/fetch"])
         let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("FETCH_HEAD"))
+        #expect(resetCall.arguments.contains("refs/mcs/fetch"))
     }
 
     @Test("update returns nil when SHA is unchanged")
@@ -267,7 +267,7 @@ struct PackFetcherOperationTests {
         }
     }
 
-    @Test("update with tag ref fetches the ref and resets to FETCH_HEAD")
+    @Test("update with tag ref fetches the ref into a private ref and resets to it")
     func updateWithRefFetchesAndResets() throws {
         let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -284,10 +284,10 @@ struct PackFetcherOperationTests {
         #expect(result?.commitSHA == "new-sha")
 
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("v2.0.0"))
+        #expect(fetchCall.arguments.contains("+v2.0.0:refs/mcs/fetch"))
 
         let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("FETCH_HEAD"))
+        #expect(resetCall.arguments.contains("refs/mcs/fetch"))
 
         #expect(!shell.runCalls.contains { $0.arguments.contains("checkout") })
     }
@@ -310,10 +310,10 @@ struct PackFetcherOperationTests {
         #expect(result?.commitSHA == "new-sha")
 
         let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("main"))
+        #expect(fetchCall.arguments.contains("+main:refs/mcs/fetch"))
 
         let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("FETCH_HEAD"))
+        #expect(resetCall.arguments.contains("refs/mcs/fetch"))
     }
 
     @Test("update throws fetchFailed when ref fetch fails")
@@ -437,5 +437,32 @@ struct PackFetcherCommitRefTests {
         // no `origin/HEAD`.
         let unpinned = try fetcher.update(packPath: result.localPath, ref: nil)
         #expect(unpinned?.commitSHA == tip)
+    }
+}
+
+struct PackFetcherFailureTests {
+    @Test("A clone whose fetch fails leaves no partial checkout behind")
+    func failedCloneCleansUp() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let shell = ShellRunner(environment: env)
+        let packs = tmpDir.appendingPathComponent("packs")
+        let fetcher = PackFetcher(shell: shell, output: CLIOutput(colorsEnabled: false), packsDirectory: packs)
+
+        #expect(throws: PackFetchError.self) {
+            try fetcher.fetch(url: tmpDir.appendingPathComponent("no-such-remote").path, identifier: "broken", ref: nil)
+        }
+        #expect(!FileManager.default.fileExists(atPath: packs.appendingPathComponent("broken").path))
+    }
+
+    @Test("Hex refs git can't explain get a hint", arguments: [
+        ("0123456789abcdef0123456789abcdef01234567", "protocol v2"),
+        ("0123abc", "full 40-character SHA"),
+        ("v1.0.0", ""),
+    ])
+    func refHints(ref: String, expected: String) {
+        let hint = PackFetcher.refHint(ref)
+        #expect(expected.isEmpty ? hint.isEmpty : hint.contains(expected))
     }
 }
