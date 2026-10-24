@@ -91,6 +91,10 @@ struct DoctorRunner {
             return effectiveProjectRoot.map(SyncTarget.project) ?? .global
         }
 
+        var packScope: PackScope {
+            effectiveProjectRoot == nil ? .global : .project
+        }
+
         /// Hook directory the commands in `artifactsByPack` were recorded with.
         ///
         /// Relies on an invariant every `CheckScope` construction path upholds: a non-nil
@@ -241,6 +245,9 @@ struct DoctorRunner {
             // Derived and artifact-record checks verify what sync installs or recorded, so a re-sync
             // can repair them. Pack-authored checks can assert anything, so they never trigger one.
             for pack in scopePacks {
+                if !pack.supportedScopes.contains(scope.packScope) {
+                    allChecks.append((check: PackScopeCheck(packID: pack.identifier, scope: scope.packScope), syncTarget: nil))
+                }
                 for component in pack.components {
                     if let derived = component.deriveDoctorCheck(
                         projectRoot: scope.effectiveProjectRoot, environment: env, pluginListing: pluginListing

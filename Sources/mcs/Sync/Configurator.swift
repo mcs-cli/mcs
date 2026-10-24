@@ -36,6 +36,10 @@ struct Configurator {
         strategy.scope
     }
 
+    var packScope: PackScope {
+        scope.packScope
+    }
+
     // MARK: - Interactive Flow
 
     /// Full interactive configure flow — multi-select of registered packs.
@@ -81,7 +85,10 @@ struct Configurator {
             globallyInstalled: globallyInstalledPacks,
             previouslyConfigured: previousPacks
         )
-        let selectablePacks = packs.filter { !blocked.contains($0.identifier) }
+        let unsupported = Set(ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previousPacks
+        ).map(\.identifier))
+        let selectablePacks = packs.filter { !blocked.contains($0.identifier) && !unsupported.contains($0.identifier) }
         let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
 
         // Every registered pack is global, so the picker would have no selectable rows —
@@ -172,6 +179,7 @@ struct Configurator {
     /// Compute and display what `configure` would do, without making any changes.
     func dryRun(packs: [any TechPack], seededValues: [String: String] = [:]) throws {
         let state = try ProjectState(stateFile: scope.stateFile)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -233,6 +241,7 @@ struct Configurator {
         seededValues: [String: String] = [:]
     ) throws {
         var state = try ProjectState(stateFile: scope.stateFile)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -755,6 +764,14 @@ struct Configurator {
 
         state.setResolvedValues(allValues)
         return allValues
+    }
+
+    private func checkScopeSupport(packs: [any TechPack], previouslyConfigured: Set<String>) throws {
+        let rejected = ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previouslyConfigured
+        )
+        guard !rejected.isEmpty else { return }
+        throw PackScopeError(packs: rejected, scope: scope.packScope)
     }
 
     /// The non-interactive preflight over the values `configure` will resolve against:

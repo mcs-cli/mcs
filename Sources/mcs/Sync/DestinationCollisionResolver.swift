@@ -260,6 +260,10 @@ private struct CollisionResolvedTechPack: TechPack {
         inner.templateSectionIdentifiers
     }
 
+    var supportedScopes: Set<PackScope> {
+        inner.supportedScopes
+    }
+
     func supplementaryDoctorChecks(projectRoot: URL?) -> [any DoctorCheck] {
         inner.supplementaryDoctorChecks(projectRoot: projectRoot)
     }
