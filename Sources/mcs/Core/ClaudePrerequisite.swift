@@ -18,12 +18,7 @@ func ensureClaudeCLI(
     output.plain("  mcs requires the Claude Code CLI to function.")
 
     let brew = Homebrew(shell: shell, environment: environment)
-    guard brew.isInstalled else {
-        output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
-        return false
-    }
-
-    guard output.askYesNo("Install Claude Code via Homebrew?", default: true) else {
+    guard brew.isInstalled, output.askYesNo("Install Claude Code via Homebrew?", default: true) else {
         output.plain("  Install it manually: https://docs.anthropic.com/en/docs/claude-code")
         return false
     }

@@ -286,11 +286,11 @@ struct ConfigurationDiscovery {
     /// manifest that re-registers it under bash.
     private static func interpreter(ofHookCommand command: String, directory: String) -> String? {
         guard let interpreter = HookInterpreter.interpreter(
-            ofRegisteredCommand: command,
-            directory: directory
-        ),
-            !HookInterpreter.isDefault(interpreter),
-            HookInterpreter.rejectionReason(for: interpreter) == nil
+                  ofRegisteredCommand: command,
+                  directory: directory
+              ),
+              !HookInterpreter.isDefault(interpreter),
+              HookInterpreter.rejectionReason(for: interpreter) == nil
         else { return nil }
         return interpreter
     }
