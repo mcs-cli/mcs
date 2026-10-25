@@ -257,7 +257,8 @@ struct CrossPackPromptResolverTests {
             ],
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let adapter = ExternalPackAdapter(
             manifest: manifest,

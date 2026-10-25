@@ -1497,7 +1497,8 @@ struct ExternalPackManifestTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
 
         #expect(throws: ManifestError.templateSectionMismatch(
@@ -2513,7 +2514,8 @@ struct ExternalPackManifestTests {
             prompts: nil,
             configureProject: configureProject,
             supplementaryDoctorChecks: nil,
-            ignore: ignore
+            ignore: ignore,
+            scopes: nil
         )
     }
 
