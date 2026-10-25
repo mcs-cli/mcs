@@ -655,7 +655,8 @@ struct BootstrapCommand: LockedCommand {
         if !moving.isEmpty, !prune {
             output.error("\(fileName) routes these packs to global scope, but this project already configures them:")
             output.plain("  \(moving.map(\.displayName).sorted().joined(separator: ", "))")
-            output.plain("  Run 'mcs bootstrap --prune' to move them, or remove them from this project first.")
+            output.plain("  Deselect them in this project with 'mcs sync' first, or run 'mcs bootstrap --prune' to move them —")
+            output.plain("  --prune also removes every project pack \(fileName) doesn't list.")
             throw ExitCode.failure
         }
 
@@ -671,7 +672,9 @@ struct BootstrapCommand: LockedCommand {
                 requested: entries.map(\.pack),
                 previouslyConfigured: keeping ?? state.configuredPacks,
                 prune: prune,
-                pruneCommand: "mcs bootstrap --prune",
+                // A global extra is never this file's to prune unless it owns it alone, so
+                // `--prune` can't be the remedy for a broken one there.
+                pruneCommand: strategy.scope.isGlobalScope ? "mcs sync --global" : "mcs bootstrap --prune",
                 registry: registry,
                 output: output
             )

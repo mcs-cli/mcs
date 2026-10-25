@@ -3855,6 +3855,47 @@ struct BootstrapIntegrationTests {
         #expect(try bed.globalState().configuredPacks == ["machine"])
     }
 
+    @Test("An unanswerable project prompt stops a mixed file before the global part installs")
+    func bothScopesCheckedBeforeEither() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let prompted = bed.adapterPack(identifier: "prompted", displayName: "Prompted", prompts: [tokenPrompt])
+        let machine = MockTechPack(identifier: "machine", displayName: "Machine")
+        let registry = TechPackRegistry(packs: [prompted, machine])
+
+        #expect(throws: PromptResolutionError.self) {
+            try bootstrap([entry("prompted"), entry("machine", scope: .global)], bed: bed, registry: registry)
+        }
+
+        let global = try bed.globalState()
+        #expect(global.configuredPacks.isEmpty)
+        #expect(global.owners(of: "machine") == [ProjectState.userOwner])
+        #expect(try bed.projectState().configuredPacks.isEmpty)
+    }
+
+    @Test("sync --global warns when it removes a pack an mcs.yaml installed")
+    func syncGlobalWarnsOnFileOwnedRemoval() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let owned = MockTechPack(identifier: "owned", displayName: "Owned")
+        let personal = MockTechPack(identifier: "personal", displayName: "Personal")
+        let registry = TechPackRegistry(packs: [owned, personal])
+        try bootstrap([entry("owned")], fileScope: .global, bed: bed, registry: registry)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [owned, personal], confirmRemovals: false)
+
+        func warningsRemoving(keep: MockTechPack) throws -> Int {
+            let counter = WarningCounter()
+            try bed.makeGlobalSyncConfigurator(registry: registry, warningCounter: counter)
+                .configure(packs: [keep], confirmRemovals: false)
+            return counter.count
+        }
+
+        let removingPersonal = try warningsRemoving(keep: owned)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [owned, personal], confirmRemovals: false)
+        let removingOwned = try warningsRemoving(keep: personal)
+        #expect(removingOwned == removingPersonal + 1)
+    }
+
     @Test("A configured pack that fails to load fails the run instead of reporting success")
     func unloadablePackFailsTheRun() throws {
         let bed = try LifecycleTestBed()
