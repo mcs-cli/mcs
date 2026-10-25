@@ -38,7 +38,7 @@ struct BootstrapUnmatchedSeedKeysTests {
         )
 
         let unmatched = BootstrapCommand.unmatchedSeedKeys(
-            file: file, packs: [pack], context: context, includeTemplates: true
+            refs: file.packs, packs: [pack], context: context, includeTemplates: true
         )
 
         #expect(unmatched == ["API_TOKNE"])
@@ -169,5 +169,28 @@ struct BootstrapReconcileMissingCheckoutTests {
         let persisted = try fix.ctx.loadRegistry().packs
         #expect(persisted.first?.commitSHA == fix.tipSHA)
         #expect(persisted.first?.ref == nil)
+    }
+}
+
+struct BootstrapFileIdentityTests {
+    @Test("Every clone style of one repo yields the same owner identity", arguments: [
+        "git@github.com:Org/Config.git",
+        "https://github.com/Org/Config.git",
+        "https://user:token@GitHub.com/Org/Config",
+        "ssh://git@github.com/Org/Config.git/",
+    ])
+    func normalizedRemote(raw: String) {
+        #expect(BootstrapCommand.normalizedRemote(raw) == "github.com/Org/Config")
+    }
+
+    @Test("A file outside a git repo is identified by its canonical path")
+    func pathIdentityOutsideRepo() throws {
+        let dir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(BootstrapFile.defaultFilename)
+
+        let identity = BootstrapCommand.fileIdentity(of: file, shell: ShellRunner(environment: Environment(home: dir)))
+
+        #expect(identity == file.resolvingSymlinksInPath().path)
     }
 }

@@ -322,12 +322,9 @@ struct GlobalSyncStrategy: SyncStrategy {
             output.warn(warning)
         }
 
-        if fm.fileExists(atPath: scope.claudeFilePath.path) {
-            var backup = Backup()
-            try backup.backupFile(at: scope.claudeFilePath)
+        if try ConfiguratorSupport.writeIfChanged(result.content, existing: existingContent, to: scope.claudeFilePath) {
+            output.success("Generated \(scope.claudeFilePath.lastPathComponent) (global)")
         }
-        try result.content.write(to: scope.claudeFilePath, atomically: true, encoding: .utf8)
-        output.success("Generated \(scope.claudeFilePath.lastPathComponent) (global)")
 
         return Set(allContributions.map(\.sectionIdentifier))
     }

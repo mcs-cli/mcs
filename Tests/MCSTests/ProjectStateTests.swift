@@ -406,4 +406,23 @@ struct ProjectStateTests {
         #expect(final.artifacts(for: "ios")?.mcpServers.isEmpty == true)
         #expect(final.artifacts(for: "android") == nil)
     }
+
+    @Test("Pack owners: a sole owner keeps its claim, and claims on held packs keep the user")
+    func packOwnerClaims() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        var state = try ProjectState(projectRoot: tmpDir)
+        state.recordPack("held")
+        state.recordPack("solo")
+
+        state.claim("held", by: "file:a", wasConfigured: true)
+        state.claim("solo", by: "file:a", wasConfigured: false)
+        #expect(state.owners(of: "held") == [ProjectState.userOwner, "file:a"])
+        #expect(state.owners(of: "solo") == ["file:a"])
+
+        state.releaseClaim(on: "held", by: "file:a")
+        state.releaseClaim(on: "solo", by: "file:a")
+        #expect(state.owners(of: "held") == [ProjectState.userOwner])
+        #expect(state.owners(of: "solo") == ["file:a"])
+    }
 }

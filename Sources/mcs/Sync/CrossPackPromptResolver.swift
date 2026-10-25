@@ -404,7 +404,7 @@ struct UnresolvedPrompt: Equatable {
 /// values commonly hold secrets, and this message lands in CI logs.
 struct PromptResolutionError: Error, Equatable, LocalizedError {
     let unresolved: [UnresolvedPrompt]
-    /// Bootstrap seeds project scope only, so the remedy differs by scope.
+    /// Global packs are seeded from entries routed to global scope, so the remedy differs by scope.
     let isGlobalScope: Bool
 
     var errorDescription: String? {
@@ -415,7 +415,8 @@ struct PromptResolutionError: Error, Equatable, LocalizedError {
         ["Cannot resolve \(unresolved.count) prompt value(s) without an interactive terminal:"]
             + unresolved.map { "  - \($0.packNames.joined(separator: ", ")): \($0.key)" }
             + [isGlobalScope
-                ? "Re-run 'mcs sync --global' from a terminal to answer them; later unattended runs reuse the answers."
+                ? "Declare them under 'values:' on a global entry in \(BootstrapFile.defaultFilename) and run"
+                + " 'mcs bootstrap', or re-run 'mcs sync --global' from a terminal."
                 : "Declare them under 'values:' in \(BootstrapFile.defaultFilename) and run 'mcs bootstrap',"
                 + " or re-run from a terminal."]
     }
