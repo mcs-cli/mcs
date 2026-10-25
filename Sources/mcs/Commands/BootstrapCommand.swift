@@ -648,17 +648,7 @@ struct BootstrapCommand: LockedCommand {
             throw ExitCode.failure
         }
 
-        // Installing globally what this project also holds is the state `ScopeDuplicationCheck`
-        // fails on. Under --prune the project run drops it, so the pack moves instead.
-        let moving = routed.global.map(\.pack)
-            .filter { projectState?.configuredPacks.contains($0.identifier) == true }
-        if !moving.isEmpty, !prune {
-            output.error("\(fileName) routes these packs to global scope, but this project already configures them:")
-            output.plain("  \(moving.map(\.displayName).sorted().joined(separator: ", "))")
-            output.plain("  Deselect them in this project with 'mcs sync' first, or run 'mcs bootstrap --prune' to move them —")
-            output.plain("  --prune also removes every project pack \(fileName) doesn't list.")
-            throw ExitCode.failure
-        }
+        try rejectUnprunedMoves(routed.global.map(\.pack), projectState: projectState, output: output)
 
         func makePlan(
             _ entries: [RoutedEntry],
@@ -825,6 +815,19 @@ struct BootstrapCommand: LockedCommand {
             throw ExitCode.failure
         }
         return routed
+    }
+
+    /// Installing globally what this project also holds is the state `ScopeDuplicationCheck` fails
+    /// on. Under --prune the project run drops it, so the pack moves instead.
+    private func rejectUnprunedMoves(_ globalPacks: [any TechPack], projectState: ProjectState?, output: CLIOutput) throws {
+        let moving = globalPacks.filter { projectState?.configuredPacks.contains($0.identifier) == true }
+        guard !moving.isEmpty, !prune else { return }
+        let fileName = BootstrapFile.defaultFilename
+        output.error("\(fileName) routes these packs to global scope, but this project already configures them:")
+        output.plain("  \(moving.map(\.displayName).sorted().joined(separator: ", "))")
+        output.plain("  Deselect them in this project with 'mcs sync' first, or run 'mcs bootstrap --prune' to move them —")
+        output.plain("  --prune also removes every project pack \(fileName) doesn't list.")
+        throw ExitCode.failure
     }
 
     /// Claim the packs this file declared for global scope and, under a global `--prune`, release
