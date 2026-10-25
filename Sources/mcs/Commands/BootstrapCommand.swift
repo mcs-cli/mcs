@@ -616,6 +616,9 @@ struct BootstrapCommand: LockedCommand {
         }
 
         let prunesGlobal = prune && fileScope == .global
+        // Only a global file may prune global packs, so it keeps a sole claim to retry the removal.
+        // Any other file can never remove one, so a pack it no longer lists becomes the user's.
+        let claimHeir: String? = fileScope == .global ? nil : ProjectState.userOwner
         let runsGlobal = !routed.global.isEmpty || prunesGlobal
         let runsProject = fileScope != .global && (file.routesToProject || prune)
         if runsProject, !file.routesToProject {
@@ -733,28 +736,17 @@ struct BootstrapCommand: LockedCommand {
             }
         }
 
+        let declaredGlobal = Set(routed.global.map(\.pack.identifier))
         for plan in plans {
-            guard plan.scope == .global, !dryRun else {
-                try converge(plan, projectRoot: projectRoot, env: env, output: output)
-                continue
-            }
-            let declaredGlobal = Set(routed.global.map(\.pack.identifier))
-            do {
-                try converge(plan, projectRoot: projectRoot, env: env, output: output)
-            } catch {
-                // Whatever did install before the failure is still this file's, or the file
-                // could never retire it.
-                do {
-                    try recordOwnership(
-                        owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: false, env: env
-                    )
-                } catch let recordError {
-                    output.warn("Could not record which packs \(fileName) installed: \(recordError.localizedDescription)")
-                }
-                throw error
-            }
+            try converge(
+                plan, declaredGlobal: declaredGlobal, owner: owner, heir: claimHeir,
+                projectRoot: projectRoot, env: env, output: output
+            )
+        }
+        // A file that routes nothing to global anymore still lets go of what it once installed there.
+        if !dryRun, !runsGlobal {
             try recordOwnership(
-                owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: prunesGlobal, env: env
+                owner: owner, declared: [], before: globalState, releasingUndeclared: true, heir: claimHeir, env: env
             )
         }
         if !dryRun {
@@ -764,7 +756,9 @@ struct BootstrapCommand: LockedCommand {
 
         // Global extras are divergence only when this file installed them; anything else there
         // is the user's own or another file's.
-        for plan in plans {
+        // A non-global file hands its undeclared global packs to the user, so only a global file
+        // can still own one it no longer lists.
+        for plan in plans where plan.scope == .project || fileScope == .global {
             let extras = plan.scope == .project
                 ? plan.keptExtras
                 : plan.keptExtras.filter { plan.state.owners(of: $0).contains(owner) }
@@ -810,7 +804,7 @@ struct BootstrapCommand: LockedCommand {
                 output.error("Pack '\(id)' declared in \(BootstrapFile.defaultFilename) failed to load.")
             }
             for (pack, target) in unsupported {
-                output.error(Self.misroutedMessage(pack: pack, target: target))
+                output.error(Self.misroutedMessage(pack: pack, target: target, fileScope: fileScope))
             }
             throw ExitCode.failure
         }
@@ -838,35 +832,83 @@ struct BootstrapCommand: LockedCommand {
         declared: Set<String>,
         before: ProjectState,
         releasingUndeclared: Bool,
+        heir: String?,
         env: Environment
     ) throws {
         var state = try ProjectState(stateFile: env.globalStateFile)
+        var changed = false
+        func update(_ packID: String, _ change: (inout ProjectState) -> Void) {
+            let prior = state.owners(of: packID)
+            change(&state)
+            changed = changed || state.owners(of: packID) != prior
+        }
         // Only what is configured now: a claim on a pack that never installed would make it this
         // file's when the user adds it by hand later.
         for packID in declared where state.configuredPacks.contains(packID) {
-            state.claim(packID, by: owner, wasConfigured: before.configuredPacks.contains(packID))
+            update(packID) { $0.claim(packID, by: owner, wasConfigured: before.configuredPacks.contains(packID)) }
         }
         if releasingUndeclared {
             for packID in state.configuredPacks.subtracting(declared) where state.owners(of: packID).contains(owner) {
-                state.releaseClaim(on: packID, by: owner)
+                update(packID) { $0.releaseClaim(on: packID, by: owner, heir: heir) }
             }
         }
-        try state.save()
+        // A repeated run must not rewrite global state.
+        if changed {
+            try state.save()
+        }
     }
 
     /// Bootstrap re-asserts the file every run, so unlike `mcs update` it fails on a pack whose
     /// `scopes:` no longer allows its entry's scope, and the remedy is an edit to the file.
-    static func misroutedMessage(pack: any TechPack, target: PackScope) -> String {
+    static func misroutedMessage(pack: any TechPack, target: PackScope, fileScope: PackScope?) -> String {
         let supported = PackScope.allCases.filter(pack.supportedScopes.contains)
         let file = BootstrapFile.defaultFilename
         guard let only = supported.first else {
             return "Pack '\(pack.displayName)' declares no valid `scopes:` value — remove it from \(file)"
         }
-        let remedy = supported.count == 1
-            ? "set this entry's `scope: \(only.rawValue)` or remove it from \(file)"
-            : "remove it from \(file)"
+        let remedy = if supported.count > 1 {
+            "remove it from \(file)"
+        } else if only == .project, fileScope == .global {
+            // A global file rejects `scope: project` entries, so the pack belongs in a project's file.
+            "remove it from \(file), or list it in a project's \(file)"
+        } else {
+            "set this entry's `scope: \(only.rawValue)` or remove it from \(file)"
+        }
         return "Pack '\(pack.displayName)' supports only \(supported.map(\.rawValue).joined(separator: ", "))"
             + " but \(file) routes it to \(target.rawValue) scope — \(remedy)"
+    }
+
+    /// Converge one scope; for global, record this file's claims afterwards — and on failure too,
+    /// since whatever did install is still this file's, or the file could never retire it.
+    private func converge(
+        _ plan: ScopePlan,
+        declaredGlobal: Set<String>,
+        owner: String,
+        heir: String?,
+        projectRoot: URL,
+        env: Environment,
+        output: CLIOutput
+    ) throws {
+        guard plan.scope == .global, !dryRun else {
+            try converge(plan, projectRoot: projectRoot, env: env, output: output)
+            return
+        }
+        do {
+            try converge(plan, projectRoot: projectRoot, env: env, output: output)
+        } catch {
+            do {
+                try recordOwnership(
+                    owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: false,
+                    heir: nil, env: env
+                )
+            } catch let recordError {
+                output.warn("Could not record which packs \(BootstrapFile.defaultFilename) installed: \(recordError.localizedDescription)")
+            }
+            throw error
+        }
+        try recordOwnership(
+            owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: true, heir: heir, env: env
+        )
     }
 
     private func converge(_ plan: ScopePlan, projectRoot: URL, env: Environment, output: CLIOutput) throws {
