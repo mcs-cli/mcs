@@ -818,7 +818,8 @@ struct UpdateCheckerIgnoreFieldTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: ignore
+            ignore: ignore,
+            scopes: nil
         )
     }
 

@@ -1769,7 +1769,8 @@ extension LifecycleTestBed {
                 prompts: prompts,
                 configureProject: nil,
                 supplementaryDoctorChecks: nil,
-                ignore: nil
+                ignore: nil,
+                scopes: nil
             ),
             packPath: home,
             shell: ShellRunner(environment: env),

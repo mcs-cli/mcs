@@ -21,7 +21,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: ignore
+            ignore: ignore,
+            scopes: nil
         )
     }
 
@@ -621,7 +622,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -836,7 +838,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -863,7 +866,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -906,7 +910,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -934,7 +939,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "scripts/configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -1112,7 +1118,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: ["docs/"]
+            ignore: ["docs/"],
+            scopes: nil
         )
         let ignoredFindings = PackHeuristics.check(manifest: manifestWithIgnore, packPath: tmpDir)
         let ignoredDocsWarnings = ignoredFindings.filter { $0.message.contains("docs/guide.md") }
@@ -1149,7 +1156,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: ["assets/*.png"]
+            ignore: ["assets/*.png"],
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
         // logo.png matches the glob → silenced; notes.txt is still flagged.

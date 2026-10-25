@@ -24,7 +24,7 @@ struct ExternalPackManifest: Codable {
     /// `validate()` rejects those at publish time and the runtime loader strips them defensively.
     let ignore: [String]?
     /// Scopes the pack may be installed into (`project`, `global`). Absent means both.
-    var scopes: [String]?
+    let scopes: [String]?
 }
 
 // MARK: - Loading

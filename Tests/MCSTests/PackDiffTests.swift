@@ -84,7 +84,8 @@ struct PackDiffTests {
             prompts: prompts,
             configureProject: configureProject,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
     }
 
