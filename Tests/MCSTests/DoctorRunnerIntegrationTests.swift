@@ -161,7 +161,8 @@ struct DoctorRunnerIntegrationTests {
                     keyPath: nil, expectedValue: nil, isOptional: false
                 ),
             ],
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         return ExternalPackAdapter(
             manifest: manifest,

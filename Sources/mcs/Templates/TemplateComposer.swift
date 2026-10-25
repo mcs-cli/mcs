@@ -108,10 +108,8 @@ enum TemplateComposer {
                     unpaired.append(previous)
                 }
                 openSections.append(identifier)
-            } else if let identifier = parseEndMarker(line) {
-                if openSections.last == identifier {
-                    openSections.removeLast()
-                }
+            } else if let identifier = parseEndMarker(line), openSections.last == identifier {
+                openSections.removeLast()
             }
         }
 

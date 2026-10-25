@@ -245,8 +245,8 @@ private struct LifecycleTestBed {
     }
 
     /// Every hook command composed into the project's settings under `event`.
-    func hookCommands(event: String) throws -> [String] {
-        let settings = try Settings.load(from: settingsLocalPath)
+    func hookCommands(event: String, in settingsPath: URL? = nil) throws -> [String] {
+        let settings = try Settings.load(from: settingsPath ?? settingsLocalPath)
         return (settings.hooks?[event] ?? []).flatMap { $0.hooks ?? [] }.compactMap(\.command)
     }
 
@@ -1769,7 +1769,8 @@ extension LifecycleTestBed {
                 prompts: prompts,
                 configureProject: nil,
                 supplementaryDoctorChecks: nil,
-                ignore: nil
+                ignore: nil,
+                scopes: nil
             ),
             packPath: home,
             shell: ShellRunner(environment: env),
@@ -3931,6 +3932,7 @@ struct BootstrapMigrationPersistenceTests {
 }
 
 private struct TemplateFailingPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String = "Template Failing Pack"
     let description: String = "A pack whose templates throw"
@@ -4844,5 +4846,193 @@ struct PluginScopeLifecycleTests {
         var runner = bed.makeDoctorRunner(registry: registry, fixMode: true)
         #expect(try runner.run().isHealthy)
         #expect(bed.mockCLI.pluginInstallCalls.count == 2)
+    }
+}
+
+// MARK: - Pack scope support
+
+struct PackScopeLifecycleTests {
+    private func globalHookCommands(_ bed: LifecycleTestBed) throws -> [String] {
+        try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue, in: bed.env.claudeSettings)
+    }
+
+    private func hookedPack(
+        _ id: String, bed: LifecycleTestBed, scopes: Set<PackScope> = Set(PackScope.allCases)
+    ) throws -> MockTechPack {
+        try MockTechPack(
+            identifier: id,
+            displayName: id,
+            components: [bed.hookComponent(
+                pack: id, id: "hook", source: bed.makeHookSource(name: "\(id).sh"), destination: "\(id).sh",
+                hookRegistration: HookRegistration(event: .preToolUse)
+            )],
+            supportedScopes: scopes
+        )
+    }
+
+    private func syncGlobal(_ arguments: [String], bed: LifecycleTestBed, registry: TechPackRegistry) throws {
+        try SyncCommand.parse(["--global"] + arguments).syncRequestedPacks(
+            configurator: bed.makeGlobalSyncConfigurator(registry: registry),
+            registry: registry,
+            previouslyConfigured: bed.globalState().configuredPacks,
+            globallyInstalled: nil,
+            scopeLabel: "Global",
+            targetPath: bed.env.claudeDirectory.path,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+    }
+
+    @Test("sync --global --pack rejects a project-only pack before touching global scope")
+    func globalRejectsProjectOnlyPack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let existing = try hookedPack("existing", bed: bed)
+        let projectOnly = try hookedPack("project-only", bed: bed, scopes: [.project])
+        let registry = TechPackRegistry(packs: [existing, projectOnly])
+        try syncGlobal(["--pack", "existing"], bed: bed, registry: registry)
+        let commandsBefore = try globalHookCommands(bed)
+
+        #expect(throws: PackScopeError.self) {
+            try syncGlobal(["--pack", "project-only"], bed: bed, registry: registry)
+        }
+        #expect(throws: PackScopeError.self) {
+            try syncGlobal(["--pack", "project-only", "--dry-run"], bed: bed, registry: registry)
+        }
+
+        #expect(try bed.globalState().configuredPacks == ["existing"])
+        #expect(try globalHookCommands(bed) == commandsBefore)
+        let hook = bed.env.hooksDirectory.appendingPathComponent("project-only/project-only.sh")
+        #expect(!FileManager.default.fileExists(atPath: hook.path))
+    }
+
+    @Test("sync --pack names a global-only pack's scope conflict instead of pruning the project")
+    func namedGlobalOnlyPackFailsBeforeGlobalBlockFilter() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let local = try hookedPack("local", bed: bed)
+        let machine = try hookedPack("machine", bed: bed, scopes: [.global])
+        let registry = TechPackRegistry(packs: [local, machine])
+        try bed.makeConfigurator(registry: registry).configure(packs: [local], confirmRemovals: false)
+        try syncGlobal(["--pack", "machine"], bed: bed, registry: registry)
+
+        #expect(throws: PackScopeError.self) {
+            try SyncCommand.parse(["--pack", "machine", "--prune", "--yes"]).syncRequestedPacks(
+                configurator: bed.makeConfigurator(registry: registry),
+                registry: registry,
+                previouslyConfigured: bed.projectState().configuredPacks,
+                globallyInstalled: bed.globalState().configuredPacks,
+                scopeLabel: "Project",
+                targetPath: bed.project.path,
+                output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+            )
+        }
+        #expect(try bed.projectState().configuredPacks == ["local"])
+    }
+
+    @Test("Configurator itself rejects adding a project-only pack globally and writes nothing")
+    func configuratorGateRejectsBeforeWriting() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let projectOnly = try hookedPack("project-only", bed: bed, scopes: [.project])
+        let registry = TechPackRegistry(packs: [projectOnly])
+
+        let error = #expect(throws: PackScopeError.self) {
+            try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [projectOnly], confirmRemovals: false)
+        }
+        #expect(error?.errorDescription?.contains("supports project only") == true)
+        #expect(try bed.globalState().configuredPacks.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: bed.env.hooksDirectory.appendingPathComponent("project-only").path))
+        if FileManager.default.fileExists(atPath: bed.env.claudeSettings.path) {
+            #expect(try globalHookCommands(bed).isEmpty)
+        }
+    }
+
+    @Test("sync --global --all skips a project-only pack and installs the rest")
+    func globalAllSkipsProjectOnlyPack() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let shared = try hookedPack("shared", bed: bed)
+        let projectOnly = try hookedPack("project-only", bed: bed, scopes: [.project])
+        let registry = TechPackRegistry(packs: [shared, projectOnly])
+
+        try syncGlobal(["--all"], bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["shared"])
+    }
+
+    @Test("A pack without scopes installs in both scopes")
+    func unscopedPackInstallsInBothScopes() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try hookedPack("anywhere", bed: bed)
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        #expect(try bed.projectState().configuredPacks == ["anywhere"])
+        #expect(try bed.globalState().configuredPacks == ["anywhere"])
+    }
+
+    @Test("A project-only pack already in global scope survives a re-sync and doctor warns")
+    func preexistingUnsupportedPackSurvives() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let legacy = try hookedPack("legacy", bed: bed)
+        let other = try hookedPack("other", bed: bed)
+        let before = TechPackRegistry(packs: [legacy, other])
+        try bed.makeGlobalSyncConfigurator(registry: before)
+            .configure(packs: [legacy, other], confirmRemovals: false)
+        let baseline = try bed.runGlobalDoctor(registry: before)
+        let commands = try globalHookCommands(bed)
+        #expect(commands.count == 2)
+
+        // The pack now declares `scopes: [project]`; `mcs update` re-applies the scope's own set.
+        let restricted = try hookedPack("legacy", bed: bed, scopes: [.project])
+        let after = TechPackRegistry(packs: [restricted, other])
+        try bed.makeGlobalSyncConfigurator(registry: after)
+            .configure(packs: [restricted, other], confirmRemovals: false)
+
+        #expect(try bed.globalState().configuredPacks == ["legacy", "other"])
+        #expect(try globalHookCommands(bed) == commands)
+        #expect(try bed.runGlobalDoctor(registry: after).warnings == baseline.warnings + 1)
+    }
+
+    @Test("In-project doctor reports a both-scope pack's unsupported global copy and won't drop the project one")
+    func bothScopePackNarrowedToProject() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let shared = try hookedPack("shared", bed: bed)
+        let before = TechPackRegistry(packs: [shared])
+        try bed.makeConfigurator(registry: before).configure(packs: [shared], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: before).configure(packs: [shared], confirmRemovals: false)
+        let baseline = try bed.runDoctor(registry: before)
+
+        let narrowed = try TechPackRegistry(packs: [hookedPack("shared", bed: bed, scopes: [.project])])
+        #expect(try bed.runDoctor(registry: narrowed).warnings == baseline.warnings + 1)
+
+        let duplication = try #require(ScopeDuplicationCheck.checks(
+            projectRoot: bed.project, registry: narrowed, environment: bed.env, packFilter: nil
+        ).first)
+        #expect(duplication.fixCommandPreview == nil)
+        guard case let .fail(message) = duplication.check() else {
+            Issue.record("expected a failing duplication check")
+            return
+        }
+        #expect(message.contains("no longer supports global scope"))
+    }
+
+    @Test("doctor --pack does not flag a global-only pack that is only installed globally")
+    func packFilterHasNoScopeFalsePositive() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let machine = try hookedPack("machine", bed: bed, scopes: [.global])
+        let registry = TechPackRegistry(packs: [machine])
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [machine], confirmRemovals: false)
+
+        let unrestricted = try TechPackRegistry(packs: [hookedPack("machine", bed: bed)])
+        var baseline = bed.makeDoctorRunner(registry: unrestricted, packFilter: "machine")
+        var filtered = bed.makeDoctorRunner(registry: registry, packFilter: "machine")
+        #expect(try filtered.run().warnings == baseline.run().warnings)
     }
 }

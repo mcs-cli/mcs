@@ -36,6 +36,10 @@ struct Configurator {
         strategy.scope
     }
 
+    var packScope: PackScope {
+        scope.packScope
+    }
+
     // MARK: - Interactive Flow
 
     /// Full interactive configure flow — multi-select of registered packs.
@@ -81,18 +85,32 @@ struct Configurator {
             globallyInstalled: globallyInstalledPacks,
             previouslyConfigured: previousPacks
         )
-        let selectablePacks = packs.filter { !blocked.contains($0.identifier) }
+        let unsupportedPacks = ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previousPacks
+        )
+        let unsupported = Set(unsupportedPacks.map(\.identifier))
+        let selectablePacks = packs.filter { !blocked.contains($0.identifier) && !unsupported.contains($0.identifier) }
         let lockedNames = packs.filter { blocked.contains($0.identifier) }.map(\.displayName)
 
-        // Every registered pack is global, so the picker would have no selectable rows —
-        // and `interactiveMultiSelect` returns before rendering when it has none, hiding
-        // the locked section entirely. Explain here, where the reason is known.
-        // `previousPacks.isEmpty` keeps stale configured packs converging as before.
-        if selectablePacks.isEmpty, !lockedNames.isEmpty, previousPacks.isEmpty {
+        if !unsupportedPacks.isEmpty {
             output.plain("")
-            output.info("All registered packs are already installed globally:")
-            output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
-            output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            output.info("Not available in \(scope.packScope.rawValue) scope:")
+            output.plain("  \(unsupportedPacks.map(\.displayName).sorted().joined(separator: ", "))")
+        }
+
+        // The picker would have no selectable rows — and `interactiveMultiSelect` returns
+        // before rendering when it has none, hiding the locked section entirely. Explain here,
+        // where the reason is known. `previousPacks.isEmpty` keeps stale configured packs
+        // converging as before.
+        if selectablePacks.isEmpty, previousPacks.isEmpty {
+            output.plain("")
+            if lockedNames.isEmpty {
+                output.info("No registered pack can be installed in \(scope.packScope.rawValue) scope.")
+            } else {
+                output.info("All registered packs are already installed globally:")
+                output.plain("  \(lockedNames.sorted().joined(separator: ", "))")
+                output.plain("  They already apply here. Run 'mcs sync --global' to manage them.")
+            }
             return
         }
 
@@ -172,6 +190,7 @@ struct Configurator {
     /// Compute and display what `configure` would do, without making any changes.
     func dryRun(packs: [any TechPack], seededValues: [String: String] = [:]) throws {
         let state = try ProjectState(stateFile: scope.stateFile)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -233,6 +252,7 @@ struct Configurator {
         seededValues: [String: String] = [:]
     ) throws {
         var state = try ProjectState(stateFile: scope.stateFile)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -755,6 +775,14 @@ struct Configurator {
 
         state.setResolvedValues(allValues)
         return allValues
+    }
+
+    private func checkScopeSupport(packs: [any TechPack], previouslyConfigured: Set<String>) throws {
+        let rejected = ConfiguratorSupport.scopeUnsupported(
+            packs, scope: scope.packScope, previouslyConfigured: previouslyConfigured
+        )
+        guard !rejected.isEmpty else { return }
+        throw PackScopeError(packs: rejected, scope: scope.packScope)
     }
 
     /// The non-interactive preflight over the values `configure` will resolve against:

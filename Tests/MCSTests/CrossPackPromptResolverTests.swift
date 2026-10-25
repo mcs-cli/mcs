@@ -257,7 +257,8 @@ struct CrossPackPromptResolverTests {
             ],
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let adapter = ExternalPackAdapter(
             manifest: manifest,
@@ -1063,6 +1064,7 @@ struct PartitionDeclaredPromptsTests {
 
 /// A mock TechPack that supports declaredPrompts for testing cross-pack dedup.
 private struct PromptMockPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String
     let description: String = "Mock pack for prompt tests"

@@ -72,6 +72,39 @@ struct ExternalPackLoaderTests {
 
     // MARK: - Validate
 
+    @Test("Runtime sanitizing keeps a pack's scopes; strict validation rejects an unknown one")
+    func scopesSurviveSanitizingAndFailStrictly() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let loader = ExternalPackLoader(environment: env, registry: PackRegistryFile(path: env.packsRegistry))
+
+        func pack(_ name: String, scopes: String, ignore: String = "[]") throws -> URL {
+            let dir = tmpDir.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try """
+            schemaVersion: 1
+            identifier: \(name)
+            displayName: Test
+            description: Test
+            scopes: \(scopes)
+            ignore: \(ignore)
+            """.write(to: dir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8)
+            return dir
+        }
+
+        // The forbidden `ignore:` entry makes the runtime sanitizer rebuild the manifest.
+        let sanitized = try loader.validate(
+            at: pack("project-only", scopes: "[project]", ignore: "[techpack.yaml]"),
+            sanitizeOutput: CLIOutput(colorsEnabled: false)
+        )
+        #expect(sanitized.supportedScopes == [.project])
+
+        #expect(throws: (any Error).self) {
+            try loader.validate(at: pack("typo", scopes: "[machine]"))
+        }
+    }
+
     @Test("Validate succeeds for a minimal valid manifest")
     func validateMinimalManifest() throws {
         let tmpDir = try makeTmpDir()

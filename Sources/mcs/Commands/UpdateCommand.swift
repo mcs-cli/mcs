@@ -211,8 +211,7 @@ struct UpdateCommand: LockedCommand {
         runs: [UpdateScopeResolver.ScopeRun],
         output: CLIOutput
     ) {
-        guard filter == .all else { return }
-        guard !runs.contains(where: { !$0.isGlobal }) else { return }
+        guard filter == .all, !runs.contains(where: { !$0.isGlobal }) else { return }
 
         if let projectRoot {
             output.warn("Project at \(projectRoot.path) has no configured packs — only refreshing the global scope.")

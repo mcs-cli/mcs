@@ -691,6 +691,7 @@ struct CLAUDEMDFreshnessCheckTests {
 // MARK: - Test doubles
 
 private struct StubTechPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String = "Stub Pack"
     let description: String = "A stub pack for testing"
@@ -705,6 +706,7 @@ private struct StubTechPack: TechPack {
 }
 
 private struct ThrowingTechPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String = "Throwing Pack"
     let description: String = "A pack whose templates throw"

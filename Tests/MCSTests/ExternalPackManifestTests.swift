@@ -1439,7 +1439,8 @@ struct ExternalPackManifestTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
 
         #expect(throws: ManifestError.templateSectionMismatch(
@@ -2455,7 +2456,8 @@ struct ExternalPackManifestTests {
             prompts: nil,
             configureProject: configureProject,
             supplementaryDoctorChecks: nil,
-            ignore: ignore
+            ignore: ignore,
+            scopes: nil
         )
     }
 
@@ -2706,10 +2708,59 @@ struct ExternalPackManifestTests {
         #expect(Set(labels) == [
             // Metadata — not diffed, references no files.
             "schemaVersion", "identifier", "displayName", "description", "author", "minMCSVersion",
-            "ignore",
+            "ignore", "scopes",
             // Author-visible surfaces — each needs a `PackDiff.Kind` case, and any that names a
             // file needs a `referencedSource` folded into `referencedPaths`.
             "components", "templates", "prompts", "configureProject", "supplementaryDoctorChecks",
         ])
+    }
+
+    // MARK: - Scopes
+
+    private func scopedManifest(_ scopesLine: String) throws -> ExternalPackManifest {
+        try loadManifest("""
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        \(scopesLine)
+        """)
+    }
+
+    @Test("A pack without scopes supports both")
+    func scopesDefaultToBoth() throws {
+        let manifest = try scopedManifest("")
+        try manifest.validate()
+        #expect(manifest.supportedScopes == [.project, .global])
+    }
+
+    @Test("Declared scopes restrict the pack")
+    func scopesRestrict() throws {
+        let manifest = try scopedManifest("scopes: [project]")
+        try manifest.validate()
+        #expect(manifest.supportedScopes == [.project])
+    }
+
+    @Test("Publish validation rejects an empty or unknown scopes list", arguments: ["scopes: []", "scopes: [project, machine]"])
+    func scopesRejectInvalid(line: String) throws {
+        let manifest = try scopedManifest(line)
+        #expect(throws: ManifestError.self) {
+            try manifest.validateScopes()
+        }
+    }
+
+    @Test("Unknown scopes are ignored at runtime, and a list with none supports no scope")
+    func scopesFailClosed() throws {
+        let counter = WarningCounter()
+        let output = CLIOutput(colorsEnabled: false, warningCounter: counter)
+
+        let partial = try scopedManifest("scopes: [global, machine]")
+        partial.reportInvalidScopes(output: output)
+        #expect(partial.supportedScopes == [.global])
+
+        let none = try scopedManifest("scopes: [machine]")
+        none.reportInvalidScopes(output: output)
+        #expect(none.supportedScopes.isEmpty)
+        #expect(counter.count == 3)
     }
 }

@@ -537,12 +537,8 @@ struct UpdateChecker {
         )
 
         guard result.succeeded,
-              let latestTag = Self.parseLatestTag(from: result.stdout)
-        else {
-            return nil
-        }
-
-        guard VersionCompare.isNewer(candidate: latestTag, than: currentVersion) else {
+              let latestTag = Self.parseLatestTag(from: result.stdout),
+              VersionCompare.isNewer(candidate: latestTag, than: currentVersion) else {
             return nil
         }
 

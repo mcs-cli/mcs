@@ -31,6 +31,7 @@ enum PackHeuristics {
         findings += checkUninstalledHookRuntimes(components: components)
         findings += checkHookDoctorCheckInterpreters(manifest: manifest, components: components)
         findings += checkDeprecatedKeys(manifest: manifest, components: components)
+        findings += checkProjectOnlyFeatures(manifest: manifest, packPath: packPath)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
         // (not for the IO-failure warnings that share the same severity).
@@ -50,6 +51,39 @@ enum PackHeuristics {
     static let unreferencedMarker = "is not referenced"
 
     // MARK: - Individual Checks
+
+    /// Warns when a pack that allows global scope relies on features global sync skips.
+    private static func checkProjectOnlyFeatures(manifest: ExternalPackManifest, packPath: URL) -> [Finding] {
+        guard manifest.supportedScopes.contains(.global) else { return [] }
+
+        var findings: [Finding] = []
+        var features: [String] = []
+        if manifest.configureProject != nil {
+            features.append("`configureProject`")
+        }
+        if manifest.prompts?.contains(where: { $0.type == .fileDetect }) == true {
+            features.append("`fileDetect` prompts")
+        }
+        // Same scan sync uses to find placeholders, so every file a pack ships is covered.
+        let referenced = ConfiguratorSupport.referencedPlaceholderKeys(
+            packs: [ExternalPackAdapter(manifest: manifest, packPath: packPath)],
+            includeTemplates: true,
+            onWarning: { findings.append(Finding(severity: .warning, message: $0)) }
+        )
+        let projectOnly = ProjectSyncStrategy.builtInKeys.filter(referenced.contains)
+        if !projectOnly.isEmpty {
+            features.append(projectOnly.map { "`__\($0)__`" }.joined(separator: " / "))
+        }
+
+        if !features.isEmpty {
+            findings.append(Finding(
+                severity: .warning,
+                message: "Pack uses project-only features (\(features.joined(separator: ", "))) but allows"
+                    + " global scope, where they are skipped or left unresolved. Declare `scopes: [project]`."
+            ))
+        }
+        return findings
+    }
 
     /// Warns about keys that are still accepted but no longer do anything, so an author does not
     /// believe a component is optional or ordered by a dependency graph.

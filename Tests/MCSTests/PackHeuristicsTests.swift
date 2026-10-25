@@ -21,7 +21,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: ignore
+            ignore: ignore,
+            scopes: nil
         )
     }
 
@@ -621,7 +622,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -836,7 +838,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -863,7 +866,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -906,7 +910,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -934,7 +939,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: ExternalConfigureProject(script: "scripts/configure.sh"),
             supplementaryDoctorChecks: nil,
-            ignore: nil
+            ignore: nil,
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
 
@@ -1112,7 +1118,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: ["docs/"]
+            ignore: ["docs/"],
+            scopes: nil
         )
         let ignoredFindings = PackHeuristics.check(manifest: manifestWithIgnore, packPath: tmpDir)
         let ignoredDocsWarnings = ignoredFindings.filter { $0.message.contains("docs/guide.md") }
@@ -1149,7 +1156,8 @@ struct PackHeuristicsTests {
             prompts: nil,
             configureProject: nil,
             supplementaryDoctorChecks: nil,
-            ignore: ["assets/*.png"]
+            ignore: ["assets/*.png"],
+            scopes: nil
         )
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
         // logo.png matches the glob → silenced; notes.txt is still flagged.
@@ -1423,5 +1431,46 @@ struct PackHeuristicsTests {
         #expect(deprecations.contains { $0.contains("'test-pack.tool'") && $0.contains("`isRequired`") })
         #expect(deprecations.contains { $0.contains("'test-pack.tool'") && $0.contains("`dependencies`") })
         #expect(deprecations.contains { $0.contains("'test-pack.main'") && $0.contains("`dependencies`") })
+    }
+
+    // MARK: - Project-only features
+
+    private func templatedManifest(content: String, scopes: [String]?, in dir: URL) throws -> ExternalPackManifest {
+        try content.write(to: dir.appendingPathComponent("template.md"), atomically: true, encoding: .utf8)
+        return ExternalPackManifest(
+            schemaVersion: 1,
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            description: "A test pack",
+            author: nil,
+            minMCSVersion: nil,
+            components: nil,
+            templates: [ExternalTemplateDefinition(sectionIdentifier: "test-pack.main", placeholders: nil, contentFile: "template.md")],
+            prompts: nil,
+            configureProject: nil,
+            supplementaryDoctorChecks: nil,
+            ignore: nil,
+            scopes: scopes
+        )
+    }
+
+    @Test("Warns when a pack allowing global scope uses project-only placeholders")
+    func projectOnlyPlaceholderWarns() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = try templatedManifest(content: "Repo: __REPO_NAME__", scopes: nil, in: tmpDir)
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains { $0.severity == .warning && $0.message.contains("`__REPO_NAME__`") })
+    }
+
+    @Test("A project-only pack may use project-only placeholders")
+    func projectOnlyPlaceholderSilentWhenDeclared() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let manifest = try templatedManifest(content: "Repo: __REPO_NAME__", scopes: ["project"], in: tmpDir)
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("project-only features") })
     }
 }

@@ -327,8 +327,24 @@ struct SyncCommand: LockedCommand {
         targetPath: String,
         output: CLIOutput
     ) throws {
+        var requested = try resolvePacks(from: registry, output: output)
+        // `--all` means every pack that fits this scope. A named `--pack` that doesn't fit fails
+        // here, ahead of the global-block filter, so the error names the real conflict.
+        if all {
+            requested = ConfiguratorSupport.filterScopeUnsupported(
+                requested, scope: configurator.packScope,
+                previouslyConfigured: previouslyConfigured, output: output
+            )
+        } else {
+            let rejected = ConfiguratorSupport.scopeUnsupported(
+                requested, scope: configurator.packScope, previouslyConfigured: previouslyConfigured
+            )
+            if !rejected.isEmpty {
+                throw PackScopeError(packs: rejected, scope: configurator.packScope)
+            }
+        }
         let desired = try ConfiguratorSupport.additivePackSet(
-            requested: resolvePacks(from: registry, output: output),
+            requested: requested,
             previouslyConfigured: previouslyConfigured,
             prune: prune || all,
             pruneCommand: global ? "mcs sync --global --pack <pack> --prune" : "mcs sync --pack <pack> --prune",

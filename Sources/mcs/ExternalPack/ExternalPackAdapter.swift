@@ -40,6 +40,10 @@ struct ExternalPackAdapter: TechPack {
         manifest.description
     }
 
+    var supportedScopes: Set<PackScope> {
+        manifest.supportedScopes
+    }
+
     // MARK: - Templates
 
     var templates: [TemplateContribution] {

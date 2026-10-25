@@ -262,6 +262,7 @@ struct DoctorRunner {
         // Layers 3-5: Standalone and project-scoped checks (scope-independent)
         var nonComponentChecks: [any DoctorCheck] = []
         nonComponentChecks += standaloneDoctorChecks()
+        nonComponentChecks += packScopeChecks(projectRoot: globalOnly ? nil : projectRoot, env: env)
         if !globalOnly, let root = projectRoot {
             // Only add project-scoped checks if mcs was used in this project
             let claudeLocalExists = FileManager.default.fileExists(
@@ -359,6 +360,30 @@ struct DoctorRunner {
     }
 
     // MARK: - Scope resolution
+
+    /// One check per pack configured in a scope it does not support, read from each scope's own
+    /// state rather than the check scopes: those fold a both-scope pack into the project, which
+    /// would hide an unsupported global copy, and `--pack` names packs that may not be configured.
+    private func packScopeChecks(projectRoot: URL?, env: Environment) -> [any DoctorCheck] {
+        var configured: [(scope: PackScope, packIDs: Set<String>)] = []
+        // Unreadable state was already reported while resolving check scopes.
+        do {
+            try configured.append((.global, ProjectState(stateFile: env.globalStateFile).configuredPacks))
+        } catch {}
+        if let projectRoot {
+            do {
+                try configured.append((.project, ProjectState(projectRoot: projectRoot).configuredPacks))
+            } catch {}
+        }
+
+        return configured.flatMap { scope, packIDs in
+            packIDs.sorted()
+                .filter { packFilterIDs?.contains($0) ?? true }
+                .compactMap { registry.pack(for: $0) }
+                .filter { !$0.supportedScopes.contains(scope) }
+                .map { PackScopeCheck(packID: $0.identifier, scope: scope) }
+        }
+    }
 
     /// Resolves which packs to check and in which scope(s).
     ///
