@@ -741,13 +741,28 @@ struct BootstrapCommand: LockedCommand {
         }
 
         for plan in plans {
-            try converge(plan, projectRoot: projectRoot, env: env, output: output)
-            if plan.scope == .global, !dryRun {
-                try recordOwnership(
-                    owner: owner, declared: Set(routed.global.map(\.pack.identifier)),
-                    before: plan.state, releasingUndeclared: prunesGlobal, env: env
-                )
+            guard plan.scope == .global, !dryRun else {
+                try converge(plan, projectRoot: projectRoot, env: env, output: output)
+                continue
             }
+            let declaredGlobal = Set(routed.global.map(\.pack.identifier))
+            do {
+                try converge(plan, projectRoot: projectRoot, env: env, output: output)
+            } catch {
+                // Whatever did install before the failure is still this file's, or the file
+                // could never retire it.
+                do {
+                    try recordOwnership(
+                        owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: false, env: env
+                    )
+                } catch let recordError {
+                    output.warn("Could not record which packs \(fileName) installed: \(recordError.localizedDescription)")
+                }
+                throw error
+            }
+            try recordOwnership(
+                owner: owner, declared: declaredGlobal, before: plan.state, releasingUndeclared: prunesGlobal, env: env
+            )
         }
         if !dryRun {
             output.header("Done")
@@ -820,7 +835,9 @@ struct BootstrapCommand: LockedCommand {
         env: Environment
     ) throws {
         var state = try ProjectState(stateFile: env.globalStateFile)
-        for packID in declared {
+        // Only what is configured now: a claim on a pack that never installed would make it this
+        // file's when the user adds it by hand later.
+        for packID in declared where state.configuredPacks.contains(packID) {
             state.claim(packID, by: owner, wasConfigured: before.configuredPacks.contains(packID))
         }
         if releasingUndeclared {

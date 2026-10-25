@@ -3816,6 +3816,45 @@ struct BootstrapIntegrationTests {
         #expect(try bed.globalState().owners(of: "shared") == [ProjectState.userOwner])
     }
 
+    @Test("A global seed for a template placeholder outlives another pack's removal")
+    func globalTemplateSeedSurvivesPrune() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let org = MockTechPack(
+            identifier: "org",
+            displayName: "Org",
+            templates: [TemplateContribution(sectionIdentifier: "org", templateContent: "Org: __ORG__", placeholders: [])]
+        )
+        let retired = MockTechPack(identifier: "retired", displayName: "Retired")
+        let registry = TechPackRegistry(packs: [org, retired])
+        try bootstrap([entry("org", values: ["ORG": "Acme"]), entry("retired")], fileScope: .global, bed: bed, registry: registry)
+
+        try bootstrap(["--prune", "--yes"], [entry("org")], fileScope: .global, bed: bed, registry: registry)
+
+        #expect(try bed.globalState().configuredPacks == ["org"])
+        #expect(try bed.globalState().resolvedValues?["ORG"] == "Acme")
+        #expect(try String(contentsOf: bed.env.globalClaudeMD, encoding: .utf8).contains("Org: Acme"))
+    }
+
+    @Test("An untagged global-only pack already installed globally fails before --prune or --dry-run act")
+    func misroutedGlobalPackFailsBeforePruneAndDryRun() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let local = MockTechPack(identifier: "local", displayName: "Local")
+        let machine = MockTechPack(identifier: "machine", displayName: "Machine", supportedScopes: [.global])
+        let registry = TechPackRegistry(packs: [local, machine])
+        try bed.makeConfigurator(registry: registry).configure(packs: [local], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [machine], confirmRemovals: false)
+
+        for arguments in [["--prune", "--yes"], ["--dry-run"]] {
+            #expect(throws: (any Error).self) {
+                try bootstrap(arguments, [entry("machine")], bed: bed, registry: registry)
+            }
+        }
+        #expect(try bed.projectState().configuredPacks == ["local"])
+        #expect(try bed.globalState().configuredPacks == ["machine"])
+    }
+
     @Test("A configured pack that fails to load fails the run instead of reporting success")
     func unloadablePackFailsTheRun() throws {
         let bed = try LifecycleTestBed()

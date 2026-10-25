@@ -206,9 +206,11 @@ struct ProjectState {
         storage.packOwners?[packID] = current.union([owner]).sorted()
     }
 
-    /// Drop `owner`'s claim; the pack stays configured for whoever else owns it.
+    /// Drop `owner`'s claim when someone else still owns the pack. A sole owner keeps its claim:
+    /// an empty owner list would read as nobody's, so the pack could never be pruned again.
     mutating func releaseClaim(on packID: String, by owner: String) {
         let remaining = owners(of: packID).subtracting([owner])
+        guard !remaining.isEmpty else { return }
         storage.packOwners = storage.packOwners ?? [:]
         storage.packOwners?[packID] = remaining.sorted()
     }
