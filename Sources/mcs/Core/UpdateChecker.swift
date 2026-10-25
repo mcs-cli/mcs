@@ -22,6 +22,7 @@ struct UpdateChecker {
     // MARK: - SessionStart Hook (single source of truth)
 
     static let hookCommand = "mcs check-updates --hook"
+    static let checkedRef = "refs/mcs/update-check"
     static let hookTimeout: Int = 30
     static let hookStatusMessage = "Checking for updates..."
 
@@ -284,10 +285,9 @@ struct UpdateChecker {
     /// upstream change at all, the closure exits without producing an outcome (consistent with
     /// the file-level "Network failures are silently ignored" design goal).
     ///
-    /// Mirrors `PackFetcher.update` for the fetch shape: when `entry.ref == nil`, fetch without
-    /// a ref arg and diff against `origin/HEAD` (more reliable across git servers than passing
-    /// `HEAD` as a positional ref). When `entry.ref` is set, fetch that ref explicitly and diff
-    /// against `FETCH_HEAD`.
+    /// Mirrors `PackFetcher.update` for the fetch shape: fetch `PackFetcher.fetchTarget(entry.ref)`
+    /// into its own ref and diff against it. This runs unlocked from the SessionStart hook, so it
+    /// must not write the ref an update in the same checkout resets to.
     ///
     /// - Parameter manifest: when non-nil, the manifest's `ignore:` list extends the built-in
     ///   deny-list. Callers pre-load manifests once per pack so the parallel `concurrentPerform`
@@ -307,24 +307,17 @@ struct UpdateChecker {
         }
         let workDir = workDirURL.path
 
-        let fetchArgs: [String]
-        let diffTarget: String
-        if let ref = entry.ref {
-            // Refs are read from `registry.yaml`; if user-edited or corrupted, a ref starting
-            // with `-` would be interpreted as a git option (argument injection). Validate
-            // before invoking git; treat invalid refs as a fetch failure so the never-hide
-            // invariant still surfaces a notification.
-            guard isValidGitRef(ref) else { return .unknown(.fetchFailed) }
-            fetchArgs = ["fetch", "--depth", "1", "origin", ref]
-            diffTarget = "FETCH_HEAD"
-        } else {
-            fetchArgs = ["fetch", "--depth", "1", "origin"]
-            diffTarget = "origin/HEAD"
+        // Refs are read from `registry.yaml`; if user-edited or corrupted, a ref starting
+        // with `-` would be interpreted as a git option (argument injection). Validate
+        // before invoking git; treat invalid refs as a fetch failure so the never-hide
+        // invariant still surfaces a notification.
+        if let ref = entry.ref, !isValidGitRef(ref) {
+            return .unknown(.fetchFailed)
         }
 
         let fetchResult = shell.run(
             environment.gitPath,
-            arguments: fetchArgs,
+            arguments: ["fetch", "--depth", "1", "origin", PackFetcher.fetchRefspec(entry.ref, into: Self.checkedRef)],
             workingDirectory: workDir,
             additionalEnvironment: Self.gitNoPromptEnv
         )
@@ -340,7 +333,7 @@ struct UpdateChecker {
         guard isValidGitRef(entry.commitSHA) else { return .unknown(.fetchFailed) }
         let diffResult = shell.run(
             environment.gitPath,
-            arguments: ["diff", "--name-only", entry.commitSHA, diffTarget],
+            arguments: ["diff", "--name-only", entry.commitSHA, Self.checkedRef],
             workingDirectory: workDir,
             additionalEnvironment: Self.gitNoPromptEnv
         )
@@ -391,6 +384,10 @@ struct UpdateChecker {
                         let message = "mcs: skipping update check for '\(entry.identifier)': invalid ref '\(ref)'\n"
                         FileHandle.standardError.write(Data(message.utf8))
                     }
+                    return
+                }
+                // A commit SHA never moves, and `ls-remote` cannot match one anyway.
+                if let ref = entry.ref, PackFetcher.isCommitSHA(ref) {
                     return
                 }
                 let lsRemote = shell.run(
@@ -572,7 +569,7 @@ struct UpdateChecker {
            let cached = loadCache(currentIgnoreHashes: cacheInvalidationHashes),
            let lastCheck = ISO8601DateFormatter().date(from: cached.timestamp),
            Date().timeIntervalSince(lastCheck) < Self.cooldownInterval {
-            return cached.result
+            return Self.droppingStaleUpdates(cached.result, entries: entries)
         }
 
         let packUpdates = checkPacks ? checkPackUpdates(entries: entries, manifests: manifests) : []
@@ -583,6 +580,18 @@ struct UpdateChecker {
         saveCache(result, ignoreHashes: ignoreHashes.isEmpty ? nil : ignoreHashes)
 
         return result
+    }
+
+    /// A cached pack update is stale once its pack is pinned to a commit SHA, which never moves,
+    /// or the registry no longer sits at the commit it was checked from (updated, re-added,
+    /// or removed).
+    static func droppingStaleUpdates(_ result: CheckResult, entries: [PackRegistryFile.PackEntry]) -> CheckResult {
+        let current = Dictionary(entries.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        let live = result.packUpdates.filter { update in
+            guard let entry = current[update.identifier], entry.commitSHA == update.localSHA else { return false }
+            return !(entry.ref.map(PackFetcher.isCommitSHA) ?? false)
+        }
+        return CheckResult(packUpdates: live, cliUpdate: result.cliUpdate)
     }
 
     // MARK: - Output Formatting

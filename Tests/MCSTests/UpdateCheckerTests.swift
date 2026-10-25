@@ -166,9 +166,15 @@ struct UpdateCheckerPerformCheckTests {
         try writeFreshCache(at: env, result: cachedResult)
 
         let checker = makeChecker(home: tmpDir)
-        let result = checker.performCheck(entries: [], checkPacks: true, checkCLI: false)
+        // The registry still sits at the checked commit, so the cached update stays live.
+        let entry = PackRegistryFile.PackEntry(
+            identifier: "cached-pack", displayName: "Cached", author: nil,
+            sourceURL: "https://example.com/cached.git", ref: nil, commitSHA: "aaa",
+            localPath: "cached-pack", addedAt: "2026-01-01T00:00:00Z", trustedScriptHashes: [:], isLocal: nil
+        )
+        let result = checker.performCheck(entries: [entry], checkPacks: true, checkCLI: false)
 
-        // Should return cached result, not do network calls (entries is empty so network would return nothing)
+        // Should return cached result, not do network calls
         #expect(result.packUpdates.count == 1)
         #expect(result.packUpdates.first?.identifier == "cached-pack")
     }
@@ -348,7 +354,7 @@ struct UpdateCheckerOrchestratorTests {
         UpdateChecker(environment: Environment(home: home), shell: mock)
     }
 
-    @Test("nil ref: fetch without ref arg, diff against origin/HEAD (mirrors PackFetcher.update)")
+    @Test("nil ref: fetch the remote's HEAD into its own ref and diff against it")
     func nilRefUsesOriginHEAD() throws {
         let tmpDir = try makeTmpDir(label: "classify")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -368,10 +374,10 @@ struct UpdateCheckerOrchestratorTests {
 
         let expectedWorkDir = Environment(home: tmpDir).packsDirectory
             .appendingPathComponent("pack-a").path
-        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin"])
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "+HEAD:refs/mcs/update-check"])
         #expect(mock.runCalls[0].workingDirectory == expectedWorkDir)
         // Diffed from the registry baseline, not HEAD — see `classifyUpstreamChange`.
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "origin/HEAD"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "refs/mcs/update-check"])
         #expect(mock.runCalls[1].workingDirectory == expectedWorkDir)
     }
 
@@ -393,7 +399,7 @@ struct UpdateCheckerOrchestratorTests {
         #expect(result == .material(["hooks/session-start.sh"]))
     }
 
-    @Test("Custom entry.ref propagates through fetch + diff against FETCH_HEAD")
+    @Test("Custom entry.ref propagates through fetch + diff against the update-check ref")
     func customRefPropagates() throws {
         let tmpDir = try makeTmpDir(label: "classify")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
@@ -408,8 +414,8 @@ struct UpdateCheckerOrchestratorTests {
         let checker = makeChecker(home: tmpDir, mock: mock)
         _ = checker.classifyUpstreamChange(entry: makeEntry(ref: "v2.0"))
 
-        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "v2.0"])
-        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "FETCH_HEAD"])
+        #expect(mock.runCalls[0].arguments == ["fetch", "--depth", "1", "origin", "+v2.0:refs/mcs/update-check"])
+        #expect(mock.runCalls[1].arguments == ["diff", "--name-only", "old123", "refs/mcs/update-check"])
     }
 
     @Test("Invalid entry.ref (argument injection) → .unknown(.fetchFailed); no git invocation")
@@ -1324,5 +1330,50 @@ struct UpdateCheckerSnoozeTests {
 
         #expect(UpdateChecker.isSnoozed(environment: env, now: lateEvening.addingTimeInterval(30)))
         #expect(!UpdateChecker.isSnoozed(environment: env, now: midnight))
+    }
+}
+
+struct UpdateCheckerStaleCacheTests {
+    private func entry(ref: String?, commitSHA: String) -> PackRegistryFile.PackEntry {
+        PackRegistryFile.PackEntry(
+            identifier: "pack-a",
+            displayName: "pack-a",
+            author: nil,
+            sourceURL: "https://example.com/pack-a.git",
+            ref: ref,
+            commitSHA: commitSHA,
+            localPath: "pack-a",
+            addedAt: "2026-01-01T00:00:00Z",
+            trustedScriptHashes: [:],
+            isLocal: nil
+        )
+    }
+
+    @Test("A cached update is dropped once its pack is SHA-pinned or has moved past the checked commit")
+    func staleCachedUpdatesDropped() {
+        let cached = UpdateChecker.CheckResult(
+            packUpdates: [UpdateChecker.PackUpdate(identifier: "pack-a", displayName: "pack-a", localSHA: "old123", remoteSHA: "new456")],
+            cliUpdate: nil
+        )
+        let pinned = String(repeating: "a", count: 40)
+
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: "main", commitSHA: "old123")]).packUpdates.count == 1)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: pinned, commitSHA: "old123")]).packUpdates.isEmpty)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: "main", commitSHA: "new456")]).packUpdates.isEmpty)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: []).packUpdates.isEmpty)
+    }
+
+    @Test("A SHA-pinned pack is never checked over the network")
+    func shaPinnedPackSkipsNetwork() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let mock = MockShellRunner(environment: env)
+
+        let updates = UpdateChecker(environment: env, shell: mock)
+            .checkPackUpdates(entries: [entry(ref: String(repeating: "a", count: 40), commitSHA: "old123")])
+
+        #expect(updates.isEmpty)
+        #expect(mock.runCalls.isEmpty)
     }
 }

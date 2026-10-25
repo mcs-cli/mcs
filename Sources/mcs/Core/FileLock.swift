@@ -5,6 +5,7 @@ import Foundation
 enum FileLockError: Error, LocalizedError {
     case acquireFailed(path: String)
     case openFailed(path: String, errno: Int32)
+    case lockFailed(path: String, errno: Int32)
 
     var errorDescription: String? {
         switch self {
@@ -12,6 +13,8 @@ enum FileLockError: Error, LocalizedError {
             "Another mcs process is running. Lock file: \(path)"
         case let .openFailed(path, code):
             "Could not open lock file at \(path): \(String(cString: strerror(code)))"
+        case let .lockFailed(path, code):
+            "Could not lock \(path): \(String(cString: strerror(code)))"
         }
     }
 }
@@ -48,10 +51,27 @@ extension LockedCommand {
         if skipLock {
             try cmd.perform()
         } else {
-            try withFileLock(at: env.lockFile) {
+            try runHoldingLock(at: env.lockFile) {
                 try cmd.perform()
             }
         }
+    }
+}
+
+/// `EX_TEMPFAIL` from sysexits(3): another `mcs` process holds the lock, so a scheduled caller
+/// can retry later instead of treating the run as a failure.
+let lockContentionExitCode: Int32 = 75
+
+/// Run `body` under the process lock, turning contention into `lockContentionExitCode` and a
+/// stable `mcs: lock held:` stderr line rather than a generic failure.
+func runHoldingLock(at lockFile: URL, body: () throws -> Void) throws {
+    do {
+        try withFileLock(at: lockFile, body: body)
+    } catch let FileLockError.acquireFailed(path) {
+        FileHandle.standardError.write(Data(
+            "mcs: lock held: another mcs process is running (lock file: \(path))\n".utf8
+        ))
+        throw ExitCode(lockContentionExitCode)
     }
 }
 
@@ -80,6 +100,11 @@ func withFileLock<T>(at path: URL, body: () throws -> T) throws -> T {
     defer { close(fd) }
 
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        let code = errno
+        // Only contention means "retry later"; any other failure would retry forever.
+        guard code == EWOULDBLOCK else {
+            throw FileLockError.lockFailed(path: path.path, errno: code)
+        }
         throw FileLockError.acquireFailed(path: path.path)
     }
 
