@@ -4929,6 +4929,24 @@ struct PackScopeLifecycleTests {
         #expect(try bed.projectState().configuredPacks == ["local"])
     }
 
+    @Test("Configurator itself rejects adding a project-only pack globally and writes nothing")
+    func configuratorGateRejectsBeforeWriting() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let projectOnly = try hookedPack("project-only", bed: bed, scopes: [.project])
+        let registry = TechPackRegistry(packs: [projectOnly])
+
+        let error = #expect(throws: PackScopeError.self) {
+            try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [projectOnly], confirmRemovals: false)
+        }
+        #expect(error?.errorDescription?.contains("supports project only") == true)
+        #expect(try bed.globalState().configuredPacks.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: bed.env.hooksDirectory.appendingPathComponent("project-only").path))
+        if FileManager.default.fileExists(atPath: bed.env.claudeSettings.path) {
+            #expect(try globalHookCommands(bed).isEmpty)
+        }
+    }
+
     @Test("sync --global --all skips a project-only pack and installs the rest")
     func globalAllSkipsProjectOnlyPack() throws {
         let bed = try LifecycleTestBed()
