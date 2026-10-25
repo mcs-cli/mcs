@@ -1362,4 +1362,18 @@ struct UpdateCheckerStaleCacheTests {
         #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: "main", commitSHA: "new456")]).packUpdates.isEmpty)
         #expect(UpdateChecker.droppingStaleUpdates(cached, entries: []).packUpdates.isEmpty)
     }
+
+    @Test("A SHA-pinned pack is never checked over the network")
+    func shaPinnedPackSkipsNetwork() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        let env = Environment(home: tmpDir)
+        let mock = MockShellRunner(environment: env)
+
+        let updates = UpdateChecker(environment: env, shell: mock)
+            .checkPackUpdates(entries: [entry(ref: String(repeating: "a", count: 40), commitSHA: "old123")])
+
+        #expect(updates.isEmpty)
+        #expect(mock.runCalls.isEmpty)
+    }
 }

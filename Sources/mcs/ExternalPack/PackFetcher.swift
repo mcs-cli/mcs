@@ -64,7 +64,9 @@ struct PackFetcher {
                     shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
                 )
                 guard result.succeeded else {
-                    throw PackFetchError.cloneFailed(url: url, stderr: result.stderr + Self.refHint(ref))
+                    // Only the fetch can fail for a reason the ref's shape explains.
+                    let hint = step.arguments.first == "fetch" ? Self.refHint(ref) : ""
+                    throw PackFetchError.cloneFailed(url: url, stderr: result.stderr + hint)
                 }
             }
             commitSHA = try currentCommit(at: packPath)
