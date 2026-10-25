@@ -569,7 +569,7 @@ struct UpdateChecker {
            let cached = loadCache(currentIgnoreHashes: cacheInvalidationHashes),
            let lastCheck = ISO8601DateFormatter().date(from: cached.timestamp),
            Date().timeIntervalSince(lastCheck) < Self.cooldownInterval {
-            return cached.result
+            return Self.droppingStaleUpdates(cached.result, entries: entries)
         }
 
         let packUpdates = checkPacks ? checkPackUpdates(entries: entries, manifests: manifests) : []
@@ -580,6 +580,18 @@ struct UpdateChecker {
         saveCache(result, ignoreHashes: ignoreHashes.isEmpty ? nil : ignoreHashes)
 
         return result
+    }
+
+    /// A cached pack update is stale once its pack is pinned to a commit SHA, which never moves,
+    /// or the registry no longer sits at the commit it was checked from (updated, re-added,
+    /// or removed).
+    static func droppingStaleUpdates(_ result: CheckResult, entries: [PackRegistryFile.PackEntry]) -> CheckResult {
+        let current = Dictionary(entries.map { ($0.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        let live = result.packUpdates.filter { update in
+            guard let entry = current[update.identifier], entry.commitSHA == update.localSHA else { return false }
+            return !(entry.ref.map(PackFetcher.isCommitSHA) ?? false)
+        }
+        return CheckResult(packUpdates: live, cliUpdate: result.cliUpdate)
     }
 
     // MARK: - Output Formatting

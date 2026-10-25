@@ -166,9 +166,15 @@ struct UpdateCheckerPerformCheckTests {
         try writeFreshCache(at: env, result: cachedResult)
 
         let checker = makeChecker(home: tmpDir)
-        let result = checker.performCheck(entries: [], checkPacks: true, checkCLI: false)
+        // The registry still sits at the checked commit, so the cached update stays live.
+        let entry = PackRegistryFile.PackEntry(
+            identifier: "cached-pack", displayName: "Cached", author: nil,
+            sourceURL: "https://example.com/cached.git", ref: nil, commitSHA: "aaa",
+            localPath: "cached-pack", addedAt: "2026-01-01T00:00:00Z", trustedScriptHashes: [:], isLocal: nil
+        )
+        let result = checker.performCheck(entries: [entry], checkPacks: true, checkCLI: false)
 
-        // Should return cached result, not do network calls (entries is empty so network would return nothing)
+        // Should return cached result, not do network calls
         #expect(result.packUpdates.count == 1)
         #expect(result.packUpdates.first?.identifier == "cached-pack")
     }
@@ -1324,5 +1330,36 @@ struct UpdateCheckerSnoozeTests {
 
         #expect(UpdateChecker.isSnoozed(environment: env, now: lateEvening.addingTimeInterval(30)))
         #expect(!UpdateChecker.isSnoozed(environment: env, now: midnight))
+    }
+}
+
+struct UpdateCheckerStaleCacheTests {
+    private func entry(ref: String?, commitSHA: String) -> PackRegistryFile.PackEntry {
+        PackRegistryFile.PackEntry(
+            identifier: "pack-a",
+            displayName: "pack-a",
+            author: nil,
+            sourceURL: "https://example.com/pack-a.git",
+            ref: ref,
+            commitSHA: commitSHA,
+            localPath: "pack-a",
+            addedAt: "2026-01-01T00:00:00Z",
+            trustedScriptHashes: [:],
+            isLocal: nil
+        )
+    }
+
+    @Test("A cached update is dropped once its pack is SHA-pinned or has moved past the checked commit")
+    func staleCachedUpdatesDropped() {
+        let cached = UpdateChecker.CheckResult(
+            packUpdates: [UpdateChecker.PackUpdate(identifier: "pack-a", displayName: "pack-a", localSHA: "old123", remoteSHA: "new456")],
+            cliUpdate: nil
+        )
+        let pinned = String(repeating: "a", count: 40)
+
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: "main", commitSHA: "old123")]).packUpdates.count == 1)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: pinned, commitSHA: "old123")]).packUpdates.isEmpty)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: [entry(ref: "main", commitSHA: "new456")]).packUpdates.isEmpty)
+        #expect(UpdateChecker.droppingStaleUpdates(cached, entries: []).packUpdates.isEmpty)
     }
 }

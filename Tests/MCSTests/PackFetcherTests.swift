@@ -390,7 +390,7 @@ struct PackFetcherCommitRefTests {
     private func git(_ arguments: [String], in dir: URL, shell: ShellRunner) throws -> String {
         let result = shell.run(
             shell.environment.gitPath,
-            arguments: ["-c", "user.email=test@example.com", "-c", "user.name=Test"] + arguments,
+            arguments: ["-c", "user.email=test@example.com", "-c", "user.name=Test", "-c", "commit.gpgsign=false"] + arguments,
             workingDirectory: dir.path
         )
         guard result.succeeded else {
