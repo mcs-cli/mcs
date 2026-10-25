@@ -643,10 +643,12 @@ struct Configurator {
             output: output, resolvedValues: priors, priorValues: priors
         )
         var templatesUnreadable = false
+        // Templates always count for retention: global sync never prompts for their placeholders,
+        // but it still fills them from stored values, which must outlive another pack's removal.
         let consumed = CrossPackPromptResolver.consumedKeys(
             packs: survivingPacks,
             context: context,
-            includeTemplates: scope.includeTemplatesInScan,
+            includeTemplates: true,
             onWarning: {
                 if reportWarnings { output.warn($0) }
                 templatesUnreadable = true
@@ -736,9 +738,12 @@ struct Configurator {
         }
         // Global scope never prompts for template placeholders — a global template may name a
         // project-only key — but a value stored or seeded for one (mcs.yaml `values:`) still applies.
+        // Declared prompts are left to the reuse gate above, which may have declined their priors.
         if !scope.includeTemplatesInScan {
-            let templateKeys = ConfiguratorSupport.referencedPlaceholderKeys(packs: packs, includeTemplates: true)
-            allValues.merge(priorValues.filter { templateKeys.contains($0.key) }) { existing, _ in existing }
+            let declaredKeys = Set(plan.declared.map(\.key))
+            let templateOnlyKeys = ConfiguratorSupport.referencedPlaceholderKeys(packs: packs, includeTemplates: true)
+                .subtracting(declaredKeys)
+            allValues.merge(priorValues.filter { templateOnlyKeys.contains($0.key) }) { existing, _ in existing }
         }
         // The preflight replayed every stage below, so off-TTY no executor reaches a reader.
         allValues.merge(nonInteractiveValues) { existing, _ in existing }
