@@ -543,7 +543,9 @@ struct SinglePackLifecycleTests {
             components: [
                 bed.hookComponent(
                     pack: "test-pack", id: "lint-hook", source: hookSource, destination: "lint.sh",
-                    hookRegistration: HookRegistration(event: .preToolUse, matcher: "Bash")
+                    // A runtime no runner has, so the interpreter check must fail under both
+                    // prefixes; parsing a legacy command as bash would hide it.
+                    hookRegistration: HookRegistration(event: .preToolUse, matcher: "Bash", interpreter: "mcs-missing-runtime")
                 ),
             ]
         )
@@ -551,10 +553,11 @@ struct SinglePackLifecycleTests {
         let configurator = bed.makeConfigurator(registry: registry)
         try configurator.configure(packs: [pack], confirmRemovals: false)
         let clean = try bed.runDoctor(registry: registry)
+        #expect(clean.issues > 0)
 
         // Rewrite settings and state the way an earlier release left them.
-        let anchored = bed.projectHookCommand("test-pack/lint.sh")
-        let legacy = "bash \(Constants.HookCommand.legacyProjectDirectory)test-pack/lint.sh"
+        let anchored = bed.projectHookCommand("test-pack/lint.sh", interpreter: "mcs-missing-runtime")
+        let legacy = "mcs-missing-runtime \(Constants.HookCommand.legacyProjectDirectory)test-pack/lint.sh"
         var settings = try Settings.load(from: bed.settingsLocalPath)
         settings.hooks = settings.hooks?.mapValues { groups in
             groups.map { group in

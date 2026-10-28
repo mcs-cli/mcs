@@ -139,9 +139,12 @@ enum Constants {
         static let defaultInterpreter = "bash"
 
         /// Project scope — hooks live in `<project>/.claude/hooks/`. Anchored to the project root
-        /// because Claude Code runs hooks in the session's current directory, which a `cd` or
-        /// EnterWorktree moves; quoted so a root containing spaces stays one argument.
-        static let projectDirectory = "\"$CLAUDE_PROJECT_DIR\"/" + legacyProjectDirectory
+        /// because Claude Code runs hooks in the session's current directory, which a mid-session
+        /// `cd` moves; quoted so a root containing spaces stays one argument.
+        static let projectDirectory = projectRootAnchor + legacyProjectDirectory
+
+        /// The token prefix that anchors a project hook path; stripping it yields the legacy form.
+        static let projectRootAnchor = "\"$CLAUDE_PROJECT_DIR\"/"
 
         /// Relative project prefix written by earlier releases, still recognised in settings and
         /// state that have not been re-synced since.

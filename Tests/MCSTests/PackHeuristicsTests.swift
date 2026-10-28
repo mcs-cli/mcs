@@ -397,7 +397,13 @@ struct PackHeuristicsTests {
 
     @Test(
         "Warns when a hookEventExists check asserts the relative invocation, not the script path",
-        arguments: [("bash .claude/hooks/fmt.sh", true), (".claude/hooks/fmt.sh", false)]
+        arguments: [
+            ("bash .claude/hooks/fmt.sh", true),
+            ("bash .claude/hooks/test-pack/fmt.sh", true),
+            (".claude/hooks/fmt.sh", false),
+            ("bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/test-pack/fmt.sh", false),
+            ("bash ~/.claude/hooks/test-pack/fmt.sh", false),
+        ]
     )
     func warnsOnRelativeInvocationAssertion(asserted: String, warns: Bool) throws {
         let tmpDir = try makeTmpDir(label: "heuristics")
@@ -414,8 +420,26 @@ struct PackHeuristicsTests {
         ])
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
         #expect(findings.contains {
-            $0.severity == .warning && $0.message.contains("match on '.claude/hooks/fmt.sh' alone")
+            $0.severity == .warning && $0.message.contains("match on 'test-pack/fmt.sh' alone")
         } == warns)
+    }
+
+    @Test("Leaves relative assertions alone when they name no hook component's file")
+    func ignoresRelativeAssertionsOutsideHookComponents() throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        // A settings-file hook is registered verbatim, so its relative command is the right one
+        // to assert; `pre-fmt.sh` shares a suffix with the component's file but is not it.
+        let checks = ["bash .claude/hooks/settings-hook.sh", "bash .claude/hooks/pre-fmt.sh"].map {
+            ExternalDoctorCheckDefinition(type: .hookEventExists, name: $0, command: $0, event: "SessionStart")
+        }
+        let manifest = minimalManifest(
+            components: [hookComponent(source: "hooks/fmt.sh", destination: "fmt.sh")],
+            supplementaryDoctorChecks: checks
+        )
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(!findings.contains { $0.message.contains("match on") })
     }
 
     // MARK: - Root Source Copy

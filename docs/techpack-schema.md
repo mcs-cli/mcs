@@ -530,10 +530,12 @@ fire. Two optional fields tighten it:
 the component itself — restating the matcher here just creates a second copy that can drift from
 the first.
 
-When you do match on `command`, match the script path alone (`.claude/hooks/<pack-id>/gate.sh`).
-Project hooks are registered as `<interpreter> "$CLAUDE_PROJECT_DIR"/.claude/hooks/…`, so a check
-asserting `bash .claude/hooks/…` never matches, and naming an interpreter also breaks the moment
-the component declares a different `hookInterpreter`. `mcs pack validate` warns about both.
+When you do match on `command`, match the script path rather than the whole invocation: a settings
+file's hook by its path as written, a component's hook by `<pack-id>/<file>` (component hooks always
+install under `<pack-id>/`, and a bare filename also matches `pre-<file>`). Naming an interpreter
+breaks the moment the component declares a different `hookInterpreter`. Component hooks are
+registered as `<interpreter> "$CLAUDE_PROJECT_DIR"/.claude/hooks/…`; an older check asserting the
+relative `bash .claude/hooks/…` still passes, but `mcs pack validate` suggests the path instead.
 
 **What this does not prove:** that the matcher matches a tool Claude Code actually emits. It proves
 the string you declared reached the settings file. Tool names are harness details that change

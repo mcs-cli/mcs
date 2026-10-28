@@ -405,7 +405,7 @@ enum PackHeuristics {
     ///
     /// The assertion is a substring of the registered command, so it may be just the script path
     /// (`gate.ts`, asserting nothing about the interpreter) or the whole invocation
-    /// (`bash .claude/hooks/gate.ts`). Only the latter can contradict the component, and comparing
+    /// (`bash …/gate.ts`). Only the latter can contradict the component, and comparing
     /// it against the resolved interpreter catches what a `bash ` prefix test missed: a node hook
     /// asserting `python3`, and a bash hook asserting `node`.
     private static func assertedInterpreter(in asserted: String, destination: String) -> String? {
@@ -447,26 +447,41 @@ enum PackHeuristics {
         return findings
     }
 
-    /// A `hookEventExists` check asserting the whole relative invocation (`bash .claude/hooks/…`).
-    /// Project hooks are registered under `"$CLAUDE_PROJECT_DIR"/.claude/hooks/`, so only the
-    /// script path is still a substring of the registered command.
+    /// A `hookEventExists` check on a hook component that asserts the relative invocation
+    /// (`bash .claude/hooks/…`). Doctor still accepts it by also matching with the
+    /// `"$CLAUDE_PROJECT_DIR"/` anchor removed, so this nudges authors toward the path alone.
+    /// Hooks shipped through a settings file are merged verbatim, so their relative command is
+    /// what gets registered and they are left alone.
     private static func checkRelativeHookInvocationAssertions(
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let legacy = [Constants.HookCommand.legacyProjectDirectory]
-        return allDoctorChecks(manifest: manifest, components: components).compactMap { check in
-            guard check.type == .hookEventExists, let asserted = check.command,
-                  HookInterpreter.interpreter(ofRegisteredCommand: asserted, directories: legacy) != nil,
-                  let path = HookInterpreter.managedHookPath(in: asserted, directories: legacy)
-            else { return nil }
-            return Finding(
-                severity: .warning,
-                message: "Doctor check '\(check.name)' asserts command '\(asserted)', but project hooks"
-                    + " are registered as '<interpreter> \(Constants.HookCommand.projectDirectory)…'"
-                    + " — match on '\(path)' alone"
-            )
+        let legacyDirectory = Constants.HookCommand.legacyProjectDirectory
+        let supplementary = manifest.supplementaryDoctorChecks ?? []
+        var findings: [Finding] = []
+        for component in components {
+            guard let invocation = component.hookInvocation else { continue }
+            let correlated = supplementary.filter {
+                $0.command?.contains(invocation.destination) == true
+            }
+            for check in (component.doctorChecks ?? []) + correlated
+                where check.type == .hookEventExists {
+                guard let asserted = check.command,
+                      HookInterpreter.interpreter(ofRegisteredCommand: asserted, directories: [legacyDirectory]) != nil,
+                      let path = HookInterpreter.managedHookPath(in: asserted, directories: [legacyDirectory]),
+                      path == legacyDirectory + invocation.destination || path.hasSuffix("/" + invocation.destination)
+                else { continue }
+                // Hooks always install under `<pack-id>/`, and a bare filename would also match
+                // `pre-<file>` because the check is a substring test.
+                findings.append(Finding(
+                    severity: .warning,
+                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', but project hooks"
+                        + " are registered as '<interpreter> \(Constants.HookCommand.projectDirectory)…'"
+                        + " — match on '\(manifest.identifier)/\(invocation.destination)' alone"
+                ))
+            }
         }
+        return findings
     }
 
     private static func allDoctorChecks(

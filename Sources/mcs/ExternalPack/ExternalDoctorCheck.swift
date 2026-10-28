@@ -385,8 +385,15 @@ struct ExternalHookEventExistsCheck: SettingsReadingCheck {
         }
 
         if let commandSubstring {
+            // Also tried with the anchor removed: packs published before project hooks were
+            // anchored assert the relative invocation, and their users cannot edit the check.
             let found = candidates.contains { group in
-                (group.hooks ?? []).contains { $0.command?.contains(commandSubstring) == true }
+                (group.hooks ?? []).contains { entry in
+                    guard let command = entry.command else { return false }
+                    return command.contains(commandSubstring)
+                        || command.replacingOccurrences(of: Constants.HookCommand.projectRootAnchor, with: "")
+                        .contains(commandSubstring)
+                }
             }
             guard found else {
                 let scope = matcher.map { " with matcher \(describeMatcher($0))" } ?? ""

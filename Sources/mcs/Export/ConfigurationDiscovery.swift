@@ -308,7 +308,7 @@ struct ConfigurationDiscovery {
         let files = hookFiles(in: hooksDir)
 
         // Keyed on the whole managed path, not the basename. Commands name the namespaced path
-        // (`.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts` capture the
+        // (`…/.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts` capture the
         // event and interpreter belonging to `pre-gate.ts`.
         var registrationByPath: [String: HookRegistration] = [:]
         for (command, registration) in hookCommands ?? [:] {

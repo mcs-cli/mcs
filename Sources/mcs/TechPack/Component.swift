@@ -106,8 +106,8 @@ extension ComponentDefinition {
     /// must build it identically — a divergence makes every hook look missing. That is why the
     /// interpreter is resolved here and nowhere else.
     ///
-    /// - Parameter pathPrefix: Scope-dependent directory, `Constants.HookCommand.projectDirectory`
-    ///   or `.globalDirectory`.
+    /// - Parameter pathPrefix: One of `Constants.HookCommand.recognizedDirectories(isGlobal:)` —
+    ///   the current prefix when writing, any of them when doctor matches a legacy record.
     func hookCommand(pathPrefix: String) -> String? {
         guard let invocation = hookInvocation else { return nil }
         return "\(invocation.interpreter) \(pathPrefix)\(invocation.destination)"
