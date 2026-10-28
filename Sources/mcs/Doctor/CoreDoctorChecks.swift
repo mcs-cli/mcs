@@ -386,6 +386,14 @@ struct HookSettingsCheck: DoctorCheck {
                 missing.append(expectation.command)
                 continue
             }
+            // Still fires from the project root, so a warning: it only breaks once the session
+            // leaves the root, and the next sync rewrites it.
+            if HookInterpreter.managedHookPath(
+                in: expectation.command,
+                directories: [Constants.HookCommand.legacyProjectDirectory]
+            ) != nil {
+                drift.append("'\(expectation.command)' uses a relative path that stops firing after a cd")
+            }
             if let registration = expectation.registration,
                let finding = driftFinding(
                    command: expectation.command,

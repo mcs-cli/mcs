@@ -189,7 +189,7 @@ struct GlobalSyncStrategy: SyncStrategy {
                     // Matched on the path token, not an interpreter prefix: a hook registered as
                     // `node ~/.claude/hooks/p/x.js` must be stripped as readily as a bash one, or
                     // unconfiguring the pack deletes the script and leaves the entry behind.
-                    if HookInterpreter.managedHookPath(in: cmd, directory: scope.hookPathPrefix) != nil {
+                    if HookInterpreter.managedHookPath(in: cmd, directories: [scope.hookPathPrefix]) != nil {
                         return false
                     }
                     if cmd == UpdateChecker.hookCommand { return false }
@@ -224,9 +224,7 @@ struct GlobalSyncStrategy: SyncStrategy {
         // the command entry point has already surfaced any migration notice, and
         // persisting it is deferred to the same entry point's non-dry-run gate.
         let config = MCSConfig.load(from: environment.mcsConfigFile)
-        if config.isUpdateCheckEnabled {
-            if UpdateChecker.addHook(to: &settings) { hasContent = true }
-        }
+        if config.isUpdateCheckEnabled, UpdateChecker.addHook(to: &settings) { hasContent = true }
 
         if hasContent || strippedContent {
             do {

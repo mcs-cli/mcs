@@ -56,8 +56,8 @@ struct SyncScope {
     /// Suffix for output messages: `" (global)"` when in global scope, empty otherwise.
     let labelSuffix: String
 
-    /// Directory portion of hook commands in settings (e.g. `".claude/hooks/"` or
-    /// `"~/.claude/hooks/"`). The interpreter that precedes it comes from the component.
+    /// Directory portion of hook commands in settings (e.g. `"$CLAUDE_PROJECT_DIR"/.claude/hooks/` or
+    /// `~/.claude/hooks/`). The interpreter that precedes it comes from the component.
     let hookPathPrefix: String
 
     /// Display prefix for file paths in dry-run output (e.g. `".claude/"` or `"~/.claude/"`).

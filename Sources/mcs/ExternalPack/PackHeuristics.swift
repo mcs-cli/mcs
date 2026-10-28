@@ -30,6 +30,7 @@ enum PackHeuristics {
         findings += checkAmbiguousHookExtensions(components: components)
         findings += checkUninstalledHookRuntimes(components: components)
         findings += checkHookDoctorCheckInterpreters(manifest: manifest, components: components)
+        findings += checkRelativeHookInvocationAssertions(manifest: manifest, components: components)
         findings += checkDeprecatedKeys(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
@@ -444,6 +445,30 @@ enum PackHeuristics {
             }
         }
         return findings
+    }
+
+    /// A `hookEventExists` check asserting the whole relative invocation (`bash .claude/hooks/…`).
+    /// Project hooks are registered under `"$CLAUDE_PROJECT_DIR"/.claude/hooks/`, so only the
+    /// script path is still a substring of the registered command.
+    private static func checkRelativeHookInvocationAssertions(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let checks = (manifest.supplementaryDoctorChecks ?? []) + components.flatMap { $0.doctorChecks ?? [] }
+        return checks.compactMap { check in
+            guard check.type == .hookEventExists, let asserted = check.command else { return nil }
+            let tokens = asserted.split(whereSeparator: \.isWhitespace)
+            guard let pathIndex = tokens.firstIndex(where: {
+                $0.hasPrefix(Constants.HookCommand.legacyProjectDirectory)
+            }), pathIndex > 0
+            else { return nil }
+            return Finding(
+                severity: .warning,
+                message: "Doctor check '\(check.name)' asserts command '\(asserted)', but project hooks"
+                    + " are registered as '<interpreter> \(Constants.HookCommand.projectDirectory)…'"
+                    + " — match on '\(tokens[pathIndex])' alone"
+            )
+        }
     }
 
     private static func checkPythonModulePaths(

@@ -211,7 +211,7 @@ Hook scripts run at specific Claude Code lifecycle events:
       destination: session_start.sh
 ```
 
-This copies `hooks/session_start.sh` from your pack repo into `<project>/.claude/hooks/<pack-id>/` and registers it in `settings.local.json` under the `SessionStart` event, as `bash .claude/hooks/<pack-id>/session_start.sh`.
+This copies `hooks/session_start.sh` from your pack repo into `<project>/.claude/hooks/<pack-id>/` and registers it in `settings.local.json` under the `SessionStart` event, as `bash "$CLAUDE_PROJECT_DIR"/.claude/hooks/<pack-id>/session_start.sh`. Anchoring the path to the project root keeps the hook firing after the session `cd`s elsewhere.
 
 **Hooks are not bash-only.** The interpreter comes from the file extension — `.js` and `.mjs` run
 under `node`, `.py` under `python3`, `.rb` under `ruby`, `.sh` and extensionless files under

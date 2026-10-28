@@ -105,20 +105,20 @@ struct ConfigurationDiscovery {
         discoverMCPServers(scope: scope, into: &config)
 
         // 2. Discover settings (hooks, plugins, remaining keys)
-        let hookDirectory = switch scope {
-        case .global: Constants.HookCommand.globalDirectory
-        case .project: Constants.HookCommand.projectDirectory
+        let hookDirectories = switch scope {
+        case .global: [Constants.HookCommand.globalDirectory]
+        case .project: Constants.HookCommand.projectDirectories
         }
         let hookCommands = discoverSettings(
             at: settingsPath,
-            hookDirectory: hookDirectory,
+            hookDirectories: hookDirectories,
             into: &config
         )
 
         // 3. Discover files in .claude/ subdirectories
         discoverFiles(
             in: hooksDir,
-            hookDirectory: hookDirectory,
+            hookDirectories: hookDirectories,
             hookCommands: hookCommands,
             into: &config
         )
@@ -211,7 +211,7 @@ struct ConfigurationDiscovery {
     @discardableResult
     private func discoverSettings(
         at settingsPath: URL,
-        hookDirectory: String,
+        hookDirectories: [String],
         into config: inout DiscoveredConfiguration
     ) -> [String: HookRegistration]? {
         let settings: Settings
@@ -264,7 +264,7 @@ struct ConfigurationDiscovery {
                             statusMessage: entry.statusMessage,
                             interpreter: Self.interpreter(
                                 ofHookCommand: command,
-                                directory: hookDirectory
+                                directories: hookDirectories
                             )
                         )
                     } else {
@@ -284,13 +284,13 @@ struct ConfigurationDiscovery {
     /// --hook`, or a `python3 -m pkg.hook` pointing elsewhere — from being exported as a bogus
     /// `hookInterpreter`. Without any of this, exporting a live `node …/gate.ts` hook would emit a
     /// manifest that re-registers it under bash.
-    private static func interpreter(ofHookCommand command: String, directory: String) -> String? {
+    private static func interpreter(ofHookCommand command: String, directories: [String]) -> String? {
         guard let interpreter = HookInterpreter.interpreter(
-            ofRegisteredCommand: command,
-            directory: directory
-        ),
-            !HookInterpreter.isDefault(interpreter),
-            HookInterpreter.rejectionReason(for: interpreter) == nil
+                  ofRegisteredCommand: command,
+                  directories: directories
+              ),
+              !HookInterpreter.isDefault(interpreter),
+              HookInterpreter.rejectionReason(for: interpreter) == nil
         else { return nil }
         return interpreter
     }
@@ -299,7 +299,7 @@ struct ConfigurationDiscovery {
 
     private func discoverFiles(
         in hooksDir: URL,
-        hookDirectory: String,
+        hookDirectories: [String],
         hookCommands: [String: HookRegistration]?,
         into config: inout DiscoveredConfiguration
     ) {
@@ -314,9 +314,10 @@ struct ConfigurationDiscovery {
             // Match on the whole managed path, not the basename. Commands name the namespaced
             // path (`.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts`
             // capture the event and interpreter belonging to `pre-gate.ts`.
-            let managedPath = hookDirectory + file.relativePath
+            let managedPaths = Set(hookDirectories.map { $0 + file.relativePath })
             let matchedReg = commandToReg.first { command, _ in
-                HookInterpreter.managedHookPath(in: command, directory: hookDirectory) == managedPath
+                HookInterpreter.managedHookPath(in: command, directories: hookDirectories)
+                    .map(managedPaths.contains) ?? false
             }?.value
 
             config.hookFiles.append(DiscoveredFile(

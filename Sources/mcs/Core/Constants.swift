@@ -138,8 +138,17 @@ enum Constants {
         /// Interpreter used when a component declares none and the extension implies none.
         static let defaultInterpreter = "bash"
 
-        /// Project scope — hooks live in `<project>/.claude/hooks/`.
-        static let projectDirectory = ".claude/hooks/"
+        /// Project scope — hooks live in `<project>/.claude/hooks/`. Anchored to the project root
+        /// because Claude Code runs hooks in the session's current directory, which a `cd` or
+        /// EnterWorktree moves; quoted so a root containing spaces stays one argument.
+        static let projectDirectory = "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/"
+
+        /// Relative project prefix written by earlier releases, still recognised in settings and
+        /// state that have not been re-synced since.
+        static let legacyProjectDirectory = ".claude/hooks/"
+
+        /// Every project prefix a registered command may carry, current first.
+        static let projectDirectories = [projectDirectory, legacyProjectDirectory]
 
         /// Global scope — hooks live in `~/.claude/hooks/`.
         static let globalDirectory = "~/.claude/hooks/"

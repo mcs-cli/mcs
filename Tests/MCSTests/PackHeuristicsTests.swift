@@ -395,6 +395,29 @@ struct PackHeuristicsTests {
         })
     }
 
+    @Test(
+        "Warns when a hookEventExists check asserts the relative invocation, not the script path",
+        arguments: [("bash .claude/hooks/fmt.sh", true), (".claude/hooks/fmt.sh", false)]
+    )
+    func warnsOnRelativeInvocationAssertion(asserted: String, warns: Bool) throws {
+        let tmpDir = try makeTmpDir(label: "heuristics")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let check = ExternalDoctorCheckDefinition(
+            type: .hookEventExists,
+            name: "Session hook registered",
+            command: asserted,
+            event: "SessionStart"
+        )
+        let manifest = minimalManifest(components: [
+            hookComponent(source: "hooks/fmt.sh", destination: "fmt.sh", doctorChecks: [check]),
+        ])
+        let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
+        #expect(findings.contains {
+            $0.severity == .warning && $0.message.contains("match on '.claude/hooks/fmt.sh' alone")
+        } == warns)
+    }
+
     // MARK: - Root Source Copy
 
     @Test("Detects source: '.' copying pack root")

@@ -101,8 +101,14 @@ struct ConfigurationDiscoveryTests {
         #expect(start?.hookRegistration?.interpreter == nil)
     }
 
-    @Test("discovers hooks inside the pack-id subdirectories sync installs into")
-    func discoversNamespacedHooks() throws {
+    @Test(
+        "discovers hooks inside the pack-id subdirectories sync installs into",
+        arguments: [
+            #"node --experimental-strip-types \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ts-pack/gate.ts"#,
+            "node --experimental-strip-types .claude/hooks/ts-pack/gate.ts",
+        ]
+    )
+    func discoversNamespacedHooks(registeredCommand: String) throws {
         let home = try makeGlobalTmpDir(label: "discovery-namespaced")
         defer { try? FileManager.default.removeItem(at: home) }
         let env = Environment(home: home)
@@ -126,7 +132,7 @@ struct ConfigurationDiscoveryTests {
         {
           "hooks": {
             "PreToolUse": [
-              { "hooks": [{ "type": "command", "command": "node --experimental-strip-types .claude/hooks/ts-pack/gate.ts" }] }
+              { "hooks": [{ "type": "command", "command": "\(registeredCommand)" }] }
             ]
           }
         }

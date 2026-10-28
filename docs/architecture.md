@@ -61,8 +61,8 @@ In the per-project model, `Configurator` (with `ProjectSyncStrategy`) composes `
 {
   "hooks": {
     "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "bash .claude/hooks/core/session-start.sh" }] },
-      { "hooks": [{ "type": "command", "command": "node .claude/hooks/ios/session-start.js" }] }
+      { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/core/session-start.sh" }] },
+      { "hooks": [{ "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ios/session-start.js" }] }
     ]
   }
 }

@@ -71,10 +71,10 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PostToolUse": [
-              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/lint.sh" }] }
+              { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/lint.sh" }] }
             ],
             "PreToolUse": [
-              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/guard.sh" }] }
+              { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/guard.sh" }] }
             ]
           }
         }
@@ -82,7 +82,7 @@ struct HookSettingsCheckTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let check = HookSettingsCheck(
-            commands: ["bash .claude/hooks/lint.sh", "bash .claude/hooks/guard.sh"],
+            commands: ["bash ~/.claude/hooks/lint.sh", "bash ~/.claude/hooks/guard.sh"],
             settingsPath: url,
             packName: "test-pack"
         )
@@ -94,13 +94,13 @@ struct HookSettingsCheckTests {
         }
     }
 
-    @Test("fail when hook command is missing")
-    func failWhenMissing() throws {
+    @Test("warn when a present command still uses the legacy relative project path")
+    func warnWhenLegacyRelativePath() throws {
         let url = try makeTempSettings(content: """
         {
           "hooks": {
-            "PostToolUse": [
-              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/lint.sh" }] }
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/p/lint.sh" }] }
             ]
           }
         }
@@ -108,7 +108,34 @@ struct HookSettingsCheckTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let check = HookSettingsCheck(
-            commands: ["bash .claude/hooks/lint.sh", "bash .claude/hooks/missing.sh"],
+            commands: ["bash .claude/hooks/p/lint.sh"],
+            settingsPath: url,
+            packName: "test-pack"
+        )
+        let result = check.check()
+        if case let .warn(msg) = result {
+            #expect(msg.contains("relative path"))
+            #expect(msg.contains("mcs sync"))
+        } else {
+            Issue.record("Expected .warn, got \(result)")
+        }
+    }
+
+    @Test("fail when hook command is missing")
+    func failWhenMissing() throws {
+        let url = try makeTempSettings(content: """
+        {
+          "hooks": {
+            "PostToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/lint.sh" }] }
+            ]
+          }
+        }
+        """)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let check = HookSettingsCheck(
+            commands: ["bash ~/.claude/hooks/lint.sh", "bash ~/.claude/hooks/missing.sh"],
             settingsPath: url,
             packName: "test-pack"
         )
@@ -125,7 +152,7 @@ struct HookSettingsCheckTests {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("nonexistent-\(UUID().uuidString).json")
         let check = HookSettingsCheck(
-            commands: ["bash .claude/hooks/lint.sh"],
+            commands: ["bash ~/.claude/hooks/lint.sh"],
             settingsPath: url,
             packName: "test-pack"
         )
@@ -164,7 +191,7 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PreToolUse": [
-              { \(matcher), "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { \(matcher), "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ]
           }
         }
@@ -174,7 +201,7 @@ struct HookSettingsCheckTests {
     private func gateCheck(matcher: String?, settingsPath: URL) -> HookSettingsCheck {
         HookSettingsCheck(
             expectations: [ExpectedHook(
-                command: "bash .claude/hooks/gate.sh",
+                command: "bash ~/.claude/hooks/gate.sh",
                 registration: HookRegistration(event: .preToolUse, matcher: matcher)
             )],
             settingsPath: settingsPath,
@@ -216,7 +243,7 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PostToolUse": [
-              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ]
           }
         }
@@ -251,7 +278,7 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PreToolUse": [
-              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ]
           }
         }
@@ -288,10 +315,10 @@ struct HookSettingsCheckTests {
           "hooks": {
             "PreToolUse": [
               { "matcher": "Task", "hooks": [
-                { "type": "command", "command": "bash .claude/hooks/other.sh" },
-                { "type": "command", "command": "bash .claude/hooks/gate.sh" }
+                { "type": "command", "command": "bash ~/.claude/hooks/other.sh" },
+                { "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }
               ] },
-              { "matcher": "Agent|Task", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "matcher": "Agent|Task", "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ]
           }
         }
@@ -312,10 +339,10 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PreToolUse": [
-              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ],
             "PostToolUse": [
-              { "matcher": "Bash", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "matcher": "Bash", "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ]
           }
         }
@@ -336,7 +363,7 @@ struct HookSettingsCheckTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let check = HookSettingsCheck(
-            expectations: [ExpectedHook(command: "bash .claude/hooks/gate.sh", registration: nil)],
+            expectations: [ExpectedHook(command: "bash ~/.claude/hooks/gate.sh", registration: nil)],
             settingsPath: url,
             packName: "test-pack"
         )
@@ -353,10 +380,10 @@ struct HookSettingsCheckTests {
         {
           "hooks": {
             "PreToolUse": [
-              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash .claude/hooks/gate.sh" }] }
+              { "matcher": "Agent", "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/gate.sh" }] }
             ],
             "PostToolUse": [
-              { "hooks": [{ "type": "command", "command": "bash .claude/hooks/orphan.sh" }] }
+              { "hooks": [{ "type": "command", "command": "bash ~/.claude/hooks/orphan.sh" }] }
             ]
           }
         }
@@ -367,10 +394,10 @@ struct HookSettingsCheckTests {
         let check = HookSettingsCheck(
             expectations: [
                 ExpectedHook(
-                    command: "bash .claude/hooks/gate.sh",
+                    command: "bash ~/.claude/hooks/gate.sh",
                     registration: HookRegistration(event: .preToolUse, matcher: "Agent")
                 ),
-                ExpectedHook(command: "bash .claude/hooks/orphan.sh", registration: nil),
+                ExpectedHook(command: "bash ~/.claude/hooks/orphan.sh", registration: nil),
             ],
             settingsPath: url,
             packName: "test-pack"
@@ -391,10 +418,10 @@ struct HookSettingsCheckTests {
         let check = HookSettingsCheck(
             expectations: [
                 ExpectedHook(
-                    command: "bash .claude/hooks/gate.sh",
+                    command: "bash ~/.claude/hooks/gate.sh",
                     registration: HookRegistration(event: .preToolUse, matcher: "Agent|Task")
                 ),
-                ExpectedHook(command: "bash .claude/hooks/absent.sh", registration: nil),
+                ExpectedHook(command: "bash ~/.claude/hooks/absent.sh", registration: nil),
             ],
             settingsPath: url,
             packName: "test-pack"
