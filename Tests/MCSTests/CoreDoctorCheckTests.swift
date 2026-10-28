@@ -108,9 +108,10 @@ struct HookSettingsCheckTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let check = HookSettingsCheck(
-            commands: ["bash .claude/hooks/p/lint.sh"],
+            expectations: [ExpectedHook(command: "bash .claude/hooks/p/lint.sh", registration: nil)],
             settingsPath: url,
-            packName: "test-pack"
+            packName: "test-pack",
+            legacyDirectories: [Constants.HookCommand.legacyProjectDirectory]
         )
         let result = check.check()
         if case let .warn(msg) = result {

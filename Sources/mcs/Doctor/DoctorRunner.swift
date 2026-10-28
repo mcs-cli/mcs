@@ -98,9 +98,7 @@ struct DoctorRunner {
         /// with a project prefix. Global-only packs get their own scope rather than being
         /// folded into a project one, so the two never mix.
         var hookPathPrefixes: [String] {
-            effectiveProjectRoot != nil
-                ? Constants.HookCommand.projectDirectories
-                : [Constants.HookCommand.globalDirectory]
+            Constants.HookCommand.recognizedDirectories(isGlobal: effectiveProjectRoot == nil)
         }
 
         func makeCollisionContext(environment: Environment) -> (any CollisionFilesystemContext)? {
@@ -554,7 +552,8 @@ struct DoctorRunner {
                     check: HookSettingsCheck(
                         expectations: hookExpectations(for: artifacts, pack: pack, scope: scope),
                         settingsPath: settingsPath,
-                        packName: pack.displayName
+                        packName: pack.displayName,
+                        legacyDirectories: Array(scope.hookPathPrefixes.dropFirst())
                     ),
                     syncTarget: scope.syncTarget
                 ))

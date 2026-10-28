@@ -454,21 +454,26 @@ enum PackHeuristics {
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let checks = (manifest.supplementaryDoctorChecks ?? []) + components.flatMap { $0.doctorChecks ?? [] }
-        return checks.compactMap { check in
-            guard check.type == .hookEventExists, let asserted = check.command else { return nil }
-            let tokens = asserted.split(whereSeparator: \.isWhitespace)
-            guard let pathIndex = tokens.firstIndex(where: {
-                $0.hasPrefix(Constants.HookCommand.legacyProjectDirectory)
-            }), pathIndex > 0
+        let legacy = [Constants.HookCommand.legacyProjectDirectory]
+        return allDoctorChecks(manifest: manifest, components: components).compactMap { check in
+            guard check.type == .hookEventExists, let asserted = check.command,
+                  HookInterpreter.interpreter(ofRegisteredCommand: asserted, directories: legacy) != nil,
+                  let path = HookInterpreter.managedHookPath(in: asserted, directories: legacy)
             else { return nil }
             return Finding(
                 severity: .warning,
                 message: "Doctor check '\(check.name)' asserts command '\(asserted)', but project hooks"
                     + " are registered as '<interpreter> \(Constants.HookCommand.projectDirectory)…'"
-                    + " — match on '\(tokens[pathIndex])' alone"
+                    + " — match on '\(path)' alone"
             )
         }
+    }
+
+    private static func allDoctorChecks(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [ExternalDoctorCheckDefinition] {
+        (manifest.supplementaryDoctorChecks ?? []) + components.flatMap { $0.doctorChecks ?? [] }
     }
 
     private static func checkPythonModulePaths(
@@ -511,10 +516,7 @@ enum PackHeuristics {
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
-            + components.flatMap { $0.doctorChecks ?? [] }
-
-        return allChecks
+        allDoctorChecks(manifest: manifest, components: components)
             .filter { $0.scope != nil && !$0.type.honorsScope }
             .map { check in
                 let detail = switch check.type {
@@ -541,10 +543,7 @@ enum PackHeuristics {
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
-            + components.flatMap { $0.doctorChecks ?? [] }
-
-        return allChecks
+        allDoctorChecks(manifest: manifest, components: components)
             .filter { $0.matcher != nil && $0.type != .hookEventExists }
             .map { check in
                 Finding(

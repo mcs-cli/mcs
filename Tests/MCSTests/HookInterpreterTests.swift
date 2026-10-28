@@ -244,6 +244,13 @@ struct HookInterpreterPathTests {
                 directories: [directory]
             ) == "node --experimental-strip-types"
         )
+        // The anchored form sync writes today: the quoted variable keeps the path one token.
+        #expect(
+            HookInterpreter.interpreter(
+                ofRegisteredCommand: "node --experimental-strip-types \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/p/gate.ts",
+                directories: Constants.HookCommand.recognizedDirectories(isGlobal: false)
+            ) == "node --experimental-strip-types"
+        )
         // Not a managed hook invocation — must not yield a bogus interpreter.
         #expect(HookInterpreter.interpreter(ofRegisteredCommand: "mcs check-updates --hook", directories: [directory]) == nil)
         #expect(HookInterpreter.interpreter(ofRegisteredCommand: "python3 -m pkg.hook", directories: [directory]) == nil)
@@ -270,24 +277,19 @@ struct HookInterpreterPathTests {
         #expect(HookInterpreter.managedHookPath(in: "", directories: [directory]) == nil)
     }
 
-    @Test("Project directories recognise both the anchored and the legacy relative form")
-    func projectDirectoriesRecogniseBothForms() {
-        let directories = Constants.HookCommand.projectDirectories
-        let anchored = "node --experimental-strip-types \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/p/gate.ts"
-        #expect(HookInterpreter.managedHookPath(in: anchored, directories: directories) != nil)
-        #expect(
-            HookInterpreter.interpreter(ofRegisteredCommand: anchored, directories: directories)
-                == "node --experimental-strip-types"
-        )
-        #expect(HookInterpreter.managedHookPath(in: "bash .claude/hooks/p/x.sh", directories: directories) != nil)
-        #expect(HookInterpreter.managedHookPath(in: "bash ~/.claude/hooks/p/x.sh", directories: directories) == nil)
-    }
-
-    @Test("Project and global directories do not cross-match")
+    @Test("Each scope recognises its own forms and not the other scope's")
     func scopesDoNotCrossMatch() {
-        let command = "bash ~/.claude/hooks/p/x.sh"
-        #expect(HookInterpreter.managedHookPath(in: command, directories: [".claude/hooks/"]) == nil)
-        #expect(HookInterpreter.managedHookPath(in: command, directories: ["~/.claude/hooks/"]) != nil)
+        let project = Constants.HookCommand.recognizedDirectories(isGlobal: false)
+        let global = Constants.HookCommand.recognizedDirectories(isGlobal: true)
+        let globalCommand = "bash ~/.claude/hooks/p/x.sh"
+        let projectCommands = ["bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/p/x.sh", "bash .claude/hooks/p/x.sh"]
+
+        #expect(HookInterpreter.managedHookPath(in: globalCommand, directories: global) != nil)
+        #expect(HookInterpreter.managedHookPath(in: globalCommand, directories: project) == nil)
+        for command in projectCommands {
+            #expect(HookInterpreter.managedHookPath(in: command, directories: project) != nil, "\(command)")
+            #expect(HookInterpreter.managedHookPath(in: command, directories: global) == nil, "\(command)")
+        }
     }
 }
 

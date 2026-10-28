@@ -141,17 +141,20 @@ enum Constants {
         /// Project scope — hooks live in `<project>/.claude/hooks/`. Anchored to the project root
         /// because Claude Code runs hooks in the session's current directory, which a `cd` or
         /// EnterWorktree moves; quoted so a root containing spaces stays one argument.
-        static let projectDirectory = "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/"
+        static let projectDirectory = "\"$CLAUDE_PROJECT_DIR\"/" + legacyProjectDirectory
 
         /// Relative project prefix written by earlier releases, still recognised in settings and
         /// state that have not been re-synced since.
         static let legacyProjectDirectory = ".claude/hooks/"
 
-        /// Every project prefix a registered command may carry, current first.
-        static let projectDirectories = [projectDirectory, legacyProjectDirectory]
-
         /// Global scope — hooks live in `~/.claude/hooks/`.
         static let globalDirectory = "~/.claude/hooks/"
+
+        /// Every prefix a registered command in the scope may carry. The first is what sync writes
+        /// today; the rest are legacy forms still recognised until the next sync rewrites them.
+        static func recognizedDirectories(isGlobal: Bool) -> [String] {
+            isGlobal ? [globalDirectory] : [projectDirectory, legacyProjectDirectory]
+        }
     }
 
     // MARK: - MCP Scopes

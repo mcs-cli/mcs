@@ -105,10 +105,11 @@ struct ConfigurationDiscovery {
         discoverMCPServers(scope: scope, into: &config)
 
         // 2. Discover settings (hooks, plugins, remaining keys)
-        let hookDirectories = switch scope {
-        case .global: [Constants.HookCommand.globalDirectory]
-        case .project: Constants.HookCommand.projectDirectories
+        let isGlobal = switch scope {
+        case .global: true
+        case .project: false
         }
+        let hookDirectories = Constants.HookCommand.recognizedDirectories(isGlobal: isGlobal)
         let hookCommands = discoverSettings(
             at: settingsPath,
             hookDirectories: hookDirectories,
@@ -308,17 +309,18 @@ struct ConfigurationDiscovery {
 
         let files = hookFiles(in: hooksDir)
 
-        let commandToReg = hookCommands ?? [:]
+        // Keyed on the whole managed path, not the basename. Commands name the namespaced path
+        // (`.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts` capture the
+        // event and interpreter belonging to `pre-gate.ts`.
+        var registrationByPath: [String: HookRegistration] = [:]
+        for (command, registration) in hookCommands ?? [:] {
+            if let path = HookInterpreter.managedHookPath(in: command, directories: hookDirectories) {
+                registrationByPath[path] = registration
+            }
+        }
 
         for file in files {
-            // Match on the whole managed path, not the basename. Commands name the namespaced
-            // path (`.claude/hooks/<pack-id>/gate.ts`), and a basename substring lets `gate.ts`
-            // capture the event and interpreter belonging to `pre-gate.ts`.
-            let managedPaths = Set(hookDirectories.map { $0 + file.relativePath })
-            let matchedReg = commandToReg.first { command, _ in
-                HookInterpreter.managedHookPath(in: command, directories: hookDirectories)
-                    .map(managedPaths.contains) ?? false
-            }?.value
+            let matchedReg = hookDirectories.lazy.compactMap { registrationByPath[$0 + file.relativePath] }.first
 
             config.hookFiles.append(DiscoveredFile(
                 filename: file.url.lastPathComponent,
