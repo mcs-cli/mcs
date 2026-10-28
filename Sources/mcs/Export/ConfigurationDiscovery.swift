@@ -286,10 +286,8 @@ struct ConfigurationDiscovery {
     /// `hookInterpreter`. Without any of this, exporting a live `node …/gate.ts` hook would emit a
     /// manifest that re-registers it under bash.
     private static func interpreter(ofHookCommand command: String, directories: [String]) -> String? {
-        guard let interpreter = HookInterpreter.interpreter(
-                  ofRegisteredCommand: command,
-                  directories: directories
-              ),
+        let interpreter = HookInterpreter.interpreter(ofRegisteredCommand: command, directories: directories)
+        guard let interpreter,
               !HookInterpreter.isDefault(interpreter),
               HookInterpreter.rejectionReason(for: interpreter) == nil
         else { return nil }
