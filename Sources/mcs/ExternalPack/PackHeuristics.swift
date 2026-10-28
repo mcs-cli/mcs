@@ -475,9 +475,9 @@ enum PackHeuristics {
                 // `pre-<file>` because the check is a substring test.
                 findings.append(Finding(
                     severity: .warning,
-                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', but project hooks"
-                        + " are registered as '<interpreter> \(Constants.HookCommand.projectDirectory)…'"
-                        + " — match on '\(manifest.identifier)/\(invocation.destination)' alone"
+                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', which still passes,"
+                        + " but match on '\(manifest.identifier)/\(invocation.destination)' alone"
+                        + " so it doesn't depend on the registered prefix"
                 ))
             }
         }
