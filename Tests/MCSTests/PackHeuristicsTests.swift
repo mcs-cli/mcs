@@ -398,14 +398,14 @@ struct PackHeuristicsTests {
     @Test(
         "Warns when a hookEventExists check asserts the relative invocation, not the script path",
         arguments: [
-            ("bash .claude/hooks/fmt.sh", true),
-            ("bash .claude/hooks/test-pack/fmt.sh", true),
-            (".claude/hooks/fmt.sh", false),
-            ("bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/test-pack/fmt.sh", false),
-            ("bash ~/.claude/hooks/test-pack/fmt.sh", false),
+            ("bash .claude/hooks/fmt.sh", "never matches"),
+            ("bash .claude/hooks/test-pack/fmt.sh", "still passes"),
+            (".claude/hooks/fmt.sh", nil),
+            ("bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/test-pack/fmt.sh", nil),
+            ("bash ~/.claude/hooks/test-pack/fmt.sh", nil),
         ]
     )
-    func warnsOnRelativeInvocationAssertion(asserted: String, warns: Bool) throws {
+    func warnsOnRelativeInvocationAssertion(asserted: String, verdict: String?) throws {
         let tmpDir = try makeTmpDir(label: "heuristics")
         defer { try? FileManager.default.removeItem(at: tmpDir) }
 
@@ -419,9 +419,14 @@ struct PackHeuristicsTests {
             hookComponent(source: "hooks/fmt.sh", destination: "fmt.sh", doctorChecks: [check]),
         ])
         let findings = PackHeuristics.check(manifest: manifest, packPath: tmpDir)
-        #expect(findings.contains {
+        let nudges = findings.filter {
             $0.severity == .warning && $0.message.contains("match on 'test-pack/fmt.sh' alone")
-        } == warns)
+        }
+        if let verdict {
+            #expect(nudges.count == 1 && nudges[0].message.contains(verdict), "\(nudges)")
+        } else {
+            #expect(nudges.isEmpty, "\(nudges)")
+        }
     }
 
     @Test("Leaves relative assertions alone when they name no hook component's file")

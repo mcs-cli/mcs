@@ -473,11 +473,14 @@ enum PackHeuristics {
                 else { continue }
                 // Hooks always install under `<pack-id>/`, and a bare filename would also match
                 // `pre-<file>` because the check is a substring test.
+                let namespaced = "\(manifest.identifier)/\(invocation.destination)"
+                let verdict = path == legacyDirectory + namespaced
+                    ? "which still passes, but match on '\(namespaced)' alone so it doesn't depend on the registered prefix"
+                    : "which never matches, because component hooks install under '\(manifest.identifier)/'"
+                    + " — match on '\(namespaced)' alone"
                 findings.append(Finding(
                     severity: .warning,
-                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', which still passes,"
-                        + " but match on '\(manifest.identifier)/\(invocation.destination)' alone"
-                        + " so it doesn't depend on the registered prefix"
+                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', \(verdict)"
                 ))
             }
         }
