@@ -14,7 +14,7 @@ env:
   # Pinned so a lint verdict is a function of the repo: a new rule lands when this is bumped,
   # not when the runner image or upstream moves mid-review.
   SWIFTLINT_VERSION: '0.65.1'
-  SWIFTFORMAT_VERSION: '0.63.0'
+  SWIFTFORMAT_VERSION: '0.64.4'
 
 jobs:
   lint:

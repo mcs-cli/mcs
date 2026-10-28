@@ -74,7 +74,7 @@ struct BackupTests {
 
         #expect(first != nil)
         #expect(second != nil)
-        #expect(try #require(first?.path) != second!.path)
+        #expect(try #require(first?.path) != #require(second?.path))
     }
 
     // MARK: - findBackups
