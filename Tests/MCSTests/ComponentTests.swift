@@ -38,7 +38,7 @@ struct ComponentHookCommandTests {
         )
         #expect(
             component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
-                == "bash .claude/hooks/gate.sh"
+                == "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/gate.sh"
         )
         #expect(
             component.hookCommand(pathPrefix: Constants.HookCommand.globalDirectory)
@@ -58,7 +58,7 @@ struct ComponentHookCommandTests {
         )
         #expect(
             component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
-                == "node --experimental-strip-types --disable-warning=ExperimentalWarning .claude/hooks/gate.ts"
+                == "node --experimental-strip-types --disable-warning=ExperimentalWarning \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/gate.ts"
         )
     }
 
@@ -71,7 +71,7 @@ struct ComponentHookCommandTests {
         )
         #expect(
             component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
-                == "node .claude/hooks/fmt.js"
+                == "node \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/fmt.js"
         )
     }
 
@@ -88,7 +88,7 @@ struct ComponentHookCommandTests {
         )
         #expect(
             component.hookCommand(pathPrefix: Constants.HookCommand.projectDirectory)
-                == "python3 .claude/hooks/audit"
+                == "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/audit"
         )
     }
 

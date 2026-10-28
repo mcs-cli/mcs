@@ -147,14 +147,14 @@ enum HookInterpreter {
 
     // MARK: - Parsing a registered command
 
-    /// The hook path a registered command points at, when that path lives in `directory`.
+    /// The hook path a registered command points at, when that path lives in one of `directories`.
     ///
     /// Parsing counterpart of `ComponentDefinition.hookCommand(pathPrefix:)`. Any token may be the
     /// path, not just the last, so a command carrying trailing arguments is still recognised —
     /// which is what lets global-scope cleanup reclaim its own directory whatever the interpreter
     /// or argument list.
-    static func managedHookPath(in command: String, directory: String) -> String? {
-        tokens(of: command).first { $0.hasPrefix(directory) }
+    static func managedHookPath(in command: String, directories: [String]) -> String? {
+        tokens(of: command).first { token in directories.contains { token.hasPrefix($0) } }
     }
 
     /// The interpreter a registered hook command runs under, or nil when the command is not a
@@ -164,9 +164,10 @@ enum HookInterpreter {
     /// *trailing* token, because that is the shape the engine composes. Requiring it is what stops
     /// an unrelated multi-token command — `mcs check-updates --hook`, say — from yielding a
     /// nonsense interpreter.
-    static func interpreter(ofRegisteredCommand command: String, directory: String) -> String? {
+    static func interpreter(ofRegisteredCommand command: String, directories: [String]) -> String? {
         let parts = tokens(of: command)
-        guard parts.count > 1, parts[parts.count - 1].hasPrefix(directory) else { return nil }
+        guard parts.count > 1, let path = parts.last, directories.contains(where: { path.hasPrefix($0) })
+        else { return nil }
         return parts.dropLast().joined(separator: " ")
     }
 
@@ -176,11 +177,11 @@ enum HookInterpreter {
     /// sync actually installed — a hook a pack has declared but not yet synced does not demand its
     /// runtime early. Deduplicated so ten node hooks produce one check; order follows the commands
     /// so doctor output is stable.
-    static func distinctCheckableBinaries(inRegisteredCommands commands: [String], directory: String) -> [String] {
+    static func distinctCheckableBinaries(inRegisteredCommands commands: [String], directories: [String]) -> [String] {
         var seen: Set<String> = []
         var binaries: [String] = []
         for command in commands {
-            let interpreter = interpreter(ofRegisteredCommand: command, directory: directory)
+            let interpreter = interpreter(ofRegisteredCommand: command, directories: directories)
                 ?? Constants.HookCommand.defaultInterpreter
             let binary = binary(of: interpreter)
             guard isCheckable(binary: binary), seen.insert(binary).inserted else { continue }

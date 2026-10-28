@@ -229,7 +229,7 @@ struct HookInterpreterPathTests {
         ]
         for command in commands {
             #expect(
-                HookInterpreter.managedHookPath(in: command, directory: directory) != nil,
+                HookInterpreter.managedHookPath(in: command, directories: [directory]) != nil,
                 "should recognise '\(command)'"
             )
         }
@@ -241,16 +241,23 @@ struct HookInterpreterPathTests {
         #expect(
             HookInterpreter.interpreter(
                 ofRegisteredCommand: "node --experimental-strip-types .claude/hooks/p/gate.ts",
-                directory: directory
+                directories: [directory]
+            ) == "node --experimental-strip-types"
+        )
+        // The anchored form sync writes today: the quoted variable keeps the path one token.
+        #expect(
+            HookInterpreter.interpreter(
+                ofRegisteredCommand: "node --experimental-strip-types \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/p/gate.ts",
+                directories: Constants.HookCommand.recognizedDirectories(isGlobal: false)
             ) == "node --experimental-strip-types"
         )
         // Not a managed hook invocation — must not yield a bogus interpreter.
-        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "mcs check-updates --hook", directory: directory) == nil)
-        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "python3 -m pkg.hook", directory: directory) == nil)
+        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "mcs check-updates --hook", directories: [directory]) == nil)
+        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "python3 -m pkg.hook", directories: [directory]) == nil)
         // Path present but not trailing: recognised as managed, but the interpreter is unclear.
-        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "bash .claude/hooks/p/x.sh -v", directory: directory) == nil)
+        #expect(HookInterpreter.interpreter(ofRegisteredCommand: "bash .claude/hooks/p/x.sh -v", directories: [directory]) == nil)
         // Bare path with no interpreter token.
-        #expect(HookInterpreter.interpreter(ofRegisteredCommand: ".claude/hooks/p/x.sh", directory: directory) == nil)
+        #expect(HookInterpreter.interpreter(ofRegisteredCommand: ".claude/hooks/p/x.sh", directories: [directory]) == nil)
     }
 
     @Test("isDefault compares the whole interpreter, not a prefix")
@@ -265,16 +272,24 @@ struct HookInterpreterPathTests {
     @Test("Ignores commands pointing elsewhere")
     func ignoresForeignCommands() {
         let directory = "~/.claude/hooks/"
-        #expect(HookInterpreter.managedHookPath(in: "mcs check-updates --hook", directory: directory) == nil)
-        #expect(HookInterpreter.managedHookPath(in: "bash ~/scripts/mine.sh", directory: directory) == nil)
-        #expect(HookInterpreter.managedHookPath(in: "", directory: directory) == nil)
+        #expect(HookInterpreter.managedHookPath(in: "mcs check-updates --hook", directories: [directory]) == nil)
+        #expect(HookInterpreter.managedHookPath(in: "bash ~/scripts/mine.sh", directories: [directory]) == nil)
+        #expect(HookInterpreter.managedHookPath(in: "", directories: [directory]) == nil)
     }
 
-    @Test("Project and global directories do not cross-match")
+    @Test("Each scope recognises its own forms and not the other scope's")
     func scopesDoNotCrossMatch() {
-        let command = "bash ~/.claude/hooks/p/x.sh"
-        #expect(HookInterpreter.managedHookPath(in: command, directory: ".claude/hooks/") == nil)
-        #expect(HookInterpreter.managedHookPath(in: command, directory: "~/.claude/hooks/") != nil)
+        let project = Constants.HookCommand.recognizedDirectories(isGlobal: false)
+        let global = Constants.HookCommand.recognizedDirectories(isGlobal: true)
+        let globalCommand = "bash ~/.claude/hooks/p/x.sh"
+        let projectCommands = ["bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/p/x.sh", "bash .claude/hooks/p/x.sh"]
+
+        #expect(HookInterpreter.managedHookPath(in: globalCommand, directories: global) != nil)
+        #expect(HookInterpreter.managedHookPath(in: globalCommand, directories: project) == nil)
+        for command in projectCommands {
+            #expect(HookInterpreter.managedHookPath(in: command, directories: project) != nil, "\(command)")
+            #expect(HookInterpreter.managedHookPath(in: command, directories: global) == nil, "\(command)")
+        }
     }
 }
 
@@ -285,7 +300,7 @@ struct HookInterpreterCheckableBinaryTests {
     private let directory = ".claude/hooks/"
 
     private func binaries(_ commands: [String]) -> [String] {
-        HookInterpreter.distinctCheckableBinaries(inRegisteredCommands: commands, directory: directory)
+        HookInterpreter.distinctCheckableBinaries(inRegisteredCommands: commands, directories: [directory])
     }
 
     @Test("Deduplicates one binary across many hooks")

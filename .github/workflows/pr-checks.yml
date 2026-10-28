@@ -10,6 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Pinned so a lint verdict is a function of the repo: a new rule lands when this is bumped,
+  # not when the runner image or upstream moves mid-review.
+  SWIFTLINT_VERSION: '0.65.1'
+  SWIFTFORMAT_VERSION: '0.64.4'
+
 jobs:
   lint:
     name: Lint
@@ -18,9 +24,25 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install linters
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          brew install swiftformat swiftlint || true
-          brew upgrade swiftformat swiftlint || true
+          mkdir -p "$RUNNER_TEMP/linters/bin"
+          cd "$RUNNER_TEMP/linters"
+          gh release download "$SWIFTLINT_VERSION" --repo realm/SwiftLint --pattern portable_swiftlint.zip
+          gh release download "$SWIFTFORMAT_VERSION" --repo nicklockwood/SwiftFormat --pattern swiftformat.zip
+          unzip -q portable_swiftlint.zip -d swiftlint-zip
+          unzip -q swiftformat.zip -d swiftformat-zip
+          install -m 0755 swiftlint-zip/swiftlint bin/swiftlint
+          install -m 0755 swiftformat-zip/swiftformat bin/swiftformat
+          echo "$RUNNER_TEMP/linters/bin" >> "$GITHUB_PATH"
+
+      # Asserted, not just printed: a pin that silently resolved to something else would make every
+      # later verdict untrustworthy.
+      - name: Verify linter versions
+        run: |
+          swiftformat --version | grep -qx "$SWIFTFORMAT_VERSION"
+          swiftlint --version | grep -qx "$SWIFTLINT_VERSION"
 
       - name: SwiftFormat
         run: swiftformat --lint --strict .

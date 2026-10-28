@@ -184,7 +184,7 @@ when a TypeScript hook declares no interpreter.
   hook:
     source: hooks/gate.ts
     destination: gate.ts
-# → node --experimental-strip-types --disable-warning=ExperimentalWarning .claude/hooks/<pack-id>/gate.ts
+# → node --experimental-strip-types --disable-warning=ExperimentalWarning "$CLAUDE_PROJECT_DIR"/.claude/hooks/<pack-id>/gate.ts
 ```
 
 `hookInterpreter` accepts a bare command name (`node`), an absolute path
@@ -530,9 +530,12 @@ fire. Two optional fields tighten it:
 the component itself — restating the matcher here just creates a second copy that can drift from
 the first.
 
-When you do match on `command`, match the script path rather than the interpreter: a check
-asserting `bash .claude/hooks/…` stops matching the moment the component declares a
-`hookInterpreter`. `mcs pack validate` warns about that specific inconsistency.
+When you do match on `command`, match the script path rather than the whole invocation: a settings
+file's hook by its path as written, a component's hook by `<pack-id>/<file>` (component hooks always
+install under `<pack-id>/`, and a bare filename also matches `pre-<file>`). Naming an interpreter
+breaks the moment the component declares a different `hookInterpreter`. Component hooks are
+registered as `<interpreter> "$CLAUDE_PROJECT_DIR"/.claude/hooks/…`; an older check asserting the
+relative `bash .claude/hooks/…` still passes, but `mcs pack validate` suggests the path instead.
 
 **What this does not prove:** that the matcher matches a tool Claude Code actually emits. It proves
 the string you declared reached the settings file. Tool names are harness details that change

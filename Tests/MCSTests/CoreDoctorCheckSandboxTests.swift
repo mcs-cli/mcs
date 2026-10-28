@@ -618,6 +618,39 @@ struct ExternalHookEventExistsCheckSandboxTests {
         }
     }
 
+    @Test(
+        "A relative full-invocation assertion still matches an anchored project entry",
+        arguments: [("bash .claude/hooks/test-pack/gate.sh", true), ("bash .claude/hooks/test-pack/other.sh", false)]
+    )
+    func relativeAssertionMatchesAnchoredEntry(asserted: String, matches: Bool) throws {
+        let home = try makeGlobalTmpDir(label: "hook-event-anchored")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+
+        let settings = #"""
+        {
+          "hooks": {
+            "PreToolUse": [
+              { "hooks": [{ "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/test-pack/gate.sh" }] }
+            ]
+          }
+        }
+        """#
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+
+        var check = ExternalHookEventExistsCheck(
+            name: "PreToolUse hook", section: "Hooks",
+            event: "PreToolUse", commandSubstring: asserted, isOptional: false
+        )
+        check.environment = env
+        let result = check.check()
+        if case .pass = result {
+            #expect(matches, "unexpected pass for '\(asserted)'")
+        } else {
+            #expect(!matches, "expected '\(asserted)' to match, got \(result)")
+        }
+    }
+
     @Test("fail when hook event is not registered")
     func failWhenNotRegistered() throws {
         let home = try makeGlobalTmpDir(label: "hook-event-fail")

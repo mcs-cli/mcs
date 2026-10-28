@@ -30,6 +30,7 @@ enum PackHeuristics {
         findings += checkAmbiguousHookExtensions(components: components)
         findings += checkUninstalledHookRuntimes(components: components)
         findings += checkHookDoctorCheckInterpreters(manifest: manifest, components: components)
+        findings += checkRelativeHookInvocationAssertions(manifest: manifest, components: components)
         findings += checkDeprecatedKeys(manifest: manifest, components: components)
 
         // Surface the `ignore:` hint only when an actual unreferenced-file warning was emitted
@@ -404,7 +405,7 @@ enum PackHeuristics {
     ///
     /// The assertion is a substring of the registered command, so it may be just the script path
     /// (`gate.ts`, asserting nothing about the interpreter) or the whole invocation
-    /// (`bash .claude/hooks/gate.ts`). Only the latter can contradict the component, and comparing
+    /// (`bash …/gate.ts`). Only the latter can contradict the component, and comparing
     /// it against the resolved interpreter catches what a `bash ` prefix test missed: a node hook
     /// asserting `python3`, and a bash hook asserting `node`.
     private static func assertedInterpreter(in asserted: String, destination: String) -> String? {
@@ -444,6 +445,53 @@ enum PackHeuristics {
             }
         }
         return findings
+    }
+
+    /// A `hookEventExists` check on a hook component that asserts the relative invocation
+    /// (`bash .claude/hooks/…`). Doctor still accepts it by also matching with the
+    /// `"$CLAUDE_PROJECT_DIR"/` anchor removed, so this nudges authors toward the path alone.
+    /// Hooks shipped through a settings file are merged verbatim, so their relative command is
+    /// what gets registered and they are left alone.
+    private static func checkRelativeHookInvocationAssertions(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [Finding] {
+        let legacyDirectory = Constants.HookCommand.legacyProjectDirectory
+        let supplementary = manifest.supplementaryDoctorChecks ?? []
+        var findings: [Finding] = []
+        for component in components {
+            guard let invocation = component.hookInvocation else { continue }
+            let correlated = supplementary.filter {
+                $0.command?.contains(invocation.destination) == true
+            }
+            for check in (component.doctorChecks ?? []) + correlated
+                where check.type == .hookEventExists {
+                guard let asserted = check.command,
+                      HookInterpreter.interpreter(ofRegisteredCommand: asserted, directories: [legacyDirectory]) != nil,
+                      let path = HookInterpreter.managedHookPath(in: asserted, directories: [legacyDirectory]),
+                      path == legacyDirectory + invocation.destination || path.hasSuffix("/" + invocation.destination)
+                else { continue }
+                // Hooks always install under `<pack-id>/`, and a bare filename would also match
+                // `pre-<file>` because the check is a substring test.
+                let namespaced = "\(manifest.identifier)/\(invocation.destination)"
+                let verdict = path == legacyDirectory + namespaced
+                    ? "which still passes, but match on '\(namespaced)' alone so it doesn't depend on the registered prefix"
+                    : "which never matches, because component hooks install under '\(manifest.identifier)/'"
+                    + " — match on '\(namespaced)' alone"
+                findings.append(Finding(
+                    severity: .warning,
+                    message: "Doctor check '\(check.name)' asserts command '\(asserted)', \(verdict)"
+                ))
+            }
+        }
+        return findings
+    }
+
+    private static func allDoctorChecks(
+        manifest: ExternalPackManifest,
+        components: [ExternalComponentDefinition]
+    ) -> [ExternalDoctorCheckDefinition] {
+        (manifest.supplementaryDoctorChecks ?? []) + components.flatMap { $0.doctorChecks ?? [] }
     }
 
     private static func checkPythonModulePaths(
@@ -486,10 +534,7 @@ enum PackHeuristics {
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
-            + components.flatMap { $0.doctorChecks ?? [] }
-
-        return allChecks
+        allDoctorChecks(manifest: manifest, components: components)
             .filter { $0.scope != nil && !$0.type.honorsScope }
             .map { check in
                 let detail = switch check.type {
@@ -516,10 +561,7 @@ enum PackHeuristics {
         manifest: ExternalPackManifest,
         components: [ExternalComponentDefinition]
     ) -> [Finding] {
-        let allChecks = (manifest.supplementaryDoctorChecks ?? [])
-            + components.flatMap { $0.doctorChecks ?? [] }
-
-        return allChecks
+        allDoctorChecks(manifest: manifest, components: components)
             .filter { $0.matcher != nil && $0.type != .hookEventExists }
             .map { check in
                 Finding(

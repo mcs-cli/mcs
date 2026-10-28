@@ -91,16 +91,14 @@ struct DoctorRunner {
             return effectiveProjectRoot.map(SyncTarget.project) ?? .global
         }
 
-        /// Hook directory the commands in `artifactsByPack` were recorded with.
+        /// Hook directories the commands in `artifactsByPack` may have been recorded with.
         ///
         /// Relies on an invariant every `CheckScope` construction path upholds: a non-nil
         /// `effectiveProjectRoot` means the records came from project state, which sync wrote
-        /// with the project prefix. Global-only packs get their own scope rather than being
+        /// with a project prefix. Global-only packs get their own scope rather than being
         /// folded into a project one, so the two never mix.
-        var hookPathPrefix: String {
-            effectiveProjectRoot != nil
-                ? Constants.HookCommand.projectDirectory
-                : Constants.HookCommand.globalDirectory
+        var hookPathPrefixes: [String] {
+            Constants.HookCommand.recognizedDirectories(isGlobal: effectiveProjectRoot == nil)
         }
 
         func makeCollisionContext(environment: Environment) -> (any CollisionFilesystemContext)? {
@@ -554,13 +552,14 @@ struct DoctorRunner {
                     check: HookSettingsCheck(
                         expectations: hookExpectations(for: artifacts, pack: pack, scope: scope),
                         settingsPath: settingsPath,
-                        packName: pack.displayName
+                        packName: pack.displayName,
+                        legacyDirectories: Array(scope.hookPathPrefixes.dropFirst())
                     ),
                     syncTarget: scope.syncTarget
                 ))
                 let interpreterBinaries = HookInterpreter.distinctCheckableBinaries(
                     inRegisteredCommands: artifacts.hookCommands,
-                    directory: scope.hookPathPrefix
+                    directories: scope.hookPathPrefixes
                 )
                 for binary in interpreterBinaries {
                     checks.append((
@@ -628,9 +627,11 @@ struct DoctorRunner {
         for component in pack.components {
             // Bind the registration explicitly rather than relying on `hookCommand(pathPrefix:)`
             // already having required one — same shape the sync-side join uses.
-            if let registration = component.hookRegistration,
-               let command = component.hookCommand(pathPrefix: scope.hookPathPrefix) {
-                registrationsByCommand[command] = registration
+            guard let registration = component.hookRegistration else { continue }
+            for prefix in scope.hookPathPrefixes {
+                if let command = component.hookCommand(pathPrefix: prefix) {
+                    registrationsByCommand[command] = registration
+                }
             }
         }
         return artifacts.hookCommands.map {

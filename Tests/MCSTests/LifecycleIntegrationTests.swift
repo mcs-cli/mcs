@@ -256,7 +256,7 @@ private struct LifecycleTestBed {
 
     /// Derive the expected hook command string for a project-scoped hook destination.
     func projectHookCommand(_ destination: String, interpreter: String = "bash") -> String {
-        "\(interpreter) .claude/hooks/\(destination)"
+        "\(interpreter) \(Constants.HookCommand.projectDirectory)\(destination)"
     }
 }
 
@@ -501,7 +501,7 @@ struct SinglePackLifecycleTests {
                 "PreToolUse": [
                   {
                     "matcher": "Task",
-                    "hooks": [{ "type": "command", "command": "bash .claude/hooks/order-pack/gate.sh" }]
+                    "hooks": [{ "type": "command", "command": "bash \\"$CLAUDE_PROJECT_DIR\\"/.claude/hooks/order-pack/gate.sh" }]
                   }
                 ]
               }
@@ -529,6 +529,64 @@ struct SinglePackLifecycleTests {
             #expect(groups.count == 1, "settingsFirst=\(settingsFirst)")
             #expect(groups.first?.matcher == "Agent|Task", "settingsFirst=\(settingsFirst)")
         }
+    }
+
+    @Test("Legacy relative hook entries: doctor warns, re-sync rewrites them anchored")
+    func legacyRelativeHookMigration() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let hookSource = try bed.makeHookSource(name: "lint.sh")
+        let pack = MockTechPack(
+            identifier: "test-pack",
+            displayName: "Test Pack",
+            components: [
+                bed.hookComponent(
+                    pack: "test-pack", id: "lint-hook", source: hookSource, destination: "lint.sh",
+                    // A runtime no runner has, so the interpreter check must fail under both
+                    // prefixes; parsing a legacy command as bash would hide it.
+                    hookRegistration: HookRegistration(event: .preToolUse, matcher: "Bash", interpreter: "mcs-missing-runtime")
+                ),
+            ]
+        )
+        let registry = TechPackRegistry(packs: [pack])
+        let configurator = bed.makeConfigurator(registry: registry)
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        let clean = try bed.runDoctor(registry: registry)
+        #expect(clean.issues > 0)
+
+        // Rewrite settings and state the way an earlier release left them.
+        let anchored = bed.projectHookCommand("test-pack/lint.sh", interpreter: "mcs-missing-runtime")
+        let legacy = "mcs-missing-runtime \(Constants.HookCommand.legacyProjectDirectory)test-pack/lint.sh"
+        var settings = try Settings.load(from: bed.settingsLocalPath)
+        settings.hooks = settings.hooks?.mapValues { groups in
+            groups.map { group in
+                var group = group
+                group.hooks = group.hooks?.map { entry in
+                    var entry = entry
+                    if entry.command == anchored { entry.command = legacy }
+                    return entry
+                }
+                return group
+            }
+        }
+        try settings.save(to: bed.settingsLocalPath)
+        var state = try bed.projectState()
+        var record = try #require(state.artifacts(for: "test-pack"))
+        record.hookCommands = [legacy]
+        state.setArtifacts(record, for: "test-pack")
+        try state.save()
+
+        let legacySummary = try bed.runDoctor(registry: registry)
+        #expect(legacySummary.warnings > clean.warnings)
+        #expect(legacySummary.issues == clean.issues)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let commands = try bed.hookCommands(event: Constants.HookEvent.preToolUse.rawValue)
+        #expect(commands == [anchored])
+        #expect(try bed.projectState().artifacts(for: "test-pack")?.hookCommands == [anchored])
+        #expect(try bed.runDoctor(registry: registry).warnings == clean.warnings)
     }
 }
 

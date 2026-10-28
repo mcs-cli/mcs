@@ -341,11 +341,14 @@ struct HookSettingsCheck: DoctorCheck {
     let expectations: [ExpectedHook]
     let settingsPath: URL
     let packName: String
+    /// Prefixes sync no longer writes; a present command under one of them is reported for re-sync.
+    let legacyDirectories: [String]
 
-    init(expectations: [ExpectedHook], settingsPath: URL, packName: String) {
+    init(expectations: [ExpectedHook], settingsPath: URL, packName: String, legacyDirectories: [String] = []) {
         self.expectations = expectations
         self.settingsPath = settingsPath
         self.packName = packName
+        self.legacyDirectories = legacyDirectories
     }
 
     /// Presence-only verification, for callers with no declaration to compare against.
@@ -385,6 +388,11 @@ struct HookSettingsCheck: DoctorCheck {
             guard !placements.isEmpty else {
                 missing.append(expectation.command)
                 continue
+            }
+            // Still fires from the project root, so a warning: it only breaks once the session
+            // leaves the root, and the next sync rewrites it.
+            if HookInterpreter.managedHookPath(in: expectation.command, directories: legacyDirectories) != nil {
+                drift.append("'\(expectation.command)' uses a relative path that stops firing after a cd")
             }
             if let registration = expectation.registration,
                let finding = driftFinding(

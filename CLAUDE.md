@@ -164,9 +164,12 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 
 ## Code Style
 
-SwiftFormat and SwiftLint enforce consistent code style. CI installs both from Homebrew and always
-gets the latest release; a local install may come from a different manager (Mint, for instance) and
-sit earlier on `PATH`, so `brew install` can appear to succeed while the old binary keeps answering.
+SwiftFormat and SwiftLint enforce consistent code style. CI downloads a **pinned** release of each
+(`SWIFTLINT_VERSION` / `SWIFTFORMAT_VERSION` in `pr-checks.yml`) and asserts the binary reports it,
+so a lint verdict depends on the repo alone — new rules arrive when someone bumps the pin. Keep the
+local install on those versions or CI will disagree with you; a local install may also come from a
+different manager (Mint, for instance) and sit earlier on `PATH`, so `brew install` can appear to
+succeed while the old binary keeps answering.
 If the formatter fails with `error: Unknown rule '<name>'` on every file, that is a stale local
 install rather than a broken config — check `which -a swiftformat` and the version of each copy.
 
@@ -219,7 +222,7 @@ swiftlint --fix
 - **External pack protocol**: `TechPack` protocol with `ExternalPackAdapter` bridging YAML manifests (`techpack.yaml`) to the same install/doctor/sync flows
 - **Section markers**: composed files use `<!-- mcs:begin/end -->` HTML comments to separate tool-managed content from user content
 - **Settings composition**: each pack's hook entries compose into `<project>/.claude/settings.local.json` as individual `HookGroup` entries
-- **Hook interpreters**: a registered hook command is `<interpreter> <path>`, composed only in `ComponentDefinition.hookCommand(pathPrefix:)`. `HookInterpreter.resolve` picks the interpreter — explicit `hookInterpreter` → file extension (`.js`→node, `.py`→python3, TypeScript infers nothing) → `bash`. Global-scope cleanup matches its own entries by the **path token**, never an interpreter prefix, so a non-bash hook is stripped on unconfigure instead of orphaning its settings entry
+- **Hook interpreters**: a registered hook command is `<interpreter> <path>`, composed only in `ComponentDefinition.hookCommand(pathPrefix:)`. The project path is anchored as `"$CLAUDE_PROJECT_DIR"/.claude/hooks/` because hooks run in the session's current directory; the legacy relative `.claude/hooks/` is still recognised (doctor warns, sync rewrites it). `HookInterpreter.resolve` picks the interpreter — explicit `hookInterpreter` → file extension (`.js`→node, `.py`→python3, TypeScript infers nothing) → `bash`. Global-scope cleanup matches its own entries by the **path token**, never an interpreter prefix, so a non-bash hook is stripped on unconfigure instead of orphaning its settings entry
 - **Backup for mixed-ownership files**: timestamped backup before modifying files with user content (CLAUDE.local.md); tool-managed files are not backed up since they can be regenerated
 - **Component-derived doctor checks**: `ComponentDefinition` is the single source of truth — `deriveDoctorCheck()` auto-generates verification from `installAction`, supplementary checks handle extras
 - **Project awareness**: doctor detects project root (walk-up for `.git/`), resolves packs from `.claude/.mcs-project` before falling back to section marker inference, then to global manifest

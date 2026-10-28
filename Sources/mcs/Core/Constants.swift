@@ -138,11 +138,26 @@ enum Constants {
         /// Interpreter used when a component declares none and the extension implies none.
         static let defaultInterpreter = "bash"
 
-        /// Project scope — hooks live in `<project>/.claude/hooks/`.
-        static let projectDirectory = ".claude/hooks/"
+        /// Project scope — hooks live in `<project>/.claude/hooks/`. Anchored to the project root
+        /// because Claude Code runs hooks in the session's current directory, which a mid-session
+        /// `cd` moves; quoted so a root containing spaces stays one argument.
+        static let projectDirectory = projectRootAnchor + legacyProjectDirectory
+
+        /// The token prefix that anchors a project hook path; stripping it yields the legacy form.
+        static let projectRootAnchor = "\"$CLAUDE_PROJECT_DIR\"/"
+
+        /// Relative project prefix written by earlier releases, still recognised in settings and
+        /// state that have not been re-synced since.
+        static let legacyProjectDirectory = ".claude/hooks/"
 
         /// Global scope — hooks live in `~/.claude/hooks/`.
         static let globalDirectory = "~/.claude/hooks/"
+
+        /// Every prefix a registered command in the scope may carry. The first is what sync writes
+        /// today; the rest are legacy forms still recognised until the next sync rewrites them.
+        static func recognizedDirectories(isGlobal: Bool) -> [String] {
+            isGlobal ? [globalDirectory] : [projectDirectory, legacyProjectDirectory]
+        }
     }
 
     // MARK: - MCP Scopes
