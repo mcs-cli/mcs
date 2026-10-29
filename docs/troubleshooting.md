@@ -112,7 +112,7 @@ claude plugin install <plugin-name>@<org>
 
 **Cause**: mcs links the plugin into its own marketplace at `~/.mcs/marketplaces/<pack-id>/`, and Claude Code should report it as read from that folder. Common causes:
 - The link or the marketplace registration was removed by hand.
-- A declined trust prompt unlinked the plugin after the checkout couldn't be reset.
+- An update that didn't end trusted couldn't return the checkout to its trusted commit, so the plugin was left unlinked.
 - The installed Claude Code version no longer loads linked plugins in place.
 
 **Fix**: Re-run sync, which re-links and re-registers it:
