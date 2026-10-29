@@ -128,7 +128,7 @@ values during `mcs sync`. The server `name` is never substituted.
 
 ### `plugin: "name@org"`
 
-Installs a Claude Code plugin. Infers `type: plugin`.
+Installs a Claude Code plugin. Infers `type: plugin`. The version follows the marketplace, not the pack's `ref:`: `mcs update` moves it to the marketplace's current release. Plugin content is not covered by the pack's trust prompt.
 
 ```yaml
 - id: my-plugin
