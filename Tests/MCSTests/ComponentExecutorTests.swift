@@ -220,6 +220,37 @@ struct ComponentExecutorTests {
         #expect(autoUpdate as? Bool == false)
     }
 
+    @Test("installPlugin links a pack-hosted plugin through the pack's marketplace, without auto-update")
+    func installPluginPackHosted() throws {
+        let home = try makeTmpDir(label: "pack-hosted")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let env = Environment(home: home)
+        let source = home.appendingPathComponent("checkout")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        // The entry `marketplace add` writes: without it, auto-update could never be set either way.
+        try FileManager.default.createDirectory(at: env.claudeDirectory, withIntermediateDirectories: true)
+        let settings = #"{"extraKnownMarketplaces":{"mcs-xcrew":{"source":{"source":"directory","path":"/x"}}}}"#
+        try settings.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+        let cli = MockClaudeCLI()
+        let executor = ComponentExecutor(
+            environment: env, output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: env), claudeCLI: cli
+        )
+
+        let outcome = executor.installPlugin("demo@mcs-xcrew", scope: Constants.PluginScope.user, hostedSource: source)
+
+        #expect(outcome == .installed(id: "demo@mcs-xcrew", userScopeCopy: false))
+        #expect(cli.marketplaceAddCalls == [PackMarketplace.wrapperDirectory(packID: "xcrew", environment: env).path])
+        #expect(try String(contentsOf: env.claudeSettings, encoding: .utf8) == settings)
+    }
+
+    @Test("installPlugin refuses a pack-hosted plugin with no directory in its pack")
+    func installPluginPackHostedWithoutSource() {
+        let cli = MockClaudeCLI()
+        #expect(makeExecutor(cli).installPlugin("demo@mcs-xcrew", scope: Constants.PluginScope.user) == .failed)
+        #expect(cli.pluginInstallCalls.isEmpty)
+    }
+
     @Test("installPlugin skips a plugin whose marketplace can't be found")
     func installPluginUnresolvableMarketplace() {
         let cli = MockClaudeCLI()

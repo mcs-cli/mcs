@@ -201,6 +201,16 @@ enum Constants {
 
         /// The GitHub repo path for the official plugin marketplace.
         static let officialMarketplaceRepo = "anthropics/claude-plugins-official"
+
+        /// The marketplace token (`name@pack`) for a plugin the pack's own repository hosts.
+        static let packToken = "pack"
+
+        /// Prefix of the marketplace mcs registers for a pack-hosted plugin (`mcs-<pack-id>`).
+        /// Reserved: a manifest may not name such a marketplace itself.
+        static let packMarketplacePrefix = "mcs-"
+
+        /// The directory under `~/.mcs/` holding one generated marketplace per pack.
+        static let packMarketplacesDirectory = "marketplaces"
     }
 }
 

@@ -724,4 +724,33 @@ struct ExternalPackAdapterTests {
         let adapter = ExternalPackAdapter(manifest: manifest, packPath: tmpDir)
         return (adapter, tmpDir)
     }
+
+    @Test("A techpack.yaml plugin declared as name@pack becomes the pack's own marketplace plugin")
+    func packHostedPluginFromManifest() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try writePackMarketplace(at: tmpDir, plugins: ["demo": "./"])
+        let yaml = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A test pack
+        components:
+          - id: plugin
+            description: The plugin
+            plugin: "demo@pack"
+        """
+        let file = tmpDir.appendingPathComponent("techpack.yaml")
+        try yaml.write(to: file, atomically: true, encoding: .utf8)
+
+        let adapter = try ExternalPackAdapter(manifest: ExternalPackManifest.load(from: file).normalized(), packPath: tmpDir)
+
+        let component = try #require(adapter.components.first)
+        guard case let .plugin(name) = component.installAction else {
+            Issue.record("Expected a plugin component, got \(component.installAction)")
+            return
+        }
+        #expect(name == "demo@mcs-test-pack")
+        #expect(component.pluginSource == tmpDir)
+    }
 }

@@ -66,16 +66,6 @@ struct PackFetcherOperationTests {
         return (fetcher, shell)
     }
 
-    /// Set up a pack directory suitable for update tests, returning the dirs, fetcher, and mock shell.
-    private func makeUpdateFixture() throws -> (tmpDir: URL, packPath: URL, fetcher: PackFetcher, shell: MockShellRunner) {
-        let tmpDir = try makeTmpDir()
-        let packsDir = tmpDir.appendingPathComponent("packs")
-        let packPath = packsDir.appendingPathComponent("test-pack")
-        try FileManager.default.createDirectory(at: packPath, withIntermediateDirectories: true)
-        let (fetcher, shell) = makeMockFetcher(home: tmpDir, packsDir: packsDir)
-        return (tmpDir, packPath, fetcher, shell)
-    }
-
     // MARK: - ensureGitAvailable
 
     @Test("fetch throws gitNotInstalled when git is missing")
@@ -203,146 +193,64 @@ struct PackFetcherOperationTests {
         #expect(shell.runCalls.isEmpty)
     }
 
-    // MARK: - update tests
+    // MARK: - fetchTarget tests
 
-    @Test("update calls fetch and reset for default branch")
-    func updateCallsFetchAndReset() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "new-sha", stderr: ""),
-        ]
-
-        let result = try fetcher.update(packPath: packPath, ref: nil)
-
-        #expect(result != nil)
-        #expect(result?.commitSHA == "new-sha")
-
-        let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("--depth"))
-        let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("origin/HEAD"))
+    /// A bare remote with one commit, cloned into `packs/test-pack` the way `pack add` does.
+    private func makeRemoteFixture() throws -> (tmpDir: URL, work: URL, packPath: URL, fetcher: PackFetcher, git: ([String]) throws -> String) {
+        let tmpDir = try makeTmpDir()
+        let env = Environment(home: tmpDir)
+        let shell = ShellRunner(environment: env)
+        let git = { (arguments: [String]) throws -> String in try runGit(arguments, in: tmpDir) }
+        let remote = tmpDir.appendingPathComponent("remote.git")
+        let work = tmpDir.appendingPathComponent("work")
+        _ = try git(["init", "-q", "--bare", remote.path])
+        _ = try git(["clone", "-q", remote.path, work.path])
+        try "v1".write(to: work.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        _ = try git(["-C", work.path, "add", "."])
+        _ = try git(["-C", work.path, "-c", "user.email=t@mcs.dev", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-qm", "v1"])
+        _ = try git(["-C", work.path, "push", "-q"])
+        let fetcher = PackFetcher(shell: shell, output: CLIOutput(colorsEnabled: false), packsDirectory: tmpDir.appendingPathComponent("packs"))
+        let packPath = try fetcher.fetch(url: remote.path, identifier: "test-pack", ref: nil).localPath
+        return (tmpDir, work, packPath, fetcher, git)
     }
 
-    @Test("update returns nil when SHA is unchanged")
-    func updateReturnsNilWhenUnchanged() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+    @Test("fetchTarget returns the remote's new commit without moving the checkout")
+    func fetchTargetLeavesCheckout() throws {
+        let fix = try makeRemoteFixture()
+        defer { try? FileManager.default.removeItem(at: fix.tmpDir) }
+        let before = try fix.fetcher.currentCommit(at: fix.packPath)
+        try "v2".write(to: fix.work.appendingPathComponent("file.txt"), atomically: true, encoding: .utf8)
+        _ = try fix.git(["-C", fix.work.path, "-c", "user.email=t@mcs.dev", "-c", "user.name=t", "-c", "commit.gpgsign=false", "commit", "-qam", "v2"])
+        _ = try fix.git(["-C", fix.work.path, "push", "-q"])
 
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "same-sha", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "same-sha", stderr: ""),
-        ]
+        let target = try fix.fetcher.fetchTarget(packPath: fix.packPath, ref: nil)
 
-        let result = try fetcher.update(packPath: packPath, ref: nil)
-        #expect(result == nil)
+        #expect(try target == (fix.git(["-C", fix.work.path, "rev-parse", "HEAD"])))
+        #expect(try fix.fetcher.currentCommit(at: fix.packPath) == before)
     }
 
-    @Test("update throws fetchFailed on error")
-    func updateThrowsOnFetchFailure() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+    @Test("fetchTarget resolves an annotated tag to its commit, so an unchanged pin is not a change")
+    func fetchTargetPeelsAnnotatedTag() throws {
+        let fix = try makeRemoteFixture()
+        defer { try? FileManager.default.removeItem(at: fix.tmpDir) }
+        _ = try fix.git(["-C", fix.work.path, "-c", "user.email=t@mcs.dev", "-c", "user.name=t", "tag", "-a", "v1.0.0", "-m", "release"])
+        _ = try fix.git(["-C", fix.work.path, "push", "-q", "origin", "v1.0.0"])
 
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 1, stdout: "", stderr: "fatal: remote not found"),
-        ]
+        let target = try fix.fetcher.fetchTarget(packPath: fix.packPath, ref: "v1.0.0")
 
-        #expect(throws: PackFetchError.self) {
-            try fetcher.update(packPath: packPath, ref: nil)
-        }
+        #expect(try target == (fix.fetcher.currentCommit(at: fix.packPath)))
     }
 
-    @Test("update with tag ref fetches the ref and resets to FETCH_HEAD")
-    func updateWithRefFetchesAndResets() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
+    @Test("fetchTarget throws fetchFailed for a ref the remote doesn't have")
+    func fetchTargetMissingRef() throws {
+        let fix = try makeRemoteFixture()
+        defer { try? FileManager.default.removeItem(at: fix.tmpDir) }
 
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "new-sha", stderr: ""),
-        ]
-
-        let result = try fetcher.update(packPath: packPath, ref: "v2.0.0")
-
-        #expect(result?.commitSHA == "new-sha")
-
-        let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("v2.0.0"))
-
-        let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("FETCH_HEAD"))
-
-        #expect(!shell.runCalls.contains { $0.arguments.contains("checkout") })
-    }
-
-    @Test("update with branch ref advances the checked-out commit SHA")
-    func updateWithBranchRefAdvancesCheckedOutCommit() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "new-sha", stderr: ""),
-        ]
-
-        let result = try fetcher.update(packPath: packPath, ref: "main")
-
-        #expect(result != nil)
-        #expect(result?.commitSHA == "new-sha")
-
-        let fetchCall = try #require(shell.runCalls.first { $0.arguments.contains("fetch") })
-        #expect(fetchCall.arguments.contains("main"))
-
-        let resetCall = try #require(shell.runCalls.first { $0.arguments.contains("reset") })
-        #expect(resetCall.arguments.contains("FETCH_HEAD"))
-    }
-
-    @Test("update throws fetchFailed when ref fetch fails")
-    func updateWithRefThrowsFetchFailed() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 128, stdout: "", stderr: "fatal: couldn't find remote ref refs/heads/nonexistent"),
-        ]
-
-        do {
-            _ = try fetcher.update(packPath: packPath, ref: "nonexistent-tag")
-            Issue.record("Expected fetchFailed to be thrown")
-        } catch let error as PackFetchError {
-            guard case .fetchFailed = error else {
-                Issue.record("Expected .fetchFailed, got \(error)")
-                return
-            }
-        }
-    }
-
-    @Test("update throws updateFailed when reset fails")
-    func updateThrowsWhenResetFails() throws {
-        let (tmpDir, packPath, fetcher, shell) = try makeUpdateFixture()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-
-        // rev-parse, fetch succeeds, reset fails
-        shell.runResults = [
-            ShellResult(exitCode: 0, stdout: "old-sha", stderr: ""),
-            ShellResult(exitCode: 0, stdout: "", stderr: ""),
-            ShellResult(exitCode: 1, stdout: "", stderr: "fatal: could not reset"),
-        ]
-
-        #expect(throws: PackFetchError.self) {
-            try fetcher.update(packPath: packPath, ref: nil)
+        #expect {
+            try fix.fetcher.fetchTarget(packPath: fix.packPath, ref: "nonexistent-tag")
+        } throws: { error in
+            guard case PackFetchError.fetchFailed = error else { return false }
+            return true
         }
     }
 

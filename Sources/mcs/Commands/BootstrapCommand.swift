@@ -347,7 +347,7 @@ struct BootstrapCommand: LockedCommand {
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
-            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy),
+            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy, shell: ctx.shell),
             environment: ctx.env,
             output: ctx.output
         )
@@ -373,7 +373,7 @@ struct BootstrapCommand: LockedCommand {
             ctx.output.error("Bootstrap aborted: trust declined for '\(target.identifier)'")
             trust.hintIfUnattended(output: ctx.output, subject: "declared packs")
             throw ExitCode.failure
-        case .fetchFailed, .manifestInvalid, .internalError:
+        case .fetchFailed, .manifestInvalid, .internalError, .restoreFailed:
             ctx.output.error("Bootstrap aborted: \(result.reason ?? "update failed") (\(target.identifier))")
             throw ExitCode.failure
         }

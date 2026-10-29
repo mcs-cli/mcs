@@ -216,6 +216,18 @@ struct RemovePack: LockedCommand {
             throw ExitCode.failure
         }
 
+        // Before the registry entry and checkout go, so a failure leaves a re-run something to finish
+        // and the marketplace never links to a deleted checkout.
+        do {
+            try PackMarketplace.unregister(
+                packID: identifier, claudeCLI: ClaudeIntegration(shell: ctx.shell), environment: ctx.env
+            )
+        } catch {
+            ctx.output.error(error.localizedDescription)
+            ctx.output.error("Fix the error above and re-run 'mcs pack remove \(identifier)'.")
+            throw ExitCode.failure
+        }
+
         // 7. Remove from registry
         do {
             var data = registryData
@@ -364,7 +376,7 @@ struct UpdatePack: LockedCommand {
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
-            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy),
+            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy, shell: ctx.shell),
             environment: ctx.env,
             output: ctx.output
         )
@@ -424,7 +436,7 @@ struct UpdatePack: LockedCommand {
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
                 anyTrustDeclined = true
-            case .fetchFailed, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError, .restoreFailed:
                 ctx.output.warn("\(entry.identifier): \(result.reason ?? "update failed")")
                 failedPacks.append(entry.identifier)
             }

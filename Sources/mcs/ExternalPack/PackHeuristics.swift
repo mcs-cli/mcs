@@ -19,7 +19,9 @@ enum PackHeuristics {
         findings += checkEmptyPack(manifest: manifest)
         findings += checkRootSourceCopy(components: components)
         findings += checkSettingsFileSources(components: components, packPath: packPath)
-        let unreferenced = checkUnreferencedFiles(manifest: manifest, packPath: packPath)
+        let pluginDirs = packHostedPluginDirectories(manifest: manifest, packPath: packPath)
+        let unreferenced = pluginDirs.contains(".") ? [] :
+            checkUnreferencedFiles(manifest: manifest, packPath: packPath, pluginDirs: pluginDirs)
             + checkRootLevelContentFiles(manifest: manifest, packPath: packPath)
         findings += unreferenced
         findings += checkMCPDependencyGaps(components: components)
@@ -120,7 +122,8 @@ enum PackHeuristics {
 
     private static func checkUnreferencedFiles(
         manifest: ExternalPackManifest,
-        packPath: URL
+        packPath: URL,
+        pluginDirs: [String]
     ) -> [Finding] {
         let fm = FileManager.default
         let referencedPaths = manifest.referencedPaths
@@ -172,6 +175,10 @@ enum PackHeuristics {
             for itemURL in contents {
                 let relativePath = "\(dirName)/\(itemURL.lastPathComponent)"
                 if referencedPaths.contains(relativePath) { continue }
+                let inPlugin = pluginDirs.contains {
+                    relativePath == $0 || relativePath.hasPrefix("\($0)/") || $0.hasPrefix("\(relativePath)/")
+                }
+                if inPlugin { continue }
                 if isIgnoredByManifest(relativePath, manifest: manifest) { continue }
                 findings.append(Finding(
                     severity: .warning,
@@ -181,6 +188,17 @@ enum PackHeuristics {
         }
 
         return findings
+    }
+
+    /// Pack-relative directories of `@pack` plugins (`"."` for the pack root): Claude Code loads
+    /// everything under them, so none of it is an unreferenced file.
+    private static func packHostedPluginDirectories(manifest: ExternalPackManifest, packPath: URL) -> [String] {
+        do {
+            return try PackMarketplace.hostedPlugins(in: manifest, packPath: packPath).map(\.relativePath)
+        } catch {
+            // Loading the pack reports an unresolvable source as an error of its own.
+            return []
+        }
     }
 
     /// True when the path (or the directory tree it lives in) matches any `ignore:` entry

@@ -122,11 +122,11 @@ mcs update --trust-all           # Trust changed executable content without prom
 
 **Plugins:** after re-applying, `mcs update` moves every plugin mcs installed to its marketplace's current version: one `claude plugin marketplace update` per marketplace, then `claude plugin update <id> -s <scope>` in each scope that recorded it. Version changes are printed as `<id> old → new`; `--dry-run` lists what would be updated. A plugin the user installed at the same scope before mcs did is left alone. This tracks the marketplace's latest release, not the pack's `ref:`. `mcs sync` and `mcs doctor --fix` never update plugins.
 
-**Trust prompts:** when a pack's executable content has changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run (the registry stays at the old SHA, and the pack is excluded from re-apply so untrusted scripts don't auto-install). The prompt re-fires on the next `mcs update` run. Without a terminal the prompt reads as "no", so an unattended run needs `--trust-all` to take updates that change a pack's executable content. An unattended run that tracks a branch trusts whatever that branch next contains; pin packs to a tag (`mcs pack add <url> --ref <tag>`) where that matters.
+**Trust prompts:** when a pack's executable content has changed, `mcs update` prompts for trust. Denying the prompt skips the pack for this run: the registry stays at the old SHA, the pack's checkout returns to that commit, and the pack is excluded from re-apply so untrusted scripts don't auto-install. Any other update that doesn't end trusted (an invalid manifest, a failed analysis) returns the checkout the same way. The prompt re-fires on the next `mcs update` run. Without a terminal the prompt reads as "no", so an unattended run needs `--trust-all` to take updates that change a pack's executable content. An unattended run that tracks a branch trusts whatever that branch next contains; pin packs to a tag (`mcs pack add <url> --ref <tag>`) where that matters.
 
 **Prompt value reuse:** unlike `mcs sync`, `mcs update` does not show the interactive *"Reuse these values? [Y/n]"* gate when a pack's prompts already have stored answers. Refresh implies "keep what I have," so existing values are reused silently. **New** prompts introduced by a pack update still execute normally. To revisit stored values, use `mcs sync` (answer "No" at the gate to re-enter values one by one, with the existing answer as the default).
 
-**Exit status:** a hard failure (failed fetch, unreadable checkout, invalid fetched manifest) exits non-zero when running non-interactively (CI), or when *every* attempted pack failed — so a transient outage in CI is a detectable failure, not a silent zero exit. In an interactive terminal a partial failure exits zero (the per-pack warnings are visible); the packs that updated cleanly are still re-applied first. A declined trust prompt is **not** a failure and always exits zero (it re-prompts next run).
+**Exit status:** a hard failure (failed fetch, unreadable checkout, invalid fetched manifest, or a checkout that can't return to its trusted commit while it hosts a linked plugin) exits non-zero when running non-interactively (CI), or when *every* attempted pack failed — so a transient outage in CI is a detectable failure, not a silent zero exit. In an interactive terminal a partial failure exits zero (the per-pack warnings are visible); the packs that updated cleanly are still re-applied first. A declined trust prompt is **not** a failure and always exits zero (it re-prompts next run).
 
 ## `mcs pack`
 
@@ -164,7 +164,7 @@ mcs pack remove <name> --force   # Remove without confirmation
 |------|-------------|
 | `-f, --force` | Skip the confirmation prompt. |
 
-Removal is federated: `mcs` discovers all projects using the pack (via the project index) and runs convergence cleanup for each scope.
+Removal is federated: `mcs` discovers all projects using the pack (via the project index) and runs convergence cleanup for each scope. A pack hosting its own plugin then has its generated marketplace unregistered; if that fails, the command fails before the registry entry or checkout is removed, and re-running it finishes the job.
 
 ### `mcs pack list`
 

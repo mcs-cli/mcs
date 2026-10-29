@@ -14,6 +14,7 @@ struct PackTrustManager {
 
     let output: CLIOutput
     var policy: TrustPolicy = .prompt
+    let shell: any ShellRunning
 
     // MARK: - Analyze
 
@@ -22,6 +23,7 @@ struct PackTrustManager {
     /// that will run with user privileges.
     func analyzeScripts(manifest: ExternalPackManifest, packPath: URL) throws -> [TrustableItem] {
         var items: [TrustableItem] = []
+        let hostedPlugins = try PackMarketplace.hostedPlugins(in: manifest, packPath: packPath)
 
         // Component install actions
         if let components = manifest.components {
@@ -88,6 +90,19 @@ struct PackTrustManager {
                             representsDefaultBehavior: HookInterpreter.isDefault(invocation.interpreter)
                         ))
                     }
+
+                case let .plugin(name) where PluginRef(name).isPackToken:
+                    guard let plugin = hostedPlugins.first(where: { $0.name == PluginRef(name).bareName }) else { break }
+                    let tree = try PluginTreeHasher.hash(plugin, packPath: packPath, shell: shell)
+                    // Everything under it runs on every session (hooks, MCP servers, mods, skills),
+                    // so the whole tree is one item rather than the files a manifest happens to name.
+                    items.append(TrustableItem(
+                        type: .pluginDirectory,
+                        relativePath: plugin.relativePath,
+                        content: "\(tree.fileCount) files",
+                        description: "\(component.id) — plugin loaded from this pack on every Claude Code session",
+                        treeHash: tree.hash
+                    ))
 
                 default:
                     break
@@ -170,7 +185,9 @@ struct PackTrustManager {
         let mcpServers = items.filter { $0.type == .mcpServerCommand }
         let hookFragments = items.filter { $0.type == .hookFragment }
         let doctorCommands = items.filter { $0.type == .doctorCommand || $0.type == .fixScript }
-        let scripts = items.filter { $0.relativePath != nil && $0.type != .hookFragment && $0.type != .commandFile }
+        let scripts = items.filter {
+            $0.relativePath != nil && $0.type != .hookFragment && $0.type != .commandFile && $0.type != .pluginDirectory
+        }
 
         if !shellCommands.isEmpty {
             output.plain("")
@@ -195,6 +212,15 @@ struct PackTrustManager {
                 let lineCount = item.content.components(separatedBy: "\n").count
                 let path = item.relativePath ?? "inline"
                 output.plain("    \(path) (\(lineCount) lines) — \(item.description)")
+            }
+        }
+
+        let pluginDirectories = items.filter { $0.type == .pluginDirectory }
+        if !pluginDirectories.isEmpty {
+            output.plain("")
+            output.sectionHeader("Plugins (every file runs or loads on every session)")
+            for item in pluginDirectories {
+                output.plain("    \(item.relativePath ?? ".")/ (\(item.content)) — \(item.description)")
             }
         }
 
@@ -258,6 +284,9 @@ struct PackTrustManager {
         items.map { item in
             guard let path = item.relativePath else {
                 return "    \(item.type.rawValue): \(item.content)"
+            }
+            if item.type == .pluginDirectory {
+                return "    \(item.type.rawValue): \(path)/ (\(item.content))"
             }
             let lineCount = item.content.components(separatedBy: "\n").count
             return "    \(item.type.rawValue): \(path) (\(lineCount) lines)"
@@ -345,13 +374,17 @@ struct PackTrustManager {
             return .mismatched
         }
         do {
-            return try FileHasher.sha256(of: fileURL) == trustedHash ? nil : .mismatched
+            return try Self.fileHash(of: item, at: fileURL) == trustedHash ? nil : .mismatched
         } catch {
             return .unreadable(error.localizedDescription)
         }
     }
 
     // MARK: - Helpers
+
+    private static func fileHash(of item: TrustableItem, at url: URL) throws -> String {
+        try item.treeHash ?? FileHasher.sha256(of: url)
+    }
 
     /// Deterministic synthetic key for inline commands (not backed by a file).
     /// Uses SHA-256 of the description to ensure stability across process invocations.
@@ -463,7 +496,7 @@ struct PackTrustManager {
             if let relativePath = item.relativePath {
                 let fileURL = packPath.appendingPathComponent(relativePath)
                 if FileManager.default.fileExists(atPath: fileURL.path) {
-                    hashes[relativePath] = try FileHasher.sha256(of: fileURL)
+                    hashes[relativePath] = try Self.fileHash(of: item, at: fileURL)
                 }
             } else {
                 // Inline command — hash the content with a deterministic synthetic key
@@ -490,6 +523,8 @@ struct TrustableItem {
     /// predates the tracking" from "this pack asks for something new", so introducing a new
     /// trustable artifact does not re-prompt every installed pack.
     var representsDefaultBehavior: Bool = false
+    /// For a directory item, the hash taken while analyzing, so one pass never walks the tree twice.
+    var treeHash: String?
 
     /// Raw values are the singular human label trust output prints. A case declared without one
     /// silently inherits its camelCase name and reaches that output verbatim, so set it.
@@ -503,5 +538,6 @@ struct TrustableItem {
         case mcpServerCommand = "MCP server" // MCP server command (runs with user privs)
         case commandFile = "command file" // Command file copied into .claude/commands/ (invoked by Claude)
         case hookInterpreter = "hook interpreter" // Command a hook runs under; emitted for defaults too (see analyzeScripts)
+        case pluginDirectory = "plugin directory" // A pack-hosted plugin, loaded in place from the checkout
     }
 }

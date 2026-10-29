@@ -357,7 +357,7 @@ struct PackAdder {
         packPath: URL,
         policy: PackTrustManager.TrustPolicy
     ) throws -> [String: String]? {
-        let trustManager = PackTrustManager(output: ctx.output, policy: policy)
+        let trustManager = PackTrustManager(output: ctx.output, policy: policy, shell: ctx.shell)
         let items = try trustManager.analyzeScripts(manifest: manifest, packPath: packPath)
         guard trustManager.promptForTrust(
             manifest: manifest,

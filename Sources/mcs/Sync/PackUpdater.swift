@@ -26,6 +26,9 @@ struct PackUpdater {
         case manifestInvalid(underlying: Error) // fetched revision's techpack.yaml is unusable
         case trustDeclined // user declined the trust prompt — expected, zero exit
         case internalError(underlying: Error) // script analysis / trust prompt crashed
+        /// The update did not land and the checkout could not return to the trusted commit, so
+        /// its pack-hosted plugins stay unlinked.
+        case restoreFailed(underlying: Error)
     }
 
     /// Fetch, validate, and re-trust a single git pack entry.
@@ -39,53 +42,117 @@ struct PackUpdater {
             return recloneMissingCheckout(entry: entry, packPath: packPath, registry: registry)
         }
 
-        // Must happen before `fetcher.update` resets the working tree — see `PackSnapshot`.
-        // Unconditional, because whether an update will happen is not known until after the
-        // fetch, by which point the old tree is gone. Cost is one YAML decode plus a hash per
-        // referenced file, discarded on the `.alreadyUpToDate` path.
+        // Must happen before the working tree moves — see `PackSnapshot`. Unconditional, because
+        // whether an update will happen is not known until after the fetch. Cost is one YAML decode
+        // plus a hash per referenced file, discarded on the `.alreadyUpToDate` path.
         let beforeSnapshot = snapshot(packPath: packPath, registry: registry)
 
-        let fetchResult: PackFetcher.FetchResult?
+        // A failure to read HEAD is the same class of git-layer error as a failed fetch — one case.
+        let head: String
+        let target: String
         do {
-            fetchResult = try fetcher.update(packPath: packPath, ref: entry.ref)
+            head = try fetcher.currentCommit(at: packPath)
+            target = try fetcher.fetchTarget(packPath: packPath, ref: entry.ref)
         } catch {
             return .fetchFailed(underlying: error)
         }
 
-        guard let result = fetchResult else {
-            // Disk may be ahead of registry if trust was denied on a previous update.
-            // A failure to read HEAD here is the same class of git-layer error as a failed
-            // fetch (and `fetcher.update` itself reads HEAD before fetching, so a broken
-            // checkout already surfaces as `.fetchFailed`) — keep them one case.
-            let diskSHA: String
-            do {
-                diskSHA = try fetcher.currentCommit(at: packPath)
-            } catch {
-                return .fetchFailed(underlying: error)
-            }
-            if diskSHA != entry.commitSHA {
-                return validateAndTrust(
-                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA,
-                    beforeSnapshot: beforeSnapshot
-                )
-            }
-            // Same commit, but recorded trust may still not describe what is on disk — a registry
-            // SHA advanced without re-trust, or a map naming files a past update renamed. Without
-            // this the loader's "run 'mcs pack update' to re-trust" advice is a dead end: refused
-            // at load, "already up to date" forever.
-            if trustNeedsRenewal(entry: entry, packPath: packPath, snapshot: beforeSnapshot) {
-                return validateAndTrust(
-                    entry: entry, packPath: packPath, registry: registry, commitSHA: diskSHA,
-                    beforeSnapshot: beforeSnapshot
-                )
-            }
-            return .alreadyUpToDate
+        let linked: [String]
+        do {
+            linked = try PackMarketplace.linkedPlugins(packID: entry.identifier, environment: environment)
+        } catch {
+            return .internalError(underlying: error)
         }
 
-        return validateAndTrust(
-            entry: entry, packPath: packPath, registry: registry, commitSHA: result.commitSHA,
-            beforeSnapshot: beforeSnapshot
-        )
+        let result: UpdateResult
+        if target != head || head != entry.commitSHA {
+            // The checkout is about to hold content not yet trusted — or already does, when an
+            // older mcs left it ahead of the registry after a declined prompt. A pack-hosted plugin
+            // loads straight from it, so it is unlinked first and linked again only once the
+            // content is trusted; otherwise a session starting while the prompt waits, or after an
+            // interrupted run, loads unreviewed code.
+            do {
+                try unlink(linked, of: entry)
+            } catch {
+                return .internalError(underlying: error)
+            }
+            do {
+                try fetcher.reset(packPath: packPath, to: target)
+                result = validateAndTrust(
+                    entry: entry, packPath: packPath, registry: registry, commitSHA: target,
+                    beforeSnapshot: beforeSnapshot
+                )
+            } catch {
+                result = .fetchFailed(underlying: error)
+            }
+        } else {
+            // No new commit, so plugins stay linked. Recorded trust may still not describe what is
+            // on disk — a registry SHA advanced without re-trust, a map naming files a past update
+            // renamed, or local edits. Without this check the loader's "run 'mcs pack update' to
+            // re-trust" advice is a dead end: refused at load, "already up to date" forever.
+            guard trustNeedsRenewal(entry: entry, packPath: packPath, snapshot: beforeSnapshot) else {
+                return .alreadyUpToDate
+            }
+            // Approving here trusts whatever is on disk, local edits included — the prompt showed them.
+            result = validateAndTrust(
+                entry: entry, packPath: packPath, registry: registry, commitSHA: entry.commitSHA,
+                beforeSnapshot: beforeSnapshot
+            )
+        }
+        return finish(result, entry: entry, packPath: packPath, registry: registry, linked: linked)
+    }
+
+    /// The one exit. Anything short of a trusted update returns the checkout to the trusted commit,
+    /// even when HEAD already is that commit: that restores a tracked file deleted locally and
+    /// discards local edits, which is fine only because mcs owns this checkout — don't skip it as
+    /// a no-op.
+    private func finish(
+        _ result: UpdateResult, entry: PackRegistryFile.PackEntry, packPath: URL,
+        registry: PackRegistryFile, linked: [String]
+    ) -> UpdateResult {
+        if !result.isUpdated {
+            do {
+                try fetcher.reset(packPath: packPath, to: entry.commitSHA)
+            } catch {
+                output.warn("  \(entry.displayName): could not return to the trusted commit: \(error.localizedDescription)")
+                // Without a linked plugin nothing loads what is on disk: the pack itself refuses
+                // untrusted content at load, so a warning is enough.
+                guard linked.isEmpty else {
+                    do {
+                        try unlink(linked, of: entry)
+                    } catch {
+                        output.error("  Could not unlink \(entry.displayName)'s plugins: \(error.localizedDescription)")
+                    }
+                    return .restoreFailed(underlying: error)
+                }
+                return result
+            }
+        }
+        if !linked.isEmpty {
+            relinkHostedPlugins(entry: entry, packPath: packPath, registry: registry)
+        }
+        return result
+    }
+
+    private func unlink(_ plugins: [String], of entry: PackRegistryFile.PackEntry) throws {
+        for name in plugins {
+            try PackMarketplace.unlink(pluginName: name, packID: entry.identifier, environment: environment)
+        }
+    }
+
+    /// Links the plugins the checkout's manifest hosts now, so one an update renamed or added is
+    /// linked and one it dropped stays unlinked until sync uninstalls it.
+    private func relinkHostedPlugins(entry: PackRegistryFile.PackEntry, packPath: URL, registry: PackRegistryFile) {
+        do {
+            let manifest = try ExternalPackLoader(environment: environment, registry: registry).validate(at: packPath)
+            for plugin in try PackMarketplace.hostedPlugins(in: manifest, packPath: packPath) {
+                _ = try PackMarketplace.link(
+                    pluginName: plugin.name, to: plugin.source, packID: entry.identifier, environment: environment
+                )
+            }
+        } catch {
+            output.warn("  \(entry.displayName): its plugins stay unlinked until 'mcs sync': \(error.localizedDescription)")
+        }
     }
 
     /// Without a re-clone every `git` call against the deleted checkout fails, and no command
@@ -261,9 +328,14 @@ extension PackUpdater.UpdateResult {
     /// Outcomes that should contribute to a non-zero exit in non-interactive use. A user
     /// trust-decline (`.trustDeclined`) is intentionally *not* a hard failure — declining is
     /// an expected choice, re-prompted on the next update.
+    var isUpdated: Bool {
+        if case .updated = self { return true }
+        return false
+    }
+
     var isHardFailure: Bool {
         switch self {
-        case .fetchFailed, .manifestInvalid, .internalError:
+        case .fetchFailed, .manifestInvalid, .internalError, .restoreFailed:
             true
         case .alreadyUpToDate, .updated, .trustDeclined:
             false
@@ -284,6 +356,8 @@ extension PackUpdater.UpdateResult {
             "update skipped (trust not granted)"
         case let .internalError(error):
             "could not verify pack scripts — \(error.localizedDescription)"
+        case let .restoreFailed(error):
+            "could not return to the trusted commit, its plugins stay unlinked — \(error.localizedDescription)"
         }
     }
 }

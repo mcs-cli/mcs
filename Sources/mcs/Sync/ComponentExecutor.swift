@@ -67,18 +67,22 @@ struct ComponentExecutor {
         case failed
     }
 
-    /// Install a plugin at `scope`, in the scope's project for `local`.
-    func installPlugin(_ fullName: String, scope: String) -> PluginInstallOutcome {
+    /// Install a plugin at `scope`, in the scope's project for `local`. A pack-hosted plugin is
+    /// first linked from `hostedSource`, its directory in the pack checkout.
+    func installPlugin(_ fullName: String, scope: String, hostedSource: URL? = nil) -> PluginInstallOutcome {
         guard claudeCLI.isAvailable else {
             output.warn("Claude Code CLI not found, skipping plugin")
             return .failed
         }
         let ref = PluginRef(fullName)
+        if ref.isPackHosted, !registerPackMarketplace(for: ref, source: hostedSource) {
+            return .failed
+        }
         // Only a marketplace mcs registers gets auto-update turned on; one the user added keeps their choice.
         let registeredBefore = ref.hasMarketplaceRepo ? registeredMarketplaces() : nil
         // A failed add is often a marketplace that is already there; it only matters when the
         // plugin then can't be resolved, and its error is the one that explains why.
-        let added = ref.hasMarketplaceRepo ? claudeCLI.pluginMarketplaceAdd(repo: ref.marketplaceRepo) : nil
+        let added = ref.hasMarketplaceRepo ? claudeCLI.pluginMarketplaceAdd(source: ref.marketplaceRepo) : nil
         guard let id = resolvePluginID(ref) else {
             let addError = added.flatMap { $0.succeeded ? nil : String($0.stderr.prefix(200)) }
             let cause = addError.map { "adding \(ref.marketplaceRepo) failed: \($0)" } ?? "is it added?"
@@ -146,21 +150,40 @@ struct ComponentExecutor {
         }
     }
 
+    /// Linked again on every sync, which also repairs a link or registration the user removed.
+    private func registerPackMarketplace(for ref: PluginRef, source: URL?) -> Bool {
+        guard let packID = ref.hostingPackID, let source else {
+            output.warn("Plugin '\(ref.fullName)' has no plugin directory in its pack. Skipping")
+            return false
+        }
+        let marketplace = PackMarketplace.marketplaceName(packID: packID)
+        let wrapper: URL
+        do {
+            wrapper = try PackMarketplace.link(pluginName: ref.bareName, to: source, packID: packID, environment: environment)
+        } catch {
+            output.warn("Could not link plugin '\(ref.bareName)' from its pack: \(error.localizedDescription)")
+            return false
+        }
+        guard let registered = registeredMarketplaces() else { return false }
+        if registered.contains(where: { $0.name == marketplace }) { return true }
+        let result = claudeCLI.pluginMarketplaceAdd(source: wrapper.path)
+        guard result.succeeded else {
+            output.warn("Could not register marketplace '\(marketplace)': \(String(result.stderr.prefix(200)))")
+            return false
+        }
+        return true
+    }
+
     private func resolvePluginID(_ ref: PluginRef) -> String? {
         if ref.marketplaceName != nil { return ref.pluginID(in: []) }
         return registeredMarketplaces().flatMap(ref.pluginID(in:))
     }
 
     private func registeredMarketplaces() -> [PluginMarketplace]? {
-        let result = claudeCLI.pluginMarketplaceList()
-        guard result.succeeded else {
-            output.warn("Could not list plugin marketplaces: \(String(result.stderr.prefix(200)))")
-            return nil
-        }
         do {
-            return try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
+            return try claudeCLI.marketplaces()
         } catch {
-            output.warn("Could not read the plugin marketplace list: \(error.localizedDescription)")
+            output.warn("Could not list plugin marketplaces: \(error.localizedDescription)")
             return nil
         }
     }
@@ -171,11 +194,16 @@ struct ComponentExecutor {
         let key = Constants.JSONKeys.extraKnownMarketplaces
         do {
             var settings = try Settings.load(from: environment.claudeSettings)
-            // `marketplace add` writes the entry; without it there is no source to attach the switch to.
+            // `marketplace add` writes the entry (verified with Claude Code 2.1.312); without it there
+            // is no source to attach the switch to.
             guard var marketplaces = settings.extraJSONObject[key] as? [String: Any],
-                  var entry = marketplaces[name] as? [String: Any],
-                  entry[Constants.JSONKeys.autoUpdate] == nil
-            else { return }
+                  var entry = marketplaces[name] as? [String: Any]
+            else {
+                let file = environment.claudeSettings.lastPathComponent
+                output.dimmed("  Auto-update not set for marketplace '\(name)': no entry in \(file)")
+                return
+            }
+            guard entry[Constants.JSONKeys.autoUpdate] == nil else { return }
             entry[Constants.JSONKeys.autoUpdate] = true
             marketplaces[name] = entry
             settings.extraJSON[key] = try JSONSerialization.data(withJSONObject: marketplaces, options: [.sortedKeys])

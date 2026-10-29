@@ -70,64 +70,52 @@ struct PackFetcher {
 
     // MARK: - Update
 
-    /// Update an existing pack checkout.
-    /// Returns a `FetchResult` if updated, or `nil` if already at the latest commit.
+    /// Fetch the commit `ref` names (the remote's default branch when nil) without touching the
+    /// working tree, so anything loading from the checkout keeps reading it while the caller decides.
     ///
-    /// When `ref` is set, fetches that ref explicitly and resets to `FETCH_HEAD` — uniform for
-    /// any ref type. A plain `checkout <branch>` would not advance the local branch past
-    /// whatever was captured at clone time, freezing branch-ref packs.
-    func update(packPath: URL, ref: String?) throws -> FetchResult? {
+    /// Fetching the ref explicitly and resetting to the result is uniform for any ref type; a plain
+    /// `checkout <branch>` would not advance the local branch past what the clone captured.
+    func fetchTarget(packPath: URL, ref: String?) throws -> String {
         try ensureGitAvailable()
         if let ref { try validateRef(ref) }
 
-        let beforeSHA = try currentCommit(at: packPath)
-        let workDir = packPath.path
-
-        let fetchArgs: [String]
-        let resetTarget: String
-        if let ref {
-            fetchArgs = ["fetch", "--depth", "1", "origin", ref]
-            resetTarget = "FETCH_HEAD"
-        } else {
-            fetchArgs = ["fetch", "--depth", "1", "origin"]
-            resetTarget = "origin/HEAD"
-        }
-
-        let fetchResult = shell.run(
-            shell.environment.gitPath, arguments: fetchArgs,
-            workingDirectory: workDir
-        )
+        let fetchArgs = ["fetch", "--depth", "1", "origin"] + (ref.map { [$0] } ?? [])
+        let fetchResult = shell.run(shell.environment.gitPath, arguments: fetchArgs, workingDirectory: packPath.path)
         guard fetchResult.succeeded else {
             throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr)
         }
+        // Peeled: an annotated tag's FETCH_HEAD names the tag object, never equal to HEAD, so
+        // every update of a tag-pinned pack would read as a change.
+        return try resolveCommit("\(ref == nil ? "origin/HEAD" : "FETCH_HEAD")^{commit}", at: packPath)
+    }
 
-        let resetResult = shell.run(
-            shell.environment.gitPath, arguments: ["reset", "--hard", resetTarget],
-            workingDirectory: workDir
-        )
+    /// Move the checkout back to `commitSHA`. A shallow fetch may have dropped it locally, so a
+    /// failed reset fetches that exact commit before retrying.
+    func reset(packPath: URL, to commitSHA: String) throws {
+        let git = { (arguments: [String]) in
+            shell.run(shell.environment.gitPath, arguments: arguments, workingDirectory: packPath.path)
+        }
+        if git(["reset", "--hard", commitSHA]).succeeded { return }
+        let fetchResult = git(["fetch", "--depth", "1", "origin", commitSHA])
+        guard fetchResult.succeeded else {
+            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr)
+        }
+        let resetResult = git(["reset", "--hard", commitSHA])
         guard resetResult.succeeded else {
             throw PackFetchError.updateFailed(path: packPath.path, stderr: resetResult.stderr)
         }
-
-        let afterSHA = try currentCommit(at: packPath)
-
-        if afterSHA == beforeSHA {
-            return nil // Already at latest
-        }
-
-        return FetchResult(
-            localPath: packPath,
-            commitSHA: afterSHA,
-            ref: ref
-        )
     }
 
     // MARK: - Current Commit
 
     /// Get the current commit SHA of a pack checkout.
     func currentCommit(at path: URL) throws -> String {
+        try resolveCommit("HEAD", at: path)
+    }
+
+    private func resolveCommit(_ revision: String, at path: URL) throws -> String {
         let result = shell.run(
-            shell.environment.gitPath, arguments: ["rev-parse", "HEAD"],
+            shell.environment.gitPath, arguments: ["rev-parse", revision],
             workingDirectory: path.path
         )
         guard result.succeeded, !result.stdout.isEmpty else {

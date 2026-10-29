@@ -106,6 +106,25 @@ You can also manually install a plugin:
 claude plugin install <plugin-name>@<org>
 ```
 
+### Plugin "not loaded from the pack checkout"
+
+**Symptom**: `mcs doctor` fails a plugin declared as `<name>@pack` with "not loaded from the pack checkout".
+
+**Cause**: mcs links the plugin into its own marketplace at `~/.mcs/marketplaces/<pack-id>/`, and Claude Code should report it as read from that folder. Common causes:
+- The link or the marketplace registration was removed by hand.
+- An update that didn't end trusted couldn't return the checkout to its trusted commit, so the plugin was left unlinked.
+- The installed Claude Code version no longer loads linked plugins in place.
+
+**Fix**: Re-run sync, which re-links and re-registers it:
+```bash
+mcs sync
+```
+If it still fails, check `claude plugin list --json` for the plugin's `readFromFolder`. Without one, this Claude Code version isn't loading the plugin from the pack.
+
+### Projects on one machine get the same pack-hosted plugin version
+
+A pack has one checkout per machine, so a pack-hosted plugin is the same version in every project. Pinning different `ref:`s of one pack in different projects conflicts for the pack's files, and for its plugin too.
+
 ## Project Configuration
 
 ### Running `mcs sync` from `~/.claude` or `$HOME`

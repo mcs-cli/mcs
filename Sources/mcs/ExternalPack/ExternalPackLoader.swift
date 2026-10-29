@@ -184,6 +184,8 @@ struct ExternalPackLoader {
             )
         }
 
+        try validatePackHostedPlugins(in: manifest, packPath: path)
+
         // Check minMCSVersion compatibility
         if let minVersion = manifest.minMCSVersion {
             let current = MCSVersion.current
@@ -243,7 +245,7 @@ struct ExternalPackLoader {
 
         // Skip trust verification for local packs — scripts change during development
         if !entry.isLocalPack {
-            let trustManager = PackTrustManager(output: CLIOutput())
+            let trustManager = PackTrustManager(output: CLIOutput(), shell: ShellRunner(environment: environment))
             // Analyzing reads script contents, so an unreadable script surfaces as a plain load
             // failure rather than the security warning below.
             let offenders = try trustManager.verifyTrust(
@@ -267,6 +269,25 @@ struct ExternalPackLoader {
             shell: shell,
             output: output
         )
+    }
+
+    private func validatePackHostedPlugins(in manifest: ExternalPackManifest, packPath: URL) throws {
+        for component in manifest.components ?? [] {
+            guard case let .plugin(name) = component.installAction else { continue }
+            let ref = PluginRef(name)
+            if ref.isPackHosted {
+                throw LoadError.invalidManifest(
+                    identifier: manifest.identifier,
+                    reason: "plugin '\(name)': marketplaces named '\(Constants.Plugins.packMarketplacePrefix)…' are reserved for mcs;"
+                        + " use '\(ref.bareName)@\(Constants.Plugins.packToken)' for a plugin this pack hosts"
+                )
+            }
+        }
+        do {
+            _ = try PackMarketplace.hostedPlugins(in: manifest, packPath: packPath)
+        } catch {
+            throw LoadError.invalidManifest(identifier: manifest.identifier, reason: error.localizedDescription)
+        }
     }
 
     /// Find files referenced in the manifest that don't exist on disk.

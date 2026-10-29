@@ -109,7 +109,16 @@ Wraps `claude mcp add/remove` and `claude plugin install/remove/update` plus `ma
 
 ### Plugin versions (`Sync/PluginRefresher.swift`)
 
-mcs never pins a marketplace plugin. Two things keep one from staying frozen at its first install:
+**Pack-hosted plugins** (`plugin: "<name>@pack"`) are pinned. `ExternalPackAdapter` rewrites the declaration to `<name>@mcs-<pack-id>` and resolves the plugin's directory from the pack's `.claude-plugin/marketplace.json`. Before installing, `ComponentExecutor` links it into a marketplace mcs generates at `~/.mcs/marketplaces/<pack-id>/` (`PackMarketplace`) and registers that marketplace.
+- Claude Code loads a relative-path plugin from a local marketplace in place, so the plugin is the checkout at the pack's commit.
+- mcs uses its own marketplace name because the pack's manifest usually names a public marketplace. Re-registering that name would mean removing the existing registration, which uninstalls its plugins everywhere.
+- `PluginCheck` fails unless `plugin list --json` reports `readFromFolder` at the plugin's directory. Claude Code following a link that leaves its marketplace is undocumented behaviour, and this check is where a change to it would surface.
+- An update that brings no new commit never touches the link. One that does fetches without moving the checkout (`PackFetcher.fetchTarget`), unlinks the pack's plugins, moves the checkout, then links them again from whatever trusted manifest is on disk afterwards.
+- `mcs pack remove` unregisters the marketplace (`PackMarketplace.unregister`) and deletes its directory once every scope is unconfigured, before the registry entry and checkout go. If unregistering fails, the command fails and a re-run finishes the job.
+- Pack-hosted plugins get no auto-update and no `mcs update` refresh.
+- A pack-hosted install and a marketplace install of the same plugin name are different plugins (`PluginRef.isSamePlugin`), so switching a pack to `@pack` uninstalls the old install mcs recorded.
+
+Marketplace plugins are never pinned. Two things keep one from staying frozen at its first install:
 
 - **Auto-update on marketplaces mcs registers.** `ComponentExecutor.installPlugin` lists marketplaces before `marketplace add`. When the add created the marketplace, mcs sets `autoUpdate: true` on its `extraKnownMarketplaces` entry in `~/.claude/settings.json`, once, and only when the entry has no `autoUpdate` yet. A marketplace that was already registered keeps the user's choice. The official marketplace auto-updates by default and is skipped.
 - **Explicit refresh in `mcs update`.** After re-applying every scope, `PluginRefresher` updates the plugins recorded in each scope's state: one `marketplace update` per marketplace, then `plugin update <id> -s <scope>` from the scope's directory. It compares `plugin list --json` versions before and after to report changes. It runs only from `UpdateCommand`, so `ScopeReapplier` (and `mcs doctor --fix`) never update plugins.
@@ -374,7 +383,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
 | **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. Modified scripts are detected and the user is prompted to re-trust before proceeding. Local packs skip verification since scripts change during development. |
-| **Trust Boundary** | `brew:` and `plugin:` install actions are outside trust review — they contribute no hashed item, so a pack declaring only those installs without a prompt, and changing one does not ask for renewed trust on `mcs pack update`. A tap-qualified `brew:` package is the case to watch: Homebrew taps a third-party repository and evaluates its formula without confirmation. `mcs update` and marketplace auto-update also move `plugin:` installs to new versions with no trust prompt. |
+| **Trust Boundary** | A pack-hosted plugin (`<name>@pack`) is one trust item: a hash of every file git tracks in its source directory (`PluginTreeHasher`); a tracked symlink leaving that directory, or a tracked file missing locally, refuses the pack. Because the plugin loads from the checkout, `PackUpdater` unlinks it while an update moves the checkout to a new commit, and resets the checkout to the last trusted commit after any update that doesn't end trusted (declined, invalid manifest, failed analysis). If that reset fails while plugins are linked, they stay unlinked and the update fails. Otherwise, `brew:` and `plugin:` install actions are outside trust review — they contribute no hashed item, so a pack declaring only those installs without a prompt, and changing one does not ask for renewed trust on `mcs pack update`. A tap-qualified `brew:` package is the case to watch: Homebrew taps a third-party repository and evaluates its formula without confirmation. `mcs update` and marketplace auto-update also move `plugin:` installs to new versions with no trust prompt. |
 
 ## Concurrency Model
 

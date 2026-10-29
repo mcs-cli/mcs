@@ -69,6 +69,8 @@ struct ComponentDefinition: Identifiable {
     /// auto-registers this hook in settings.local.json with the specified handler fields.
     let hookRegistration: HookRegistration?
     private(set) var installAction: ComponentInstallAction
+    /// For a pack-hosted plugin, the plugin's directory inside the pack checkout.
+    let pluginSource: URL?
 
     /// Additional doctor checks that cannot be auto-derived from installAction.
     /// Used for components with .shellCommand or multi-step verification needs.
@@ -84,6 +86,7 @@ struct ComponentDefinition: Identifiable {
         packIdentifier: String?,
         hookRegistration: HookRegistration? = nil,
         installAction: ComponentInstallAction,
+        pluginSource: URL? = nil,
         supplementaryChecks: @escaping SupplementaryCheckFactory = { _, _ in [] }
     ) {
         self.id = id
@@ -93,6 +96,7 @@ struct ComponentDefinition: Identifiable {
         self.packIdentifier = packIdentifier
         self.hookRegistration = hookRegistration
         self.installAction = installAction
+        self.pluginSource = pluginSource
         self.supplementaryChecks = supplementaryChecks
     }
 }
