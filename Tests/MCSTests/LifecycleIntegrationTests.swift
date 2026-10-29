@@ -4799,6 +4799,25 @@ struct PluginScopeLifecycleTests {
         #expect(bed.mockCLI.pluginRemoveCalls.count == 1)
     }
 
+    @Test("mcs update's plugin refresh moves a plugin sync installed, in every scope that recorded it")
+    func refreshUpdatesSyncedPlugin() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = pluginPack("lint-pack")
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        try bed.makeGlobalSyncConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        bed.mockCLI.latestPluginVersions = ["lint@acme": "2.0.0"]
+
+        let changes = PluginRefresher(claudeCLI: bed.mockCLI, output: CLIOutput(colorsEnabled: false, interactiveStdin: false))
+            .refresh(scopes: [.project(at: bed.project, environment: bed.env), .global(environment: bed.env)], dryRun: false)
+
+        #expect(bed.mockCLI.pluginUpdateCalls.map(\.scope) == [Constants.PluginScope.local, Constants.PluginScope.user])
+        #expect(changes.map(\.to) == ["2.0.0", "2.0.0"])
+        var doctor = bed.makeDoctorRunner(registry: registry)
+        #expect(try doctor.run().issues == 0)
+    }
+
     @Test("An install mcs didn't make is neither recorded nor removed")
     func preexistingInstallIsNotOwned() throws {
         let bed = try LifecycleTestBed()

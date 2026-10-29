@@ -87,6 +87,7 @@ struct InstalledPlugin: Codable, Equatable {
     let enabled: Bool
     /// The project a `local`- or `project`-scoped install belongs to.
     let projectPath: String?
+    var version: String?
 
     /// Whether this install is at `scope` and, unless that is `user`, belongs to `projectDirectory`.
     func isInstall(atScope scope: String, projectDirectory: URL?) -> Bool {

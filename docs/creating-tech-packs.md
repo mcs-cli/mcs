@@ -198,6 +198,12 @@ Install Claude Code plugins:
     plugin: "my-plugin@my-org"
 ```
 
+A project sync installs the plugin for that project only (`-s local`); `mcs sync --global` installs it for every project (`-s user`).
+
+The pack does not pin the plugin's version. The plugin follows its marketplace: `mcs update` moves it to the marketplace's current release, and when mcs registers the marketplace itself, Claude Code's background auto-update is turned on for it. Moving the pack to a new `ref:` doesn't change the plugin. Claude Code only sees a new release when the plugin's `version` changes, so a plugin that sets `version` in `plugin.json` must bump it on every release.
+
+Plugin content is not covered by the pack's trust prompt. Users approve the pack's own scripts, but a plugin's hooks and MCP servers come from its marketplace and are never shown for review.
+
 ### Hooks
 
 Hook scripts run at specific Claude Code lifecycle events:
@@ -604,7 +610,7 @@ This tracking lives in `<project>/.claude/.mcs-project`. You don't need to manag
 | Settings | `<project>/.claude/settings.local.json` |
 | Templates | `<project>/CLAUDE.local.md` |
 | Brew packages | Global (`brew install`) |
-| Plugins | Global (`claude plugin install`) |
+| Plugins | This project only (`claude plugin install -s local`); every project with `--global` |
 
 ---
 

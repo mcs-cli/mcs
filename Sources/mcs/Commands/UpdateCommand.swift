@@ -95,6 +95,9 @@ struct UpdateCommand: LockedCommand {
             output: output
         )
 
+        PluginRefresher(claudeCLI: ClaudeIntegration(shell: shell), output: output)
+            .refresh(scopes: runs.map(\.strategy.scope), dryRun: dryRun)
+
         if !dryRun {
             // Surface + persist any legacy MCSConfig migration from this write-safe
             // path. GlobalSyncStrategy loads the config silently during compose, so

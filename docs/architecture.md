@@ -101,11 +101,18 @@ Before modifying files with user content (e.g., `CLAUDE.local.md`), a timestampe
 
 ### ClaudeIntegration (`Core/ClaudeIntegration.swift`)
 
-Wraps `claude mcp add/remove` and `claude plugin install/remove` CLI commands. MCP server registration supports three scopes:
+Wraps `claude mcp add/remove` and `claude plugin install/remove/update` plus `marketplace add/list/update` CLI commands. MCP server registration supports three scopes:
 
 - **`local`** (default): per-user, per-project — stored in `~/.claude.json` keyed by project path
 - **`project`**: team-shared — stored in `.mcp.json` in the project directory
 - **`user`**: cross-project — stored in `~/.claude.json` globally
+
+### Plugin versions (`Sync/PluginRefresher.swift`)
+
+mcs never pins a marketplace plugin. Two things keep one from staying frozen at its first install:
+
+- **Auto-update on marketplaces mcs registers.** `ComponentExecutor.installPlugin` lists marketplaces before `marketplace add`. When the add created the marketplace, mcs sets `autoUpdate: true` on its `extraKnownMarketplaces` entry in `~/.claude/settings.json`, once, and only when the entry has no `autoUpdate` yet. A marketplace that was already registered keeps the user's choice. The official marketplace auto-updates by default and is skipped.
+- **Explicit refresh in `mcs update`.** After re-applying every scope, `PluginRefresher` updates the plugins recorded in each scope's state: one `marketplace update` per marketplace, then `plugin update <id> -s <scope>` from the scope's directory. It compares `plugin list --json` versions before and after to report changes. It runs only from `UpdateCommand`, so `ScopeReapplier` (and `mcs doctor --fix`) never update plugins.
 
 ### UpdateChecker (`Core/UpdateChecker.swift`)
 
@@ -367,7 +374,7 @@ The command (`Commands/ExportCommand.swift`) is a read-only `ParsableCommand` (n
 | **Non-Destructive** | User content in `CLAUDE.local.md` is preserved via `<!-- mcs:begin/end -->` section markers. Content outside markers is never touched. |
 | **Convergent** | Deselected packs are fully cleaned up — MCP servers removed, project files deleted, template sections stripped, settings keys cleaned. No orphaned artifacts. |
 | **Trust Verification** | Pack scripts are SHA-256 hashed at `mcs pack add` time and verified at load time. Modified scripts are detected and the user is prompted to re-trust before proceeding. Local packs skip verification since scripts change during development. |
-| **Trust Boundary** | `brew:` and `plugin:` install actions are outside trust review — they contribute no hashed item, so a pack declaring only those installs without a prompt, and changing one does not ask for renewed trust on `mcs pack update`. A tap-qualified `brew:` package is the case to watch: Homebrew taps a third-party repository and evaluates its formula without confirmation. |
+| **Trust Boundary** | `brew:` and `plugin:` install actions are outside trust review — they contribute no hashed item, so a pack declaring only those installs without a prompt, and changing one does not ask for renewed trust on `mcs pack update`. A tap-qualified `brew:` package is the case to watch: Homebrew taps a third-party repository and evaluates its formula without confirmation. `mcs update` and marketplace auto-update also move `plugin:` installs to new versions with no trust prompt. |
 
 ## Concurrency Model
 
