@@ -581,6 +581,41 @@ struct PromptExecutorTests {
         #expect(resolve(libDefault, in: tmpDir) == "Lib.xcodeproj")
     }
 
+    @Test("Off-TTY fileDetect with an empty scan: existing nested prior, then default, else fail")
+    func nonInteractiveFileDetectNestedPrior() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let nested = tmpDir.appendingPathComponent("apps/ios")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "".write(to: nested.appendingPathComponent("App.xcworkspace"), atomically: true, encoding: .utf8)
+
+        let noDefault = prompt("PROJECT", type: .fileDetect, patterns: ["*.xcworkspace"])
+        let withDefault = prompt("PROJECT", type: .fileDetect, defaultValue: "dflt.xcworkspace", patterns: ["*.xcworkspace"])
+        #expect(resolve(noDefault, prior: "apps/ios/App.xcworkspace", in: tmpDir) == "apps/ios/App.xcworkspace")
+        #expect(resolve(withDefault, prior: "apps/ios/Gone.xcworkspace", in: tmpDir) == "dflt.xcworkspace")
+        #expect(resolve(noDefault, prior: "apps/ios/Gone.xcworkspace", in: tmpDir) == nil)
+    }
+
+    @Test("priorStillExists requires an existing, contained file that a pattern accepts")
+    func priorStillExistsRules() throws {
+        let root = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let project = root.appendingPathComponent("project")
+        let nested = project.appendingPathComponent("apps/ios")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try "".write(to: nested.appendingPathComponent("App.xcworkspace"), atomically: true, encoding: .utf8)
+        try "".write(to: root.appendingPathComponent("Outside.xcworkspace"), atomically: true, encoding: .utf8)
+
+        let patterns = ["*.xcodeproj", "*.xcworkspace"]
+        #expect(PromptExecutor.priorStillExists("apps/ios/App.xcworkspace", patterns: patterns, in: project))
+        #expect(!PromptExecutor.priorStillExists("apps/ios/Gone.xcworkspace", patterns: patterns, in: project))
+        #expect(!PromptExecutor.priorStillExists("apps/ios/App.xcworkspace", patterns: ["*.xcodeproj"], in: project))
+        #expect(!PromptExecutor.priorStillExists("../Outside.xcworkspace", patterns: patterns, in: project))
+        #expect(!PromptExecutor.priorStillExists("", patterns: ["*"], in: project))
+    }
+
     @Test("Mixed declarations: any input declaration accepts a value verbatim")
     func nonInteractiveMixedTypes() {
         #expect(resolve(

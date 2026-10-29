@@ -738,7 +738,11 @@ struct PartitionDeclaredPromptsTests {
             .appendingPathComponent("mcs-partition-detect-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for file in files {
-            try "".write(to: dir.appendingPathComponent(file), atomically: true, encoding: .utf8)
+            let url = dir.appendingPathComponent(file)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            try "".write(to: url, atomically: true, encoding: .utf8)
         }
         return dir
     }
@@ -995,6 +999,42 @@ struct PartitionDeclaredPromptsTests {
 
         let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
             [Self.projectPrompt], priorValues: ["PROJECT": "App.xcworkspace"], projectPath: dir
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["PROJECT"])
+    }
+
+    @Test("partition: nested fileDetect prior is reusable when the top-level scan is empty")
+    func partitionFileDetectNestedPriorOnEmptyScan() throws {
+        let dir = try makeDetectDir(files: ["apps/ios/App.xcworkspace"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "apps/ios/App.xcworkspace"], projectPath: dir
+        )
+        #expect(reusable == ["PROJECT": "apps/ios/App.xcworkspace"])
+        #expect(newKeys.isEmpty)
+    }
+
+    @Test("partition: nested fileDetect prior that no pattern accepts becomes newDeclared")
+    func partitionFileDetectNestedPriorPatternMismatch() throws {
+        let dir = try makeDetectDir(files: ["apps/ios/Package.swift"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "apps/ios/Package.swift"], projectPath: dir
+        )
+        #expect(reusable.isEmpty)
+        #expect(newKeys == ["PROJECT"])
+    }
+
+    @Test("partition: nested fileDetect prior is not reused when the scan finds top-level files")
+    func partitionFileDetectNestedPriorWithTopLevelMatch() throws {
+        let dir = try makeDetectDir(files: ["Root.xcodeproj", "apps/ios/App.xcworkspace"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [Self.projectPrompt], priorValues: ["PROJECT": "apps/ios/App.xcworkspace"], projectPath: dir
         )
         #expect(reusable.isEmpty)
         #expect(newKeys == ["PROJECT"])

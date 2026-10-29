@@ -2087,6 +2087,35 @@ struct PromptValueReuseLifecycleTests {
         #expect(try bed.projectState().resolvedValues?["PROJECT"] == "App.xcworkspace")
     }
 
+    @Test("fileDetect prior below the top level is reused while it still exists")
+    func fileDetectNestedPriorReusedOnSecondSync() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+
+        let nested = bed.project.appendingPathComponent("apps/ios")
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try touch("App.xcworkspace", in: nested)
+
+        // The empty top-level scan resolves the first sync only through the declared default.
+        let pack = MockPromptTechPack(
+            identifier: "detect-pack",
+            displayName: "Detect Pack",
+            prompts: [fileDetectPrompt(
+                "PROJECT", patterns: ["*.xcodeproj", "*.xcworkspace"], defaultValue: "first.xcworkspace"
+            )],
+            defaultAnswer: { _ in "re-asked" }
+        )
+        let configurator = bed.makeConfigurator(registry: TechPackRegistry(packs: [pack]))
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+
+        var state = try bed.projectState()
+        state.setResolvedValues(["PROJECT": "apps/ios/App.xcworkspace"])
+        try state.save()
+
+        try configurator.configure(packs: [pack], confirmRemovals: false)
+        #expect(try bed.projectState().resolvedValues?["PROJECT"] == "apps/ios/App.xcworkspace")
+    }
+
     @Test("fileDetect prior is re-asked once the stored file is gone")
     func fileDetectStalePriorReAsks() throws {
         let bed = try LifecycleTestBed()
