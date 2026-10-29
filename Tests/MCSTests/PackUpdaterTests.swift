@@ -1034,7 +1034,7 @@ struct PackUpdaterTests {
         let packPath = fix.packsDir.appendingPathComponent("test-pack")
         _ = try PackMarketplace.link(pluginName: "old", to: packPath, packID: "test-pack", environment: fix.env)
         try pushFiles(fixture: fix, files: [
-            ".claude-plugin/marketplace.json": #"{"name":"acme","plugins":[{"name":"demo","source":"./"}]}"#,
+            ".claude-plugin/plugin.json": #"{"name":"demo"}"#,
             "techpack.yaml": """
             schemaVersion: 1
             identifier: test-pack

@@ -197,7 +197,7 @@ struct ManifestBuilderTests {
 
         // 9. Verify plugin
         let pluginComp = try #require(components.first { $0.type == .plugin })
-        guard case let .plugin(pluginName) = pluginComp.installAction else {
+        guard case let .plugin(pluginName, _) = pluginComp.installAction else {
             Issue.record("Expected plugin install action")
             return
         }

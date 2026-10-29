@@ -711,11 +711,69 @@ struct ExternalPackManifestTests {
         """
 
         let manifest = try loadManifest(yaml)
-        guard case let .plugin(name) = manifest.components?[0].installAction else {
+        guard case let .plugin(name, _) = manifest.components?[0].installAction else {
             Issue.record("Expected plugin install action")
             return
         }
         #expect(name == "my-plugin@1.0.0")
+    }
+
+    @Test("pluginSource decodes from the shorthand sibling and the long form, and round-trips")
+    func pluginSourceDecoding() throws {
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        components:
+          - id: test.short
+            description: Shorthand
+            plugin: short@pack
+            pluginSource: plugins/short
+          - id: test.long
+            description: Long form
+            type: plugin
+            installAction:
+              type: plugin
+              name: long@pack
+              source: plugins/long
+        """
+
+        let manifest = try loadManifest(yaml)
+        #expect(manifest.components?[0].installAction == .plugin(name: "short@pack", source: "plugins/short"))
+        #expect(manifest.components?[1].installAction == .plugin(name: "long@pack", source: "plugins/long"))
+        let reencoded = try JSONDecoder().decode(
+            ExternalInstallAction.self, from: JSONEncoder().encode(manifest.components?[1].installAction)
+        )
+        #expect(reencoded == .plugin(name: "long@pack", source: "plugins/long"))
+    }
+
+    @Test("pluginSource must be a plain path inside the pack, on a plugin the pack hosts")
+    func pluginSourceRules() {
+        #expect(pluginSourceRejectionReason("plugins/demo", pluginName: "demo@pack") == nil)
+        for source in ["./plugins/demo", ".", "", "../demo", "plugins/../demo", "/tmp/demo", "plugins//demo", "plugins/demo/"] {
+            #expect(pluginSourceRejectionReason(source, pluginName: "demo@pack")
+                == "pluginSource '\(source)' must be a path inside the pack such as 'plugins/demo'"
+                + " (no leading './', '.', '..' or '/'); leave it out for the pack root")
+        }
+        #expect(pluginSourceRejectionReason("plugins/demo", pluginName: "demo@acme/plugins")
+            == "pluginSource applies only to a plugin the pack hosts ('demo@pack')")
+    }
+
+    @Test("pluginSource without the plugin shorthand fails to decode")
+    func pluginSourceWithoutPlugin() {
+        let yaml = """
+        schemaVersion: 1
+        identifier: test
+        displayName: Test
+        description: Test
+        components:
+          - id: test.brew
+            description: Brew
+            brew: node
+            pluginSource: plugins/node
+        """
+        #expect(throws: DecodingError.self) { try loadManifest(yaml) }
     }
 
     @Test("Deserialize brewInstall install action")
@@ -1867,7 +1925,7 @@ struct ExternalPackManifestTests {
         let comp = try #require(manifest.components?.first)
 
         #expect(comp.type == .plugin)
-        guard case let .plugin(name) = comp.installAction else {
+        guard case let .plugin(name, _) = comp.installAction else {
             Issue.record("Expected plugin"); return
         }
         #expect(name == "pr-review-toolkit@claude-plugins-official")

@@ -3,53 +3,61 @@ import Foundation
 import Testing
 
 struct PackMarketplaceTests {
-    private func makePack(source: Any) throws -> URL {
-        let pack = try makeTmpDir(label: "pack-marketplace")
-        try writePackMarketplace(at: pack, plugins: ["demo": source])
-        return pack
+    private func resolve(_ source: String?, in pack: URL) throws -> PackMarketplace.HostedPlugin {
+        try PackMarketplace.hostedPlugin(named: "demo", source: source, packPath: pack)
     }
 
-    @Test("A root source resolves to the pack itself")
+    @Test("Without a pluginSource the plugin is the pack root")
     func rootSource() throws {
-        let pack = try makePack(source: "./")
+        let pack = try makeTmpDir(label: "pack-marketplace")
         defer { try? FileManager.default.removeItem(at: pack) }
-        #expect(try PackMarketplace.hostedPlugin(named: "demo", in: pack)
-            == PackMarketplace.HostedPlugin(name: "demo", source: pack, relativePath: "."))
+        try writePluginManifest(at: pack, name: "demo")
+        #expect(try resolve(nil, in: pack) == PackMarketplace.HostedPlugin(name: "demo", source: pack, relativePath: "."))
     }
 
-    @Test("A subdirectory source resolves inside the pack")
+    @Test("A pluginSource resolves inside the pack")
     func subdirectorySource() throws {
-        let pack = try makePack(source: "./plugin")
+        let pack = try makeTmpDir(label: "pack-marketplace")
         defer { try? FileManager.default.removeItem(at: pack) }
-        try FileManager.default.createDirectory(at: pack.appendingPathComponent("plugin"), withIntermediateDirectories: true)
-        let plugin = try PackMarketplace.hostedPlugin(named: "demo", in: pack)
-        #expect(plugin.relativePath == "plugin")
-        #expect(plugin.source.resolvingSymlinksInPath().path == pack.appendingPathComponent("plugin").resolvingSymlinksInPath().path)
+        try writePluginManifest(at: pack.appendingPathComponent("plugins/demo"), name: "demo")
+        let plugin = try resolve("plugins/demo", in: pack)
+        #expect(plugin.relativePath == "plugins/demo")
+        #expect(plugin.source.resolvingSymlinksInPath().path
+            == pack.appendingPathComponent("plugins/demo").resolvingSymlinksInPath().path)
     }
 
-    @Test("A source that is remote, unlisted, or escapes the pack is rejected")
-    func rejectedSources() throws {
-        let remote = try makePack(source: ["source": "github", "repo": "acme/demo"])
-        let escaping = try makePack(source: "./../elsewhere")
-        defer {
-            try? FileManager.default.removeItem(at: remote)
-            try? FileManager.default.removeItem(at: escaping)
+    @Test("The pack's own marketplace.json is never read, even when it points the plugin at GitHub")
+    func ignoresPackMarketplace() throws {
+        let pack = try makeTmpDir(label: "pack-marketplace")
+        defer { try? FileManager.default.removeItem(at: pack) }
+        try writePluginManifest(at: pack, name: "demo")
+        try #"{"name":"acme","plugins":[{"name":"demo","source":{"source":"github","repo":"acme/demo","ref":"stable"}}]}"#
+            .write(to: pack.appendingPathComponent(PackMarketplace.manifestPath), atomically: true, encoding: .utf8)
+        #expect(try resolve(nil, in: pack).relativePath == ".")
+    }
+
+    @Test("A missing directory, a missing or unreadable plugin.json, and a name mismatch are rejected")
+    func rejectedDirectories() throws {
+        let pack = try makeTmpDir(label: "pack-marketplace")
+        defer { try? FileManager.default.removeItem(at: pack) }
+        #expect(throws: PackMarketplace.Error.sourceMissing("demo")) { try resolve("plugins/fooo", in: pack) }
+        #expect(throws: PackMarketplace.Error.pluginManifestMissing(name: "demo", path: ".claude-plugin/plugin.json")) {
+            try resolve(nil, in: pack)
         }
-        #expect(throws: PackMarketplace.Error.sourceNotLocal("demo")) {
-            try PackMarketplace.hostedPlugin(named: "demo", in: remote)
-        }
-        #expect(throws: PackMarketplace.Error.pluginNotListed("other")) {
-            try PackMarketplace.hostedPlugin(named: "other", in: remote)
-        }
-        #expect(throws: PackMarketplace.Error.sourceEscapesPack("demo")) {
-            try PackMarketplace.hostedPlugin(named: "demo", in: escaping)
+
+        try writePluginManifest(at: pack, name: "other")
+        #expect(throws: PackMarketplace.Error.pluginNameMismatch(name: "demo", declared: "other")) { try resolve(nil, in: pack) }
+
+        try #"["demo"]"#.write(to: pack.appendingPathComponent(PackMarketplace.pluginManifestPath), atomically: true, encoding: .utf8)
+        #expect(throws: PackMarketplace.Error.pluginManifestUnreadable(name: "demo", reason: "expected an object with a `name` string")) {
+            try resolve(nil, in: pack)
         }
     }
 
     @Test("Linking writes a marketplace named for the pack that lists the linked plugin")
     func linkWritesWrapper() throws {
         let home = try makeTmpDir(label: "pack-marketplace-home")
-        let pack = try makePack(source: "./")
+        let pack = try makeTmpDir(label: "pack-marketplace")
         defer {
             try? FileManager.default.removeItem(at: home)
             try? FileManager.default.removeItem(at: pack)
@@ -70,7 +78,7 @@ struct PackMarketplaceTests {
     @Test("Unlinking drops the plugin from the marketplace without removing the marketplace")
     func unlink() throws {
         let home = try makeTmpDir(label: "pack-marketplace-home")
-        let pack = try makePack(source: "./")
+        let pack = try makeTmpDir(label: "pack-marketplace")
         defer {
             try? FileManager.default.removeItem(at: home)
             try? FileManager.default.removeItem(at: pack)
@@ -85,26 +93,5 @@ struct PackMarketplaceTests {
             .appendingPathComponent(PackMarketplace.manifestPath)
         let manifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
         #expect((manifest["plugins"] as? [Any])?.isEmpty == true)
-    }
-
-    @Test("A source directory missing from the pack is rejected")
-    func missingSource() throws {
-        let pack = try makePack(source: "./plugins/fooo")
-        defer { try? FileManager.default.removeItem(at: pack) }
-        #expect(throws: PackMarketplace.Error.sourceMissing("demo")) {
-            try PackMarketplace.hostedPlugin(named: "demo", in: pack)
-        }
-    }
-
-    @Test("A marketplace manifest whose plugins value isn't a list is unreadable, not empty")
-    func malformedPluginsList() throws {
-        let pack = try makeTmpDir(label: "pack-marketplace")
-        defer { try? FileManager.default.removeItem(at: pack) }
-        let manifest = pack.appendingPathComponent(PackMarketplace.manifestPath)
-        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try #"{"name":"acme","plugins":{"demo":"./"}}"#.write(to: manifest, atomically: true, encoding: .utf8)
-        #expect(throws: PackMarketplace.Error.manifestUnreadable("expected an object with a `plugins` list")) {
-            try PackMarketplace.hostedPlugin(named: "demo", in: pack)
-        }
     }
 }

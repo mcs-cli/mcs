@@ -91,7 +91,7 @@ struct PackTrustManager {
                         ))
                     }
 
-                case let .plugin(name) where PluginRef(name).isPackToken:
+                case let .plugin(name, _) where PluginRef(name).isPackToken:
                     guard let plugin = hostedPlugins.first(where: { $0.name == PluginRef(name).bareName }) else { break }
                     let tree = try PluginTreeHasher.hash(plugin, packPath: packPath, shell: shell)
                     // Everything under it runs on every session (hooks, MCP servers, mods, skills),

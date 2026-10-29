@@ -73,6 +73,11 @@ extension ExternalPackManifest {
                 }
                 seenComponentIDs.insert(component.id)
 
+                if case let .plugin(name, source?) = component.installAction,
+                   let reason = pluginSourceRejectionReason(source, pluginName: name) {
+                    throw ManifestError.invalidPluginSource(componentID: component.id, reason: reason)
+                }
+
                 // Validate hook registration metadata
                 if let reg = component.hookRegistration {
                     if let timeout = reg.timeout, timeout <= 0 {
@@ -466,6 +471,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case invalidHookMetadata(componentID: String, reason: String)
     case duplicateDestination(destination: String, fileType: String, componentIDs: [String])
     case ignoreEntryLoadBearing(entry: String, reason: String)
+    case invalidPluginSource(componentID: String, reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -494,6 +500,8 @@ enum ManifestError: Error, Equatable, LocalizedError {
                 + " in components: \(componentIDs.joined(separator: ", "))"
         case let .ignoreEntryLoadBearing(entry, reason):
             "ignore: entry '\(entry)' is not allowed: \(reason)"
+        case let .invalidPluginSource(componentID, reason):
+            "Component '\(componentID)': \(reason)"
         }
     }
 }
@@ -556,6 +564,7 @@ struct ExternalComponentDefinition: Codable, Equatable {
         case brew // String — brew package name
         case mcp // Map — MCPShorthand (name inferred from id)
         case plugin // String — plugin full name
+        case pluginSource // String — directory of a `name@pack` plugin inside the pack (default: the pack root)
         case shell // String — shell command (requires explicit `type`)
         case shellInteractive // Bool — allocate PTY for commands needing terminal access (e.g. sudo)
         case hook // Map — CopyFileShorthand (fileType: .hook)
@@ -634,6 +643,14 @@ struct ExternalComponentDefinition: Codable, Equatable {
             }
         }
         doctorChecks = try container.decodeIfPresent([ExternalDoctorCheckDefinition].self, forKey: .doctorChecks)
+        if shorthand.contains(.pluginSource), !shorthand.contains(.plugin) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "Component '\(id)': pluginSource requires the plugin shorthand"
+                )
+            )
+        }
 
         if let resolved = try Self.resolveShorthand(shorthand, componentId: id) {
             type = try resolved.type ?? container.decode(ExternalComponentType.self, forKey: .type)
@@ -686,7 +703,8 @@ struct ExternalComponentDefinition: Codable, Equatable {
         }
         if shorthand.contains(.plugin) {
             let name = try shorthand.decode(String.self, forKey: .plugin)
-            return ResolvedShorthand(type: .plugin, action: .plugin(name: name))
+            let source = try shorthand.decodeIfPresent(String.self, forKey: .pluginSource)
+            return ResolvedShorthand(type: .plugin, action: .plugin(name: name, source: source))
         }
         if shorthand.contains(.shell) {
             let command = try shorthand.decode(String.self, forKey: .shell)
@@ -803,7 +821,7 @@ enum ExternalInstallActionType: String, Codable {
 /// Declarative install action types that can be expressed in YAML.
 enum ExternalInstallAction: Codable, Equatable {
     case mcpServer(ExternalMCPServerConfig)
-    case plugin(name: String)
+    case plugin(name: String, source: String? = nil)
     case brewInstall(package: String)
     case shellCommand(command: String, interactive: Bool = false)
     case gitignoreEntries(entries: [String])
@@ -838,7 +856,8 @@ enum ExternalInstallAction: Codable, Equatable {
             self = .mcpServer(config)
         case .plugin:
             let name = try container.decode(String.self, forKey: .name)
-            self = .plugin(name: name)
+            let source = try container.decodeIfPresent(String.self, forKey: .source)
+            self = .plugin(name: name, source: source)
         case .brewInstall:
             let package = try container.decode(String.self, forKey: .package)
             self = .brewInstall(package: package)
@@ -867,9 +886,10 @@ enum ExternalInstallAction: Codable, Equatable {
         case let .mcpServer(config):
             try container.encode(ExternalInstallActionType.mcpServer, forKey: .type)
             try config.encode(to: encoder)
-        case let .plugin(name):
+        case let .plugin(name, source):
             try container.encode(ExternalInstallActionType.plugin, forKey: .type)
             try container.encode(name, forKey: .name)
+            try container.encodeIfPresent(source, forKey: .source)
         case let .brewInstall(package):
             try container.encode(ExternalInstallActionType.brewInstall, forKey: .type)
             try container.encode(package, forKey: .package)
@@ -950,6 +970,24 @@ enum ExternalCopyFileType: String, Codable {
 }
 
 // MARK: - Referenced Pack Files
+
+/// Unlike the other pack-relative sources, `./x` and `.` are refused rather than normalised: the
+/// value names a directory Claude Code loads in place, so there is one spelling for it, and leaving
+/// the key out is how a manifest names the pack root.
+func pluginSourceRejectionReason(_ source: String, pluginName: String) -> String? {
+    let ref = PluginRef(pluginName)
+    guard ref.isPackToken else {
+        return "pluginSource applies only to a plugin the pack hosts ('\(ref.bareName)@\(Constants.Plugins.packToken)')"
+    }
+    // An empty string and a leading `/` both split into an empty segment.
+    let isPlainRelative = !source.split(separator: "/", omittingEmptySubsequences: false)
+        .contains { $0.isEmpty || $0 == "." || $0 == ".." }
+    guard isPlainRelative else {
+        return "pluginSource '\(source)' must be a path inside the pack such as 'plugins/\(ref.bareName)'"
+            + " (no leading './', '.', '..' or '/'); leave it out for the pack root"
+    }
+    return nil
+}
 
 /// Normalize a pack-relative path so equivalent expressions collapse to the same key.
 /// Trims whitespace and strips a leading `./` so `hooks/foo.sh`, `./hooks/foo.sh`, and
