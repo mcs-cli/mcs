@@ -29,7 +29,9 @@ enum PluginTreeHasher {
         let root = packPath.resolvingSymlinksInPath()
         let result = shell.run(
             shell.environment.gitPath, arguments: ["ls-files", "-s", "-z", "--", plugin.relativePath],
-            workingDirectory: root.path
+            workingDirectory: root.path,
+            // The "not a git repository" check below reads git's message, which git translates.
+            additionalEnvironment: ["LC_ALL": "C"]
         )
         guard result.succeeded else {
             // A local pack need not be a checkout; its trust is skipped at load anyway.

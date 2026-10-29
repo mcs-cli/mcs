@@ -90,4 +90,16 @@ struct PluginTreeHasherTests {
 
         #expect(try PluginTreeHasher.hash(root(repo), packPath: repo, shell: shell(repo)).hash != pinned.hash)
     }
+
+    @Test("Listing tracked files forces git's untranslated messages, so a non-repo is recognised in any locale")
+    func lsFilesRunsInCLocale() throws {
+        let dir = try makeTmpDir(label: "plugin-tree")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let shell = MockShellRunner(environment: Environment(home: dir))
+
+        _ = try PluginTreeHasher.hash(root(dir), packPath: dir, shell: shell)
+
+        let lsFiles = try #require(shell.runCalls.first { $0.arguments.contains("ls-files") })
+        #expect(lsFiles.additionalEnvironment["LC_ALL"] == "C")
+    }
 }
