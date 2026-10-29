@@ -222,9 +222,11 @@ If the repository is both your pack and your plugin's marketplace, mcs can load 
 What changes for your users:
 
 - **The plugin id becomes `my-plugin@mcs-<pack-identifier>`.** mcs registers a marketplace of its own that links to the checkout, so it never collides with your public marketplace. Anything your README says about `claude plugin … my-plugin@<marketplace>` doesn't apply to pack installs. Skill and command names come from the plugin's own `name` and don't change.
-- **Trust covers the whole plugin directory.** Every file under it can run or load in every session, so any change there asks for trust again on `mcs pack update`. With `source: "./"` that's nearly every commit. If the user declines, the checkout goes back to the last trusted commit.
+- **Trust covers every file git tracks in the plugin directory.** Any of them can run or load in every session, so a change to one asks for trust again on `mcs pack update`. A tracked symlink pointing outside the plugin directory makes the pack fail to load. With `source: "./"` that's nearly every commit. If the user declines, the checkout goes back to the last trusted commit.
 - **Updates come from `mcs pack update`.** Claude Code reads the checkout in place, so the plugin's `version` doesn't gate anything, and mcs doesn't run `claude plugin update` for it.
 - **Switching an existing pack to `@pack` replaces the old install.** If mcs installed `my-plugin@<marketplace>` for the pack before, the next sync uninstalls that copy at that scope and installs the pack-hosted one. Claude Code keeps plugin data per plugin id, so the plugin starts with an empty data directory.
+- **Claude Code installs no Node.js dependencies for it.** A plugin loaded in place never gets the `package.json` install a copied plugin gets, so ship what the plugin needs or install it from a hook into `${CLAUDE_PLUGIN_DATA}`.
+- **Files the plugin or Claude Code writes into the checkout don't affect trust,** as long as git doesn't track them. Trust hashes the files git tracks in the plugin directory, so keep build output, caches and `.claude-plugin/types/` in `.gitignore`.
 - **One version per machine.** There is one checkout per pack, so every project on the machine gets the same plugin version.
 
 ### Hooks

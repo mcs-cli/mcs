@@ -4846,9 +4846,7 @@ struct PluginScopeLifecycleTests {
         #expect(try doctor.run().issues == 0)
 
         try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
-        RemovePack.removePackMarketplace(
-            "xcrew", env: bed.env, claudeCLI: bed.mockCLI, output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
-        )
+        try PackMarketplace.unregister(packID: "xcrew", claudeCLI: bed.mockCLI, environment: bed.env)
         #expect(bed.mockCLI.marketplaceRemoveCalls == ["mcs-xcrew"])
         #expect(!FileManager.default.fileExists(atPath: wrapper.path))
     }
@@ -4865,8 +4863,43 @@ struct PluginScopeLifecycleTests {
             InstalledPlugin(id: $0.id, scope: $0.scope, enabled: $0.enabled, projectPath: $0.projectPath)
         }
 
-        var doctor = bed.makeDoctorRunner(registry: registry)
-        #expect(try doctor.run().issues == 1)
+        let check = try #require(pack.components.first?.deriveDoctorCheck(
+            projectRoot: bed.project, environment: bed.env, pluginListing: PluginListing(claudeCLI: bed.mockCLI)
+        ))
+        guard case let .fail(message) = check.check() else {
+            Issue.record("Expected the plugin check to fail")
+            return
+        }
+        #expect(message.hasPrefix("not loaded from the pack checkout"))
+    }
+
+    @Test("Removing one of two packs hosting a same-named plugin uninstalls only that pack's copy")
+    func twoPacksHostingSameName() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let packA = try packHostedPack("pack-a", source: makePluginSource(in: bed))
+        let packB = try packHostedPack("pack-b", source: makePluginSource(in: bed))
+        let registry = TechPackRegistry(packs: [packA, packB])
+        try bed.makeConfigurator(registry: registry).configure(packs: [packA, packB], confirmRemovals: false)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [packB], confirmRemovals: false)
+
+        #expect(bed.mockCLI.pluginRemoveCalls.map(\.id) == ["demo@mcs-pack-a"])
+        #expect(try bed.projectState().artifacts(for: "pack-b")?.plugins == ["demo@mcs-pack-b"])
+    }
+
+    @Test("pack remove keeps the marketplace and reports failure when unregistering it fails")
+    func removePackMarketplaceFailure() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try packHostedPack("xcrew", source: makePluginSource(in: bed))
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [pack])).configure(packs: [pack], confirmRemovals: false)
+        bed.mockCLI.result = ShellResult(exitCode: 1, stdout: "", stderr: "busy")
+
+        #expect(throws: PackMarketplace.Error.unregisterFailed(name: "mcs-xcrew", stderr: "busy")) {
+            try PackMarketplace.unregister(packID: "xcrew", claudeCLI: bed.mockCLI, environment: bed.env)
+        }
+        #expect(FileManager.default.fileExists(atPath: PackMarketplace.wrapperDirectory(packID: "xcrew", environment: bed.env).path))
     }
 
     @Test("Switching a plugin to `@pack` uninstalls the marketplace copy the pack installed")

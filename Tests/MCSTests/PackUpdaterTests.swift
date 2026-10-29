@@ -263,12 +263,10 @@ struct PackUpdaterTests {
         // script — the state a declined trust prompt plus a baseline advance produces.
         try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
         let packPath = fix.packsDir.appendingPathComponent("test-pack")
-        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
-            Issue.record("Expected the fetch to advance the checkout")
-            return
-        }
+        let fetchedSHA = try fix.fetcher.fetchTarget(packPath: packPath, ref: nil)
+        try fix.fetcher.reset(packPath: packPath, to: fetchedSHA)
 
-        let entry = makeEntry(commitSHA: fetched.commitSHA)
+        let entry = makeEntry(commitSHA: fetchedSHA)
 
         let result = fix.updater.updateGitPack(
             entry: entry, packPath: packPath, registry: fix.registry
@@ -289,16 +287,14 @@ struct PackUpdaterTests {
 
         try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
         let packPath = fix.packsDir.appendingPathComponent("test-pack")
-        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
-            Issue.record("Expected the fetch to advance the checkout")
-            return
-        }
+        let fetchedSHA = try fix.fetcher.fetchTarget(packPath: packPath, ref: nil)
+        try fix.fetcher.reset(packPath: packPath, to: fetchedSHA)
 
         let scriptHash = try FileHasher.sha256(
             of: packPath.appendingPathComponent("scripts/configure.sh")
         )
         let entry = makeEntry(
-            commitSHA: fetched.commitSHA,
+            commitSHA: fetchedSHA,
             trustedScriptHashes: ["scripts/configure.sh": scriptHash]
         )
 
@@ -345,7 +341,7 @@ struct PackUpdaterTests {
         // Push a new commit and advance the local checkout (simulating a previous
         // update where trust was denied — disk is at new commit, registry is stale)
         let newSHA = try pushNewCommit(fixture: fix)
-        _ = try fix.fetcher.update(packPath: packPath, ref: nil)
+        try fix.fetcher.reset(packPath: packPath, to: fix.fetcher.fetchTarget(packPath: packPath, ref: nil))
 
         // Seed the update-check cache so we can assert the stale-recovery path invalidates it too
         try seedUpdateCheckCache(env: fix.env)
@@ -434,15 +430,13 @@ struct PackUpdaterTests {
 
         try pushConfigureScript(fixture: fix, body: "#!/bin/bash\necho configure")
         let packPath = fix.packsDir.appendingPathComponent("test-pack")
-        guard let fetched = try fix.fetcher.update(packPath: packPath, ref: nil) else {
-            Issue.record("Expected the fetch to advance the checkout")
-            return
-        }
+        let fetchedSHA = try fix.fetcher.fetchTarget(packPath: packPath, ref: nil)
+        try fix.fetcher.reset(packPath: packPath, to: fetchedSHA)
         let scriptHash = try FileHasher.sha256(
             of: packPath.appendingPathComponent("scripts/configure.sh")
         )
         let entry = makeEntry(
-            commitSHA: fetched.commitSHA,
+            commitSHA: fetchedSHA,
             trustedScriptHashes: ["scripts/configure.sh": scriptHash],
             sourceURL: fix.remoteDir.path
         )
@@ -457,7 +451,7 @@ struct PackUpdaterTests {
             Issue.record("Expected .updated, got \(result)")
             return
         }
-        #expect(updatedEntry.commitSHA == fetched.commitSHA)
+        #expect(updatedEntry.commitSHA == fetchedSHA)
         #expect(updatedEntry.trustedScriptHashes["scripts/configure.sh"] == scriptHash)
         #expect(!PackRegistryFile.PackEntry.isCheckoutMissing(at: packPath))
     }
@@ -992,5 +986,89 @@ struct PackUpdaterTests {
                 failedCount: failed, attemptedCount: attempted, isInteractive: interactive
             ) == expected
         )
+    }
+
+    // MARK: - Pack-hosted plugins
+
+    private let invalidManifest = "schemaVersion: 99\nidentifier: test-pack\n"
+
+    @Test("A failed update returns the checkout to the trusted commit")
+    func failedUpdateResetsCheckout() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        try pushManifest(fixture: fix, manifest: invalidManifest)
+
+        let result = fix.updater.updateGitPack(entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry)
+
+        guard case .manifestInvalid = result else {
+            Issue.record("Expected .manifestInvalid, got \(result)")
+            return
+        }
+        #expect(try fix.fetcher.currentCommit(at: packPath) == fix.initialSHA)
+    }
+
+    @Test("When the checkout can't return to the trusted commit, its plugins stay unlinked and the update fails")
+    func failedResetLeavesPluginsUnlinked() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        _ = try PackMarketplace.link(pluginName: "demo", to: packPath, packID: "test-pack", environment: fix.env)
+        try pushManifest(fixture: fix, manifest: invalidManifest)
+
+        let unreachable = makeEntry(commitSHA: String(repeating: "0", count: 40))
+        let result = fix.updater.updateGitPack(entry: unreachable, packPath: packPath, registry: fix.registry)
+
+        guard case .restoreFailed = result else {
+            Issue.record("Expected .restoreFailed, got \(result)")
+            return
+        }
+        #expect(result.isHardFailure)
+        #expect(try PackMarketplace.linkedPlugins(packID: "test-pack", environment: fix.env).isEmpty)
+    }
+
+    @Test("A trusted update links the plugins the new manifest hosts")
+    func trustedUpdateRelinksPlugins() throws {
+        let fix = try makeFixture(trustPolicy: .autoAccept)
+        defer { fix.cleanup() }
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        _ = try PackMarketplace.link(pluginName: "old", to: packPath, packID: "test-pack", environment: fix.env)
+        try pushFiles(fixture: fix, files: [
+            ".claude-plugin/marketplace.json": #"{"name":"acme","plugins":[{"name":"demo","source":"./"}]}"#,
+            "techpack.yaml": """
+            schemaVersion: 1
+            identifier: test-pack
+            displayName: Test Pack
+            description: Hosts its plugin
+            components:
+              - id: plugin
+                description: The plugin
+                plugin: "demo@pack"
+            """,
+        ])
+
+        let result = fix.updater.updateGitPack(entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry)
+
+        guard case .updated = result else {
+            Issue.record("Expected .updated, got \(result)")
+            return
+        }
+        #expect(try PackMarketplace.linkedPlugins(packID: "test-pack", environment: fix.env) == ["demo"])
+    }
+
+    @Test("An update with nothing new leaves the pack's plugins linked")
+    func noChangeKeepsPluginsLinked() throws {
+        let fix = try makeFixture()
+        defer { fix.cleanup() }
+        let packPath = fix.packsDir.appendingPathComponent("test-pack")
+        _ = try PackMarketplace.link(pluginName: "demo", to: packPath, packID: "test-pack", environment: fix.env)
+
+        let result = fix.updater.updateGitPack(entry: makeEntry(commitSHA: fix.initialSHA), packPath: packPath, registry: fix.registry)
+
+        guard case .alreadyUpToDate = result else {
+            Issue.record("Expected .alreadyUpToDate, got \(result)")
+            return
+        }
+        #expect(try PackMarketplace.linkedPlugins(packID: "test-pack", environment: fix.env) == ["demo"])
     }
 }

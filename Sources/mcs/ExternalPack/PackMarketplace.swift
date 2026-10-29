@@ -13,6 +13,8 @@ enum PackMarketplace {
         case pluginNotListed(String)
         case sourceNotLocal(String)
         case sourceEscapesPack(String)
+        case sourceMissing(String)
+        case unregisterFailed(name: String, stderr: String)
 
         var errorDescription: String? {
             switch self {
@@ -26,6 +28,10 @@ enum PackMarketplace {
                 "plugin '\(name)' in \(PackMarketplace.manifestPath) needs a relative `source` such as \"./\""
             case let .sourceEscapesPack(name):
                 "the source of plugin '\(name)' in \(PackMarketplace.manifestPath) points outside the pack"
+            case let .unregisterFailed(name, stderr):
+                "could not remove marketplace '\(name)': \(stderr)"
+            case let .sourceMissing(name):
+                "the source of plugin '\(name)' in \(PackMarketplace.manifestPath) is not a directory in the pack"
             }
         }
     }
@@ -73,12 +79,16 @@ enum PackMarketplace {
     private static func marketplaceEntries(in packPath: URL) throws -> [[String: Any]] {
         let manifestURL = packPath.appendingPathComponent(manifestPath)
         guard FileManager.default.fileExists(atPath: manifestURL.path) else { throw Error.manifestMissing }
+        let object: Any
         do {
-            let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
-            return (object as? [String: Any])?["plugins"] as? [[String: Any]] ?? []
+            object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
         } catch {
             throw Error.manifestUnreadable(error.localizedDescription)
         }
+        guard let plugins = (object as? [String: Any])?["plugins"] as? [[String: Any]] else {
+            throw Error.manifestUnreadable("expected an object with a `plugins` list")
+        }
+        return plugins
     }
 
     private static func resolve(_ pluginName: String, entries: [[String: Any]], packPath: URL) throws -> HostedPlugin {
@@ -95,6 +105,11 @@ enum PackMarketplace {
         let relative = String(source.dropFirst(2))
         guard let resolved = PathContainment.safePath(relativePath: relative, within: packPath) else {
             throw Error.sourceEscapesPack(pluginName)
+        }
+        // A missing directory would hash as empty and store nothing, so the pack could never be trusted.
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw Error.sourceMissing(pluginName)
         }
         return HostedPlugin(name: pluginName, source: resolved, relativePath: relative)
     }
@@ -130,6 +145,19 @@ enum PackMarketplace {
         guard isSymbolicLink(link) else { return }
         try FileManager.default.removeItem(at: link)
         try writeManifest(packID: packID, wrapper: wrapper)
+    }
+
+    /// Unregister the pack's generated marketplace and delete it. Claude Code uninstalls its
+    /// plugins from every scope, so this runs only after every scope is unconfigured.
+    static func unregister(packID: String, claudeCLI: any ClaudeCLI, environment: Environment) throws {
+        guard FileManager.default.fileExists(atPath: wrapperDirectory(packID: packID, environment: environment).path) else { return }
+        let name = marketplaceName(packID: packID)
+        let result = claudeCLI.pluginMarketplaceRemove(name: name)
+        // Unregistered already (e.g. by hand) is the state removal wants.
+        if !result.succeeded, try claudeCLI.marketplaces().contains(where: { $0.name == name }) {
+            throw Error.unregisterFailed(name: name, stderr: String(result.stderr.prefix(200)))
+        }
+        try remove(packID: packID, environment: environment)
     }
 
     static func remove(packID: String, environment: Environment) throws {

@@ -291,7 +291,7 @@ struct UpdateCommand: LockedCommand {
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: shell, output: output, packsDirectory: env.packsDirectory),
-            trustManager: PackTrustManager(output: output, policy: trust.policy),
+            trustManager: PackTrustManager(output: output, policy: trust.policy, shell: shell),
             environment: env,
             output: output
         )
@@ -323,7 +323,7 @@ struct UpdateCommand: LockedCommand {
                 output.info("  \(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt on next 'mcs update')")
                 skipped.insert(entry.identifier)
                 anyTrustDeclined = true
-            case .fetchFailed, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError, .restoreFailed:
                 output.warn("  \(entry.identifier): \(result.reason ?? "update failed")")
                 skipped.insert(entry.identifier)
                 failed.insert(entry.identifier)

@@ -130,7 +130,7 @@ values during `mcs sync`. The server `name` is never substituted.
 
 Installs a Claude Code plugin. Infers `type: plugin`. The version follows the marketplace, not the pack's `ref:`: `mcs update` moves it to the marketplace's current release. Plugin content is not covered by the pack's trust prompt.
 
-When the repository being packed is itself the plugin's marketplace (`.claude-plugin/marketplace.json` listing the plugin with a relative `source`), declare `plugin: "<name>@pack"` instead of `<name>@<owner>/<repo>`. mcs then loads the plugin from the pack's checkout, pinned to the pack's `ref:`, and its whole directory goes through trust review. Don't add the plugin's directories to `ignore:` for this; files under the plugin source count as referenced.
+When the repository being packed is itself the plugin's marketplace (`.claude-plugin/marketplace.json` listing the plugin with a relative `source`), declare `plugin: "<name>@pack"` instead of `<name>@<owner>/<repo>`. mcs then loads the plugin from the pack's checkout, pinned to the pack's `ref:`, and every file git tracks in its directory goes through trust review. Keep build output and caches in `.gitignore`, and don't commit a symlink that points outside the plugin directory. Don't add the plugin's directories to `ignore:` for this; files under the plugin source count as referenced.
 
 ```yaml
 - id: my-plugin

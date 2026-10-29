@@ -449,7 +449,24 @@ func preparePackDir(home: URL, identifier: String) throws {
 
 // MARK: - Temp Directory Helpers
 
-/// Create a bare temp directory with a UUID-unique name.
+extension PackTrustManager {
+    /// Tests that never reach a pack-hosted plugin don't care which git runs.
+    init(output: CLIOutput, policy: TrustPolicy = .prompt) {
+        self.init(output: output, policy: policy, shell: ShellRunner(environment: Environment()))
+    }
+}
+
+/// Run git in `directory`, failing the test setup with git's own message.
+@discardableResult
+func runGit(_ arguments: [String], in directory: URL) throws -> String {
+    let shell = ShellRunner(environment: Environment(home: directory))
+    let result = shell.run(shell.environment.gitPath, arguments: ["-C", directory.path] + arguments)
+    guard result.succeeded else {
+        throw MCSError.configurationFailed(reason: "git \(arguments.joined(separator: " ")): \(result.stderr)")
+    }
+    return result.stdout
+}
+
 /// Write a pack's own `.claude-plugin/marketplace.json` listing `plugins` as `name: source`.
 func writePackMarketplace(at pack: URL, plugins: [String: Any]) throws {
     let manifestURL = pack.appendingPathComponent(PackMarketplace.manifestPath)
@@ -458,6 +475,7 @@ func writePackMarketplace(at pack: URL, plugins: [String: Any]) throws {
     try JSONSerialization.data(withJSONObject: ["name": "acme", "plugins": entries]).write(to: manifestURL)
 }
 
+/// Create a bare temp directory with a UUID-unique name.
 func makeTmpDir(label: String = "test") throws -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")

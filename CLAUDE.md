@@ -112,7 +112,7 @@ mcs config set <key> <value>     # Set a configuration value (true/false)
 - `PackFetcher.swift` — Git clone/pull for pack repositories
 - `PackSourceResolver.swift` — resolves user input into git URL or local path (URL schemes, filesystem, GitHub shorthand)
 - `PackRegistryFile.swift` — YAML registry of installed external packs (`~/.mcs/registry.yaml`)
-- `PackTrustManager.swift` — pack trust verification; a pack-hosted plugin is one `.pluginDirectory` item hashed with `FileHasher.treeHash` (hidden files in, `.git` out)
+- `PackTrustManager.swift` — pack trust verification; a pack-hosted plugin is one `.pluginDirectory` item hashed by `PluginTreeHasher` over the files git tracks there (untracked runtime files ignored, escaping symlinks and missing tracked files refused)
 - `PackMarketplace.swift` — reads a pack's `.claude-plugin/marketplace.json` and maintains the generated `mcs-<pack-id>` marketplace in `~/.mcs/marketplaces/<pack-id>/` that links pack-hosted plugins to the checkout
 - `PromptExecutor.swift` — executes pack prompts (interactive value resolution during sync)
 - `ScriptRunner.swift` — sandboxed script execution for pack scripts

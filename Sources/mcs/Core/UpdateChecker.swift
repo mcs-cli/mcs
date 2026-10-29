@@ -284,7 +284,7 @@ struct UpdateChecker {
     /// upstream change at all, the closure exits without producing an outcome (consistent with
     /// the file-level "Network failures are silently ignored" design goal).
     ///
-    /// Mirrors `PackFetcher.update` for the fetch shape: when `entry.ref == nil`, fetch without
+    /// Mirrors `PackFetcher.fetchTarget` for the fetch shape: when `entry.ref == nil`, fetch without
     /// a ref arg and diff against `origin/HEAD` (more reliable across git servers than passing
     /// `HEAD` as a positional ref). When `entry.ref` is set, fetch that ref explicitly and diff
     /// against `FETCH_HEAD`.

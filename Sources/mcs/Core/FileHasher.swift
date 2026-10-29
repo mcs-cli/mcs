@@ -57,9 +57,7 @@ enum FileHasher {
     /// Compute SHA-256 hashes for all regular files in a directory (recursive).
     /// Per-file errors are collected in `failures` rather than aborting the whole operation.
     /// Throws only if the directory itself cannot be enumerated.
-    static func directoryFileHashes(
-        at url: URL, includeHidden: Bool = false, skipping skipped: Set<String> = []
-    ) throws -> DirectoryHashResult {
+    static func directoryFileHashes(at url: URL) throws -> DirectoryHashResult {
         let fm = FileManager.default
         // Resolve symlinks to ensure consistent path comparison
         // (macOS /var → /private/var, /tmp → /private/tmp)
@@ -67,7 +65,7 @@ enum FileHasher {
         guard let enumerator = fm.enumerator(
             at: resolvedURL,
             includingPropertiesForKeys: [.isRegularFileKey],
-            options: includeHidden ? [] : [.skipsHiddenFiles]
+            options: [.skipsHiddenFiles]
         ) else {
             throw MCSError.fileOperationFailed(
                 path: resolvedURL.path,
@@ -79,10 +77,6 @@ enum FileHasher {
         var failures: [(relativePath: String, error: any Error)] = []
         let basePath = resolvedURL.path
         while let fileURL = enumerator.nextObject() as? URL {
-            if skipped.contains(fileURL.lastPathComponent) {
-                enumerator.skipDescendants()
-                continue
-            }
             let resolvedFile = fileURL.resolvingSymlinksInPath()
             do {
                 let resourceValues = try resolvedFile.resourceValues(forKeys: [.isRegularFileKey])
@@ -99,15 +93,5 @@ enum FileHasher {
             hashes: results.sorted { $0.relativePath < $1.relativePath },
             failures: failures
         )
-    }
-
-    /// One SHA-256 over every regular file under `url`, hidden ones included and `.git` excluded,
-    /// with the number of files it covers. Any unreadable file fails the whole hash: a tree that is
-    /// trusted on a partial read would let the unread file change unreviewed.
-    static func treeHash(at url: URL) throws -> (hash: String, fileCount: Int) {
-        let result = try directoryFileHashes(at: url, includeHidden: true, skipping: [".git"])
-        if let failure = result.failures.first { throw failure.error }
-        let manifest = result.hashes.map { "\($0.relativePath)\u{0}\($0.hash)" }.joined(separator: "\n")
-        return (sha256(data: Data(manifest.utf8)), result.hashes.count)
     }
 }

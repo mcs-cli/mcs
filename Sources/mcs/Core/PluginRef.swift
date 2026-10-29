@@ -80,11 +80,12 @@ struct PluginRef: Equatable {
         return marketplaces.first { $0.repo?.lowercased() == repo }.map { "\(bareName)@\($0.name)" }
     }
 
-    /// Matched by name, except that a pack-hosted install and a marketplace install are different
-    /// plugins: a pack switching to `@pack` must drop the old install, not carry it over beside
-    /// the new one, where Claude Code would load only one copy's hooks.
+    /// Matched by name, except that plugins hosted by different packs, or by a pack and a
+    /// marketplace, are different plugins. A pack switching to `@pack` must drop the old install
+    /// rather than keep it beside the new one, where Claude Code would load only one copy's hooks;
+    /// and one pack's copy must never count as a claim on another pack's.
     func isSamePlugin(as other: PluginRef) -> Bool {
-        bareName == other.bareName && isPackHosted == other.isPackHosted
+        bareName == other.bareName && hostingPackID == other.hostingPackID
     }
 
     /// Whether `id` (`name@marketplace`) is this plugin.

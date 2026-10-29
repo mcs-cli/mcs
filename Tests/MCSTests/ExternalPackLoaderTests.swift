@@ -114,6 +114,17 @@ struct ExternalPackLoaderTests {
         return try ExternalPackLoader(environment: env, registry: PackRegistryFile(path: env.packsRegistry)).validate(at: packDir)
     }
 
+    private func reason(_ body: () throws -> ExternalPackManifest) -> String? {
+        do {
+            _ = try body()
+            return nil
+        } catch let ExternalPackLoader.LoadError.invalidManifest(_, reason) {
+            return reason
+        } catch {
+            return nil
+        }
+    }
+
     @Test("Validate accepts `@pack` when the pack's marketplace lists the plugin with a relative source")
     func validatePackHostedPlugin() throws {
         let manifest = try validatePluginPack(plugin: "demo@pack", marketplace: ["demo": "./"])
@@ -122,12 +133,10 @@ struct ExternalPackLoaderTests {
 
     @Test("Validate rejects `@pack` without a pack marketplace, and a hand-written `@mcs-` marketplace")
     func validateRejectsBadPackHostedPlugin() {
-        #expect(throws: ExternalPackLoader.LoadError.self) {
-            try validatePluginPack(plugin: "demo@pack", marketplace: nil)
-        }
-        #expect(throws: ExternalPackLoader.LoadError.self) {
-            try validatePluginPack(plugin: "demo@mcs-other", marketplace: nil)
-        }
+        #expect(reason { try validatePluginPack(plugin: "demo@pack", marketplace: nil) }?
+            .contains(PackMarketplace.Error.manifestMissing.localizedDescription) == true)
+        #expect(reason { try validatePluginPack(plugin: "demo@mcs-other", marketplace: nil) }?
+            .contains("are reserved for mcs") == true)
     }
 
     @Test("Validate throws when techpack.yaml is missing")

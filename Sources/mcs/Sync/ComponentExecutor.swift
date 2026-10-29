@@ -194,11 +194,16 @@ struct ComponentExecutor {
         let key = Constants.JSONKeys.extraKnownMarketplaces
         do {
             var settings = try Settings.load(from: environment.claudeSettings)
-            // `marketplace add` writes the entry; without it there is no source to attach the switch to.
+            // `marketplace add` writes the entry (verified with Claude Code 2.1.312); without it there
+            // is no source to attach the switch to.
             guard var marketplaces = settings.extraJSONObject[key] as? [String: Any],
-                  var entry = marketplaces[name] as? [String: Any],
-                  entry[Constants.JSONKeys.autoUpdate] == nil
-            else { return }
+                  var entry = marketplaces[name] as? [String: Any]
+            else {
+                let file = environment.claudeSettings.lastPathComponent
+                output.dimmed("  Auto-update not set for marketplace '\(name)': no entry in \(file)")
+                return
+            }
+            guard entry[Constants.JSONKeys.autoUpdate] == nil else { return }
             entry[Constants.JSONKeys.autoUpdate] = true
             marketplaces[name] = entry
             settings.extraJSON[key] = try JSONSerialization.data(withJSONObject: marketplaces, options: [.sortedKeys])

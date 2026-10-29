@@ -86,4 +86,25 @@ struct PackMarketplaceTests {
         let manifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
         #expect((manifest["plugins"] as? [Any])?.isEmpty == true)
     }
+
+    @Test("A source directory missing from the pack is rejected")
+    func missingSource() throws {
+        let pack = try makePack(source: "./plugins/fooo")
+        defer { try? FileManager.default.removeItem(at: pack) }
+        #expect(throws: PackMarketplace.Error.sourceMissing("demo")) {
+            try PackMarketplace.hostedPlugin(named: "demo", in: pack)
+        }
+    }
+
+    @Test("A marketplace manifest whose plugins value isn't a list is unreadable, not empty")
+    func malformedPluginsList() throws {
+        let pack = try makeTmpDir(label: "pack-marketplace")
+        defer { try? FileManager.default.removeItem(at: pack) }
+        let manifest = pack.appendingPathComponent(PackMarketplace.manifestPath)
+        try FileManager.default.createDirectory(at: manifest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"name":"acme","plugins":{"demo":"./"}}"#.write(to: manifest, atomically: true, encoding: .utf8)
+        #expect(throws: PackMarketplace.Error.manifestUnreadable("expected an object with a `plugins` list")) {
+            try PackMarketplace.hostedPlugin(named: "demo", in: pack)
+        }
+    }
 }

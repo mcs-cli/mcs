@@ -216,6 +216,18 @@ struct RemovePack: LockedCommand {
             throw ExitCode.failure
         }
 
+        // Before the registry entry and checkout go, so a failure leaves a re-run something to finish
+        // and the marketplace never links to a deleted checkout.
+        do {
+            try PackMarketplace.unregister(
+                packID: identifier, claudeCLI: ClaudeIntegration(shell: ctx.shell), environment: ctx.env
+            )
+        } catch {
+            ctx.output.error(error.localizedDescription)
+            ctx.output.error("Fix the error above and re-run 'mcs pack remove \(identifier)'.")
+            throw ExitCode.failure
+        }
+
         // 7. Remove from registry
         do {
             var data = registryData
@@ -226,39 +238,12 @@ struct RemovePack: LockedCommand {
             throw ExitCode.failure
         }
 
-        Self.removePackMarketplace(
-            identifier, env: ctx.env, claudeCLI: ClaudeIntegration(shell: ctx.shell), output: ctx.output
-        )
-
         // 8. Delete local checkout (skip for local packs — don't delete user's source directory)
         if !entry.isLocalPack {
             fetcher.removeQuietly(packPath: packPath)
         }
 
         ctx.output.success("Pack '\(entry.displayName)' removed.")
-    }
-
-    /// Unregister the marketplace mcs generated for the pack's hosted plugins, once no scope uses them.
-    /// A failed unregister keeps the directory, so Claude Code is never left pointing at nothing.
-    static func removePackMarketplace(
-        _ packID: String, env: Environment, claudeCLI: any ClaudeCLI, output: CLIOutput
-    ) {
-        let wrapper = PackMarketplace.wrapperDirectory(packID: packID, environment: env)
-        guard FileManager.default.fileExists(atPath: wrapper.path) else { return }
-        let name = PackMarketplace.marketplaceName(packID: packID)
-        let result = claudeCLI.pluginMarketplaceRemove(name: name)
-        // A failure because it was already unregistered (e.g. by hand) still leaves the state removal wants.
-        let goneAnyway = (try? claudeCLI.marketplaces()).map { !$0.contains { $0.name == name } } ?? false
-        if !result.succeeded, !goneAnyway {
-            output.warn("Could not remove marketplace '\(name)': \(String(result.stderr.prefix(200)))")
-            output.warn("Run 'claude plugin marketplace remove \(name)', then delete \(wrapper.path)")
-            return
-        }
-        do {
-            try PackMarketplace.remove(packID: packID, environment: env)
-        } catch {
-            output.warn("Could not delete \(wrapper.path): \(error.localizedDescription)")
-        }
     }
 
     /// Returns the index paths of scopes left with artifacts, so the caller can keep their claims.
@@ -391,7 +376,7 @@ struct UpdatePack: LockedCommand {
 
         let updater = PackUpdater(
             fetcher: PackFetcher(shell: ctx.shell, output: ctx.output, packsDirectory: ctx.env.packsDirectory),
-            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy),
+            trustManager: PackTrustManager(output: ctx.output, policy: trust.policy, shell: ctx.shell),
             environment: ctx.env,
             output: ctx.output
         )
@@ -451,7 +436,7 @@ struct UpdatePack: LockedCommand {
             case .trustDeclined:
                 ctx.output.info("\(entry.identifier): \(result.reason ?? "trust not granted") (will re-prompt next run)")
                 anyTrustDeclined = true
-            case .fetchFailed, .manifestInvalid, .internalError:
+            case .fetchFailed, .manifestInvalid, .internalError, .restoreFailed:
                 ctx.output.warn("\(entry.identifier): \(result.reason ?? "update failed")")
                 failedPacks.append(entry.identifier)
             }

@@ -14,6 +14,7 @@ struct PackTrustManager {
 
     let output: CLIOutput
     var policy: TrustPolicy = .prompt
+    let shell: any ShellRunning
 
     // MARK: - Analyze
 
@@ -22,6 +23,7 @@ struct PackTrustManager {
     /// that will run with user privileges.
     func analyzeScripts(manifest: ExternalPackManifest, packPath: URL) throws -> [TrustableItem] {
         var items: [TrustableItem] = []
+        let hostedPlugins = try PackMarketplace.hostedPlugins(in: manifest, packPath: packPath)
 
         // Component install actions
         if let components = manifest.components {
@@ -90,8 +92,8 @@ struct PackTrustManager {
                     }
 
                 case let .plugin(name) where PluginRef(name).isPackToken:
-                    let plugin = try PackMarketplace.hostedPlugin(named: PluginRef(name).bareName, in: packPath)
-                    let tree = try FileHasher.treeHash(at: plugin.source)
+                    guard let plugin = hostedPlugins.first(where: { $0.name == PluginRef(name).bareName }) else { break }
+                    let tree = try PluginTreeHasher.hash(plugin, packPath: packPath, shell: shell)
                     // Everything under it runs on every session (hooks, MCP servers, mods, skills),
                     // so the whole tree is one item rather than the files a manifest happens to name.
                     items.append(TrustableItem(

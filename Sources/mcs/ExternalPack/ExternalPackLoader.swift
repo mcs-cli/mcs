@@ -245,7 +245,7 @@ struct ExternalPackLoader {
 
         // Skip trust verification for local packs — scripts change during development
         if !entry.isLocalPack {
-            let trustManager = PackTrustManager(output: CLIOutput())
+            let trustManager = PackTrustManager(output: CLIOutput(), shell: ShellRunner(environment: environment))
             // Analyzing reads script contents, so an unreadable script surfaces as a plain load
             // failure rather than the security warning below.
             let offenders = try trustManager.verifyTrust(
