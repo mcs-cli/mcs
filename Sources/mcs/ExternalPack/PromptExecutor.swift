@@ -100,7 +100,7 @@ struct PromptExecutor {
         projectPath: URL,
         priorValue: String?
     ) throws -> String {
-        let patterns = prompt.detectPatterns ?? ["*"]
+        let patterns = prompt.effectiveDetectPatterns
         let files = Self.detectFiles(matching: patterns, in: projectPath)
         let patternDesc = patterns.joined(separator: ", ")
 
@@ -179,10 +179,25 @@ struct PromptExecutor {
         return name == pattern
     }
 
-    /// Whether a stored `fileDetect` answer still names a file the patterns accept.
-    /// The scan only lists the project's top level, so a path the user typed into a
-    /// subdirectory (a monorepo's `apps/ios/App.xcworkspace`) is checked on disk instead.
-    static func priorStillExists(_ prior: String, patterns: [String], in projectPath: URL) -> Bool {
+    /// Whether a stored `fileDetect` answer still holds against this run's scan of `patterns`.
+    /// The scan lists only the project's top level, so when it finds nothing, a path the user
+    /// typed into a subdirectory (a monorepo's `apps/ios/App.xcworkspace`) is checked on disk.
+    static func fileDetectPriorIsValid(
+        _ prior: String,
+        detected files: [String],
+        patterns: [String],
+        in projectPath: URL
+    ) -> Bool {
+        files.isEmpty ? priorStillExists(prior, patterns: patterns, in: projectPath) : files.contains(prior)
+    }
+
+    static func fileDetectPriorIsValid(_ prior: String, patterns: [String], in projectPath: URL) -> Bool {
+        fileDetectPriorIsValid(
+            prior, detected: detectFiles(matching: patterns, in: projectPath), patterns: patterns, in: projectPath
+        )
+    }
+
+    private static func priorStillExists(_ prior: String, patterns: [String], in projectPath: URL) -> Bool {
         guard !prior.isEmpty,
               let url = PathContainment.safePath(relativePath: prior, within: projectPath),
               FileManager.default.fileExists(atPath: url.path)
@@ -247,20 +262,20 @@ struct PromptExecutor {
         }
 
         if types == [.fileDetect] {
-            let patterns = declarations.flatMap { $0.detectPatterns ?? ["*"] }
+            let patterns = declarations.flatMap(\.effectiveDetectPatterns)
             let files = detectFiles(matching: patterns, in: projectPath)
+            if let prior, fileDetectPriorIsValid(prior, detected: files, patterns: patterns, in: projectPath) {
+                return prior
+            }
             switch files.count {
             case 0:
-                // Only a prior or a default can name a file the scan can't see, and an empty
-                // default is rejected here just as the interactive zero-match branch rejects it.
-                if let prior, priorStillExists(prior, patterns: patterns, in: projectPath) {
-                    return prior
-                }
+                // A default is the only other way to name a file the scan can't see, and an empty
+                // one is rejected here just as the interactive zero-match branch rejects it.
                 return declaredDefault.flatMap { $0.isEmpty ? nil : $0 }
             case 1:
                 return files[0]
             default:
-                return candidates.first { files.contains($0) }
+                return declaredDefault.flatMap { files.contains($0) ? $0 : nil }
             }
         }
 

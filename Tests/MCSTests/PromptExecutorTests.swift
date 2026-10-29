@@ -597,8 +597,8 @@ struct PromptExecutorTests {
         #expect(resolve(noDefault, prior: "apps/ios/Gone.xcworkspace", in: tmpDir) == nil)
     }
 
-    @Test("priorStillExists requires an existing, contained file that a pattern accepts")
-    func priorStillExistsRules() throws {
+    @Test("fileDetect prior on an empty scan must exist inside the project and match a pattern")
+    func fileDetectPriorValidity() throws {
         let root = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: root) }
 
@@ -608,12 +608,15 @@ struct PromptExecutorTests {
         try "".write(to: nested.appendingPathComponent("App.xcworkspace"), atomically: true, encoding: .utf8)
         try "".write(to: root.appendingPathComponent("Outside.xcworkspace"), atomically: true, encoding: .utf8)
 
-        let patterns = ["*.xcodeproj", "*.xcworkspace"]
-        #expect(PromptExecutor.priorStillExists("apps/ios/App.xcworkspace", patterns: patterns, in: project))
-        #expect(!PromptExecutor.priorStillExists("apps/ios/Gone.xcworkspace", patterns: patterns, in: project))
-        #expect(!PromptExecutor.priorStillExists("apps/ios/App.xcworkspace", patterns: ["*.xcodeproj"], in: project))
-        #expect(!PromptExecutor.priorStillExists("../Outside.xcworkspace", patterns: patterns, in: project))
-        #expect(!PromptExecutor.priorStillExists("", patterns: ["*"], in: project))
+        func valid(_ prior: String, patterns: [String] = ["*.xcodeproj", "*.xcworkspace"], detected: [String] = []) -> Bool {
+            PromptExecutor.fileDetectPriorIsValid(prior, detected: detected, patterns: patterns, in: project)
+        }
+        #expect(valid("apps/ios/App.xcworkspace"))
+        #expect(!valid("apps/ios/Gone.xcworkspace"))
+        #expect(!valid("apps/ios/App.xcworkspace", patterns: ["*.xcodeproj"]))
+        #expect(!valid("../Outside.xcworkspace"))
+        #expect(!valid("", patterns: ["*"]))
+        #expect(!valid("apps/ios/App.xcworkspace", detected: ["Root.xcodeproj"]))
     }
 
     @Test("Mixed declarations: any input declaration accepts a value verbatim")
