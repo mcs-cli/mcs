@@ -30,11 +30,13 @@ struct PluginRefresher {
             return []
         }
 
+        var failed = false
         // A marketplace shared by several scopes needs one refresh, not one per scope.
         let marketplaces = Set(plans.flatMap(\.1).compactMap(Self.marketplaceName(of:)))
         for name in marketplaces.sorted() {
             let result = claudeCLI.pluginMarketplaceUpdate(name: name)
             if !result.succeeded {
+                failed = true
                 output.warn("  Could not refresh marketplace '\(name)': \(String(result.stderr.prefix(200)))")
             }
         }
@@ -47,16 +49,22 @@ struct PluginRefresher {
                     id: id, scope: scope.pluginScope, workingDirectory: scope.mcpWorkingDirectory
                 )
                 if !result.succeeded {
+                    failed = true
                     output.warn("  Could not update plugin '\(id)': \(String(result.stderr.prefix(200)))")
                 }
             }
             let after = versions(in: scope)
+            // Comparing against a listing that failed would report every plugin as changed.
+            guard let before, let after else {
+                failed = true
+                continue
+            }
             for id in ids where before[id] != after[id] {
                 changes.append(Change(scopeLabel: scope.label, id: id, from: before[id], to: after[id]))
                 output.success("  \(scope.label): \(id) \(before[id] ?? "?") → \(after[id] ?? "?")")
             }
         }
-        if changes.isEmpty {
+        if changes.isEmpty, !failed {
             output.dimmed("  All plugins up to date")
         }
         return changes
@@ -104,9 +112,13 @@ struct PluginRefresher {
         }
     }
 
-    private func versions(in scope: SyncScope) -> [String: String] {
+    /// nil when the listing can't be read, so a failure never reads as "no versions".
+    private func versions(in scope: SyncScope) -> [String: String]? {
         let result = claudeCLI.pluginList(workingDirectory: scope.mcpWorkingDirectory)
-        guard result.succeeded else { return [:] }
+        guard result.succeeded else {
+            output.warn("  \(scope.label): could not list plugins: \(String(result.stderr.prefix(200)))")
+            return nil
+        }
         do {
             let plugins = try JSONDecoder().decode([InstalledPlugin].self, from: Data(result.stdout.utf8))
             var versions: [String: String] = [:]
@@ -116,7 +128,7 @@ struct PluginRefresher {
             return versions
         } catch {
             output.warn("  Could not read the plugin list: \(error.localizedDescription)")
-            return [:]
+            return nil
         }
     }
 

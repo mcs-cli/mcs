@@ -87,4 +87,20 @@ struct PluginRefresherTests {
         #expect(cli.marketplaceUpdateCalls.isEmpty)
         #expect(cli.pluginUpdateCalls.isEmpty)
     }
+
+    @Test("refresh reports no version change when the listing before the update fails")
+    func refreshIgnoresFailedListing() throws {
+        let (root, scope) = try makeProject(recording: ["lint@acme"])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cli = MockClaudeCLI()
+        cli.installedPlugins = [InstalledPlugin(
+            id: "lint@acme", scope: "local", enabled: true, projectPath: root.path, version: "1.0.0"
+        )]
+        cli.pluginListFailuresRemaining = 1
+
+        let changes = refresher(cli).refresh(scopes: [scope], dryRun: false)
+
+        #expect(cli.pluginUpdateCalls.map(\.id) == ["lint@acme"])
+        #expect(changes.isEmpty)
+    }
 }

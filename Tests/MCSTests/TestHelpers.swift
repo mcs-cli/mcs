@@ -60,6 +60,8 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     var installedPlugins: [InstalledPlugin] = []
     var pluginListDirectories: [URL?] = []
     var pluginListFails = false
+    /// Fails only this many upcoming `plugin list` calls, for a listing that fails part-way through a run.
+    var pluginListFailuresRemaining = 0
 
     /// Marketplaces a successful `marketplace add` of the keyed repo registers, as the real CLI would.
     var marketplacesRegisteredOnAdd: [String: PluginMarketplace] = [:]
@@ -103,7 +105,10 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
 
     func pluginList(workingDirectory: URL?) -> ShellResult {
         pluginListDirectories.append(workingDirectory)
-        if pluginListFails { return ShellResult(exitCode: 1, stdout: "", stderr: "list failed") }
+        if pluginListFails || pluginListFailuresRemaining > 0 {
+            pluginListFailuresRemaining = max(0, pluginListFailuresRemaining - 1)
+            return ShellResult(exitCode: 1, stdout: "", stderr: "list failed")
+        }
         return jsonResult(installedPlugins.map { plugin in
             // Mirrors the CLI: a local install is enabled only when listed from its own project.
             guard plugin.scope == Constants.PluginScope.local else { return plugin }
