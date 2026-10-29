@@ -1016,6 +1016,30 @@ struct PartitionDeclaredPromptsTests {
         #expect(newKeys.isEmpty)
     }
 
+    @Test("partition: nested fileDetect prior is checked against every declaring pack's patterns")
+    func partitionFileDetectNestedPriorAcrossPacks() throws {
+        let dir = try makeDetectDir(files: ["apps/ios/App.xcworkspace"])
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let projectOnly = PromptDefinition(
+            key: "PROJECT", type: .fileDetect,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: ["*.xcodeproj"], scriptCommand: nil
+        )
+        let workspaceOnly = PromptDefinition(
+            key: "PROJECT", type: .fileDetect,
+            label: nil, defaultValue: nil, options: nil,
+            detectPatterns: ["*.xcworkspace"], scriptCommand: nil
+        )
+        let (reusable, newKeys) = CrossPackPromptResolver.partitionDeclaredPrompts(
+            [projectOnly, workspaceOnly],
+            priorValues: ["PROJECT": "apps/ios/App.xcworkspace"],
+            projectPath: dir
+        )
+        #expect(reusable == ["PROJECT": "apps/ios/App.xcworkspace"])
+        #expect(newKeys.isEmpty)
+    }
+
     @Test("partition: fileDetect declared as input by another pack keeps verbatim reuse")
     func partitionFileDetectMixedWithInput() throws {
         let dir = try makeDetectDir(files: ["Other.xcodeproj"])
