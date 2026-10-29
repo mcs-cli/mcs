@@ -11,11 +11,15 @@ protocol ClaudeCLI: Sendable {
     @discardableResult
     func pluginMarketplaceAdd(repo: String) -> ShellResult
     func pluginMarketplaceList() -> ShellResult
+    @discardableResult
+    func pluginMarketplaceUpdate(name: String) -> ShellResult
     func pluginList(workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult
+    @discardableResult
+    func pluginUpdate(id: String, scope: String, workingDirectory: URL?) -> ShellResult
 }
 
 /// Wrapper for the `claude` CLI to manage MCP servers and plugins.
@@ -89,6 +93,16 @@ struct ClaudeIntegration: ClaudeCLI {
         )
     }
 
+    /// Refresh one marketplace's catalog from its source.
+    @discardableResult
+    func pluginMarketplaceUpdate(name: String) -> ShellResult {
+        shell.run(
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "update", name],
+            additionalEnvironment: claudeEnv
+        )
+    }
+
     /// `claude plugin list --json`. Run in a project, `enabled` reflects that project's settings.
     func pluginList(workingDirectory: URL?) -> ShellResult {
         shell.run(
@@ -117,6 +131,17 @@ struct ClaudeIntegration: ClaudeCLI {
         shell.run(
             Constants.CLI.env,
             arguments: [Constants.CLI.claudeCommand, "plugin", "uninstall", id, "-s", scope],
+            workingDirectory: workingDirectory?.path,
+            additionalEnvironment: claudeEnv
+        )
+    }
+
+    /// Update a plugin at one scope to its marketplace's current version. See `pluginInstall` for `workingDirectory`.
+    @discardableResult
+    func pluginUpdate(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
+        shell.run(
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand, "plugin", "update", id, "-s", scope],
             workingDirectory: workingDirectory?.path,
             additionalEnvironment: claudeEnv
         )

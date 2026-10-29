@@ -74,6 +74,8 @@ struct ComponentExecutor {
             return .failed
         }
         let ref = PluginRef(fullName)
+        // Only a marketplace mcs registers gets auto-update turned on; one the user added keeps their choice.
+        let registeredBefore = ref.hasMarketplaceRepo ? registeredMarketplaces() : nil
         // A failed add is often a marketplace that is already there; it only matters when the
         // plugin then can't be resolved, and its error is the one that explains why.
         let added = ref.hasMarketplaceRepo ? claudeCLI.pluginMarketplaceAdd(repo: ref.marketplaceRepo) : nil
@@ -82,6 +84,12 @@ struct ComponentExecutor {
             let cause = addError.map { "adding \(ref.marketplaceRepo) failed: \($0)" } ?? "is it added?"
             output.warn("Could not find the marketplace for plugin '\(fullName)' — \(cause). Skipping")
             return .failed
+        }
+        if let registeredBefore, added?.succeeded == true,
+           ref.marketplaceName != Constants.Plugins.officialMarketplace,
+           !registeredBefore.contains(where: { $0.repo?.lowercased() == ref.marketplaceRepo.lowercased() }),
+           let marketplace = id.split(separator: "@", maxSplits: 1).last.map(String.init) {
+            enableAutoUpdate(marketplace: marketplace)
         }
         let listing = pluginListing ?? PluginListing(claudeCLI: claudeCLI)
         let installed = installedPlugins(listing)
@@ -140,17 +148,41 @@ struct ComponentExecutor {
 
     private func resolvePluginID(_ ref: PluginRef) -> String? {
         if ref.marketplaceName != nil { return ref.pluginID(in: []) }
+        return registeredMarketplaces().flatMap(ref.pluginID(in:))
+    }
+
+    private func registeredMarketplaces() -> [PluginMarketplace]? {
         let result = claudeCLI.pluginMarketplaceList()
         guard result.succeeded else {
             output.warn("Could not list plugin marketplaces: \(String(result.stderr.prefix(200)))")
             return nil
         }
         do {
-            let marketplaces = try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
-            return ref.pluginID(in: marketplaces)
+            return try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
         } catch {
             output.warn("Could not read the plugin marketplace list: \(error.localizedDescription)")
             return nil
+        }
+    }
+
+    /// Claude Code leaves background plugin updates off for third-party marketplaces, so a plugin
+    /// mcs installed would otherwise stay at its first version between `mcs update` runs.
+    private func enableAutoUpdate(marketplace name: String) {
+        let key = Constants.JSONKeys.extraKnownMarketplaces
+        do {
+            var settings = try Settings.load(from: environment.claudeSettings)
+            // `marketplace add` writes the entry; without it there is no source to attach the switch to.
+            guard var marketplaces = settings.extraJSONObject[key] as? [String: Any],
+                  var entry = marketplaces[name] as? [String: Any],
+                  entry[Constants.JSONKeys.autoUpdate] == nil
+            else { return }
+            entry[Constants.JSONKeys.autoUpdate] = true
+            marketplaces[name] = entry
+            settings.extraJSON[key] = try JSONSerialization.data(withJSONObject: marketplaces, options: [.sortedKeys])
+            try settings.save(to: environment.claudeSettings)
+            output.dimmed("  Turned on auto-update for marketplace '\(name)'")
+        } catch {
+            output.warn("Could not turn on auto-update for marketplace '\(name)': \(error.localizedDescription)")
         }
     }
 

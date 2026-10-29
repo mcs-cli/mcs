@@ -70,6 +70,10 @@ enum Constants {
         static let mcpServers = "mcpServers"
         /// The top-level key in `~/.claude.json` for per-project settings.
         static let projects = "projects"
+        /// The top-level settings key Claude Code registers marketplaces under.
+        static let extraKnownMarketplaces = "extraKnownMarketplaces"
+        /// Per-marketplace switch for Claude Code's background plugin updates.
+        static let autoUpdate = "autoUpdate"
     }
 
     // MARK: - External Packs

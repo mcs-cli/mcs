@@ -169,6 +169,57 @@ struct ComponentExecutorTests {
         #expect(cli.pluginInstallCalls == [MockClaudeCLI.PluginCall(id: "lint@hud", scope: "local", workingDirectory: project)])
     }
 
+    // MARK: - installPlugin auto-update
+
+    private func installWithSettings(
+        _ settingsJSON: String, cli: MockClaudeCLI
+    ) throws -> (home: URL, autoUpdate: Any?) {
+        let home = try makeTmpDir(label: "autoupdate")
+        let env = Environment(home: home)
+        try FileManager.default.createDirectory(at: env.claudeDirectory, withIntermediateDirectories: true)
+        try settingsJSON.write(to: env.claudeSettings, atomically: true, encoding: .utf8)
+        let executor = ComponentExecutor(
+            environment: env,
+            output: CLIOutput(colorsEnabled: false, interactiveStdin: false),
+            shell: ShellRunner(environment: env),
+            claudeCLI: cli
+        )
+        _ = executor.installPlugin("lint@org/hud-repo", scope: Constants.PluginScope.user)
+        let json = try Settings.load(from: env.claudeSettings).extraJSONObject
+        let entry = (json[Constants.JSONKeys.extraKnownMarketplaces] as? [String: Any])?["hud"] as? [String: Any]
+        return (home, entry?[Constants.JSONKeys.autoUpdate])
+    }
+
+    private let hudEntry = #"{"extraKnownMarketplaces":{"hud":{"source":{"source":"github","repo":"org/hud-repo"}}}}"#
+
+    @Test("installPlugin turns on auto-update for a marketplace its own add registered")
+    func installPluginEnablesAutoUpdateOnNewMarketplace() throws {
+        let cli = MockClaudeCLI()
+        cli.marketplacesRegisteredOnAdd = ["org/hud-repo": PluginMarketplace(name: "hud", repo: "org/hud-repo")]
+        let (home, autoUpdate) = try installWithSettings(hudEntry, cli: cli)
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(autoUpdate as? Bool == true)
+    }
+
+    @Test("installPlugin leaves auto-update alone on a marketplace that was already registered")
+    func installPluginKeepsPreexistingMarketplace() throws {
+        let cli = MockClaudeCLI()
+        cli.marketplaces = [PluginMarketplace(name: "hud", repo: "org/hud-repo")]
+        let (home, autoUpdate) = try installWithSettings(hudEntry, cli: cli)
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(autoUpdate == nil)
+    }
+
+    @Test("installPlugin never overrides an auto-update choice already in settings")
+    func installPluginKeepsExplicitAutoUpdate() throws {
+        let cli = MockClaudeCLI()
+        cli.marketplacesRegisteredOnAdd = ["org/hud-repo": PluginMarketplace(name: "hud", repo: "org/hud-repo")]
+        let settings = #"{"extraKnownMarketplaces":{"hud":{"autoUpdate":false,"source":{"source":"github","repo":"org/hud-repo"}}}}"#
+        let (home, autoUpdate) = try installWithSettings(settings, cli: cli)
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(autoUpdate as? Bool == false)
+    }
+
     @Test("installPlugin skips a plugin whose marketplace can't be found")
     func installPluginUnresolvableMarketplace() {
         let cli = MockClaudeCLI()

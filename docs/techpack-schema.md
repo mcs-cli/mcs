@@ -124,6 +124,8 @@ Infers: `type: mcpServer`, `installAction: mcpServer`
 
 Infers: `type: plugin`, `installAction: plugin`
 
+The plugin's version follows its marketplace, not the pack's `ref:`. `mcs update` moves it to the marketplace's current version. When mcs registers the marketplace itself, it also turns on Claude Code's background auto-update for it (`extraKnownMarketplaces.<name>.autoUpdate` in `~/.claude/settings.json`). A marketplace that was already registered keeps the user's setting. Plugin content is not covered by pack trust review.
+
 ---
 
 #### `hook:` — Hook Script
