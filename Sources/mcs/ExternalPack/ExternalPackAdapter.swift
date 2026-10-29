@@ -154,11 +154,11 @@ struct ExternalPackAdapter: TechPack {
         guard var action = convertInstallAction(ext.installAction) else { return nil }
 
         var pluginSource: URL?
-        if case let .plugin(name) = action, PluginRef(name).isPackToken {
+        if case let .plugin(name, _) = ext.installAction, PluginRef(name).isPackToken {
             let bareName = PluginRef(name).bareName
             action = .plugin(name: PackMarketplace.pluginID(bareName: bareName, packID: manifest.identifier))
             do {
-                pluginSource = try PackMarketplace.hostedPlugin(named: bareName, in: packPath).source
+                pluginSource = try PackMarketplace.hostedPlugin(named: bareName, in: manifest, packPath: packPath)?.source
             } catch {
                 output.warn("\(manifest.displayName): plugin '\(bareName)' — \(error.localizedDescription)")
             }
@@ -195,7 +195,7 @@ struct ExternalPackAdapter: TechPack {
         case let .mcpServer(config):
             return .mcpServer(config.toMCPServerConfig())
 
-        case let .plugin(name):
+        case let .plugin(name, _):
             return .plugin(name: name)
 
         case let .brewInstall(package):

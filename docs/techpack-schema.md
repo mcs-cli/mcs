@@ -120,11 +120,12 @@ Infers: `type: mcpServer`, `installAction: mcpServer`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `plugin` | `String` | Plugin full name (`name@org` or `name@user/repo`) |
+| `plugin` | `String` | Plugin full name (`name@org`, `name@user/repo`, or `name@pack`) |
+| `pluginSource` | `String` | Optional, `name@pack` only: the plugin's directory inside the pack, as a plain relative path (`plugins/my-plugin`). Defaults to the pack root |
 
 Infers: `type: plugin`, `installAction: plugin`
 
-**Plugin hosted by the pack itself.** When the pack's repository is also the plugin's marketplace, declare it as `plugin: "<name>@pack"`. The pack must have `.claude-plugin/marketplace.json` listing `<name>` with a relative `source` inside the pack (`"./"` for the repository root). mcs then loads the plugin straight from the pack's checkout, so it always matches the pack's `ref:`. Every file git tracks in its source directory is covered by the pack's trust prompt, and Claude Code shows it as `<name>@mcs-<pack-identifier>`. Marketplace names starting with `mcs-` are reserved; `mcs pack validate` rejects a manifest that declares one.
+**Plugin hosted by the pack itself.** When the pack's repository also contains the plugin, declare it as `plugin: "<name>@pack"`. The plugin's directory is the pack root, or `pluginSource` when it lives in a subdirectory; it must contain `.claude-plugin/plugin.json` whose `name` is `<name>`. mcs never reads the pack's own `.claude-plugin/marketplace.json`, so that catalog can keep pointing direct Claude Code installs wherever it needs to (a release branch, say). `pluginSource` takes no leading `./`, no `.` or `..`, and no absolute path, and is rejected on a plugin that isn't `name@pack`. mcs then loads the plugin straight from the pack's checkout, so it always matches the pack's `ref:`. Every file git tracks in its source directory is covered by the pack's trust prompt, and Claude Code shows it as `<name>@mcs-<pack-identifier>`. Marketplace names starting with `mcs-` are reserved; `mcs pack validate` rejects a manifest that declares one.
 
 For any other plugin, the version follows its marketplace, not the pack's `ref:`. `mcs update` moves it to the marketplace's current version. When mcs registers the marketplace itself, it also turns on Claude Code's background auto-update for it (`extraKnownMarketplaces.<name>.autoUpdate` in `~/.claude/settings.json`). A marketplace that was already registered keeps the user's setting. Plugin content is not covered by pack trust review.
 
@@ -363,7 +364,7 @@ The explicit form with `type` + `installAction` is always supported:
 | `type` | Fields | Description |
 |--------|--------|-------------|
 | `mcpServer` | `name`, `command`, `args`, `env`, `transport`, `url`, `scope` | Register MCP server |
-| `plugin` | `name` | Install Claude Code plugin |
+| `plugin` | `name`, `source` (optional, `name@pack` only) | Install Claude Code plugin |
 | `brewInstall` | `package` | Install Homebrew package |
 | `shellCommand` | `command`, `interactive` | Run shell command (`interactive`: allocate PTY, default `false`) |
 | `gitignoreEntries` | `entries` | Add to global gitignore |

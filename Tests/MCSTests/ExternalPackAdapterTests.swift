@@ -729,7 +729,7 @@ struct ExternalPackAdapterTests {
     func packHostedPluginFromManifest() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
-        try writePackMarketplace(at: tmpDir, plugins: ["demo": "./"])
+        try writePluginManifest(at: tmpDir, name: "demo")
         let yaml = """
         schemaVersion: 1
         identifier: test-pack

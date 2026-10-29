@@ -1,42 +1,42 @@
 import Foundation
 
-/// A pack's own `.claude-plugin/marketplace.json`, and the marketplace mcs generates so Claude Code
-/// loads the pack's plugins from its checkout.
+/// The marketplace mcs generates so Claude Code loads a pack's `name@pack` plugins from its checkout.
 ///
-/// The generated marketplace links to the checkout instead of registering it directly: the pack's
-/// manifest names its marketplace (often the author's general one), and a second registration
-/// under that name would collide with an existing one, whose removal uninstalls its plugins.
+/// The plugin's directory comes from the pack's techpack.yaml, never from the pack's own
+/// `.claude-plugin/marketplace.json`: a repo that is also a public marketplace keeps that catalog
+/// pointed wherever direct Claude Code installs need it (a release branch, say). The generated
+/// marketplace links to the checkout instead of registering it directly, because a second
+/// registration under the author's marketplace name would collide with an existing one, whose
+/// removal uninstalls its plugins.
 enum PackMarketplace {
     enum Error: Swift.Error, LocalizedError, Equatable {
-        case manifestMissing
-        case manifestUnreadable(String)
-        case pluginNotListed(String)
-        case sourceNotLocal(String)
         case sourceEscapesPack(String)
         case sourceMissing(String)
+        case pluginManifestMissing(name: String, path: String)
+        case pluginManifestUnreadable(name: String, reason: String)
+        case pluginNameMismatch(name: String, declared: String)
         case unregisterFailed(name: String, stderr: String)
 
         var errorDescription: String? {
             switch self {
-            case .manifestMissing:
-                "no \(PackMarketplace.manifestPath) in the pack"
-            case let .manifestUnreadable(reason):
-                "\(PackMarketplace.manifestPath) could not be read: \(reason)"
-            case let .pluginNotListed(name):
-                "\(PackMarketplace.manifestPath) lists no plugin named '\(name)'"
-            case let .sourceNotLocal(name):
-                "plugin '\(name)' in \(PackMarketplace.manifestPath) needs a relative `source` such as \"./\""
             case let .sourceEscapesPack(name):
-                "the source of plugin '\(name)' in \(PackMarketplace.manifestPath) points outside the pack"
+                "the directory of plugin '\(name)' points outside the pack"
+            case let .sourceMissing(name):
+                "the directory of plugin '\(name)' is not a directory in the pack"
+            case let .pluginManifestMissing(name, path):
+                "plugin '\(name)' has no \(path)"
+            case let .pluginManifestUnreadable(name, reason):
+                "the \(PackMarketplace.pluginManifestPath) of plugin '\(name)' could not be read: \(reason)"
+            case let .pluginNameMismatch(name, declared):
+                "plugin '\(name)' is named '\(declared)' in its \(PackMarketplace.pluginManifestPath)"
             case let .unregisterFailed(name, stderr):
                 "could not remove marketplace '\(name)': \(stderr)"
-            case let .sourceMissing(name):
-                "the source of plugin '\(name)' in \(PackMarketplace.manifestPath) is not a directory in the pack"
             }
         }
     }
 
     static let manifestPath = ".claude-plugin/marketplace.json"
+    static let pluginManifestPath = ".claude-plugin/plugin.json"
 
     static func marketplaceName(packID: String) -> String {
         Constants.Plugins.packMarketplacePrefix + packID
@@ -51,7 +51,7 @@ enum PackMarketplace {
         environment.packMarketplacesDirectory.appendingPathComponent(packID)
     }
 
-    /// A plugin the pack declares as `name@pack`, resolved against the pack's own marketplace.
+    /// A plugin the pack declares as `name@pack`, resolved to its directory in the checkout.
     struct HostedPlugin: Equatable {
         let name: String
         let source: URL
@@ -59,59 +59,65 @@ enum PackMarketplace {
         let relativePath: String
     }
 
-    /// Every `name@pack` plugin `manifest` declares, resolved against the marketplace in `packPath`.
+    /// Every `name@pack` plugin `manifest` declares, resolved against `packPath`.
     static func hostedPlugins(in manifest: ExternalPackManifest, packPath: URL) throws -> [HostedPlugin] {
-        let names = (manifest.components ?? []).compactMap { component -> String? in
-            guard case let .plugin(name) = component.installAction else { return nil }
-            let ref = PluginRef(name)
-            return ref.isPackToken ? ref.bareName : nil
+        try (manifest.components ?? []).compactMap { component in
+            guard case let .plugin(name, source) = component.installAction, PluginRef(name).isPackToken else { return nil }
+            return try resolve(PluginRef(name).bareName, source: source, packPath: packPath)
         }
-        guard !names.isEmpty else { return [] }
-        let entries = try marketplaceEntries(in: packPath)
-        return try names.map { try resolve($0, entries: entries, packPath: packPath) }
     }
 
-    /// The plugin `pluginName` as the pack's marketplace lists it.
-    static func hostedPlugin(named pluginName: String, in packPath: URL) throws -> HostedPlugin {
-        try resolve(pluginName, entries: marketplaceEntries(in: packPath), packPath: packPath)
+    /// The `name@pack` plugin named `pluginName` in `manifest`, or nil when it declares none.
+    static func hostedPlugin(named pluginName: String, in manifest: ExternalPackManifest, packPath: URL) throws -> HostedPlugin? {
+        for component in manifest.components ?? [] {
+            guard case let .plugin(name, source) = component.installAction else { continue }
+            let ref = PluginRef(name)
+            if ref.isPackToken, ref.bareName == pluginName {
+                return try resolve(pluginName, source: source, packPath: packPath)
+            }
+        }
+        return nil
     }
 
-    private static func marketplaceEntries(in packPath: URL) throws -> [[String: Any]] {
-        let manifestURL = packPath.appendingPathComponent(manifestPath)
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else { throw Error.manifestMissing }
+    private static func resolve(_ pluginName: String, source: String?, packPath: URL) throws -> HostedPlugin {
+        let directory: URL
+        if let source {
+            guard let resolved = PathContainment.safePath(relativePath: source, within: packPath) else {
+                throw Error.sourceEscapesPack(pluginName)
+            }
+            directory = resolved
+        } else {
+            directory = packPath
+        }
+        // A missing directory would hash as empty and store nothing, so the pack could never be trusted.
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw Error.sourceMissing(pluginName)
+        }
+        try verifyPluginManifest(pluginName, in: directory, relativeSource: source)
+        return HostedPlugin(name: pluginName, source: directory, relativePath: source ?? ".")
+    }
+
+    /// The generated marketplace lists the plugin under `pluginName`, so a plugin.json naming it
+    /// otherwise would be installed under one id and identify itself by another.
+    private static func verifyPluginManifest(_ pluginName: String, in directory: URL, relativeSource: String?) throws {
+        let manifestURL = directory.appendingPathComponent(pluginManifestPath)
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else {
+            let path = relativeSource.map { "\($0)/\(pluginManifestPath)" } ?? pluginManifestPath
+            throw Error.pluginManifestMissing(name: pluginName, path: path)
+        }
         let object: Any
         do {
             object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
         } catch {
-            throw Error.manifestUnreadable(error.localizedDescription)
+            throw Error.pluginManifestUnreadable(name: pluginName, reason: error.localizedDescription)
         }
-        guard let plugins = (object as? [String: Any])?["plugins"] as? [[String: Any]] else {
-            throw Error.manifestUnreadable("expected an object with a `plugins` list")
+        guard let declared = (object as? [String: Any])?["name"] as? String else {
+            throw Error.pluginManifestUnreadable(name: pluginName, reason: "expected an object with a `name` string")
         }
-        return plugins
-    }
-
-    private static func resolve(_ pluginName: String, entries: [[String: Any]], packPath: URL) throws -> HostedPlugin {
-        guard let entry = entries.first(where: { $0["name"] as? String == pluginName }) else {
-            throw Error.pluginNotListed(pluginName)
+        guard declared == pluginName else {
+            throw Error.pluginNameMismatch(name: pluginName, declared: declared)
         }
-        // Only a relative-path source loads in place; a remote one is copied from its own origin.
-        guard let source = entry["source"] as? String, source == "." || source.hasPrefix("./") else {
-            throw Error.sourceNotLocal(pluginName)
-        }
-        if source == "." || source == "./" {
-            return HostedPlugin(name: pluginName, source: packPath, relativePath: ".")
-        }
-        let relative = String(source.dropFirst(2))
-        guard let resolved = PathContainment.safePath(relativePath: relative, within: packPath) else {
-            throw Error.sourceEscapesPack(pluginName)
-        }
-        // A missing directory would hash as empty and store nothing, so the pack could never be trusted.
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: resolved.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw Error.sourceMissing(pluginName)
-        }
-        return HostedPlugin(name: pluginName, source: resolved, relativePath: relative)
     }
 
     /// Link `pluginName` to `source` in the pack's generated marketplace. Returns the marketplace

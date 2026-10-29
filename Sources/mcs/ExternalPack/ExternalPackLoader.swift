@@ -273,7 +273,7 @@ struct ExternalPackLoader {
 
     private func validatePackHostedPlugins(in manifest: ExternalPackManifest, packPath: URL) throws {
         for component in manifest.components ?? [] {
-            guard case let .plugin(name) = component.installAction else { continue }
+            guard case let .plugin(name, _) = component.installAction else { continue }
             let ref = PluginRef(name)
             if ref.isPackHosted {
                 throw LoadError.invalidManifest(

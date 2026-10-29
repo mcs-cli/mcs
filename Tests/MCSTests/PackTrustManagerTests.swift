@@ -805,7 +805,7 @@ struct PackTrustManagerTests {
 
     private func makePackHostingPlugin() throws -> (dir: URL, manifest: ExternalPackManifest) {
         let tmpDir = try makeTmpDir()
-        try writePackMarketplace(at: tmpDir, plugins: ["demo": "./"])
+        try writePluginManifest(at: tmpDir, name: "demo")
         try writeFile(#"{"mcpServers":{"demo":{"command":"demo-server"}}}"#, at: tmpDir.appendingPathComponent(".mcp.json"))
         let manifest = try loadManifest(yaml: packHostedYAML, in: tmpDir)
         // A real checkout: the hash covers what git tracks, as it does for every git pack.

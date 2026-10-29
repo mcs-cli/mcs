@@ -91,14 +91,17 @@ struct ExternalPackLoaderTests {
         #expect(manifest.identifier == "test-pack")
     }
 
-    private func validatePluginPack(plugin: String, marketplace: [String: Any]?) throws -> ExternalPackManifest {
+    private func validatePluginPack(
+        plugin: String, pluginSource: String? = nil, pluginManifestName: String? = nil
+    ) throws -> ExternalPackManifest {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let packDir = tmpDir.appendingPathComponent("my-pack")
         try FileManager.default.createDirectory(at: packDir, withIntermediateDirectories: true)
-        if let marketplace {
-            try writePackMarketplace(at: packDir, plugins: marketplace)
+        if let pluginManifestName {
+            try writePluginManifest(at: packDir.appendingPathComponent(pluginSource ?? "."), name: pluginManifestName)
         }
+        let sourceLine = pluginSource.map { "\n    pluginSource: \"\($0)\"" } ?? ""
         let yaml = """
         schemaVersion: 1
         identifier: test-pack
@@ -107,7 +110,7 @@ struct ExternalPackLoaderTests {
         components:
           - id: plugin
             description: Plugin
-            plugin: "\(plugin)"
+            plugin: "\(plugin)"\(sourceLine)
         """
         try yaml.write(to: packDir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8)
         let env = Environment(home: tmpDir)
@@ -125,18 +128,54 @@ struct ExternalPackLoaderTests {
         }
     }
 
-    @Test("Validate accepts `@pack` when the pack's marketplace lists the plugin with a relative source")
+    @Test("Validate accepts `@pack` at the pack root and in a pluginSource directory")
     func validatePackHostedPlugin() throws {
-        let manifest = try validatePluginPack(plugin: "demo@pack", marketplace: ["demo": "./"])
-        #expect(manifest.identifier == "test-pack")
+        #expect(try validatePluginPack(plugin: "demo@pack", pluginManifestName: "demo").identifier == "test-pack")
+        #expect(try validatePluginPack(plugin: "demo@pack", pluginSource: "plugins/demo", pluginManifestName: "demo")
+            .identifier == "test-pack")
     }
 
-    @Test("Validate rejects `@pack` without a pack marketplace, and a hand-written `@mcs-` marketplace")
+    @Test("Validate rejects `@pack` without a matching plugin.json, and a hand-written `@mcs-` marketplace")
     func validateRejectsBadPackHostedPlugin() {
-        #expect(reason { try validatePluginPack(plugin: "demo@pack", marketplace: nil) }?
-            .contains(PackMarketplace.Error.manifestMissing.localizedDescription) == true)
-        #expect(reason { try validatePluginPack(plugin: "demo@mcs-other", marketplace: nil) }?
+        #expect(reason { try validatePluginPack(plugin: "demo@pack") }
+            == PackMarketplace.Error.pluginManifestMissing(name: "demo", path: ".claude-plugin/plugin.json").localizedDescription)
+        #expect(reason { try validatePluginPack(plugin: "demo@pack", pluginManifestName: "other") }
+            == PackMarketplace.Error.pluginNameMismatch(name: "demo", declared: "other").localizedDescription)
+        #expect(reason { try validatePluginPack(plugin: "demo@mcs-other") }?
             .contains("are reserved for mcs") == true)
+    }
+
+    @Test("Validate rejects a pluginSource that isn't a plain path, or sits on a plugin the pack doesn't host")
+    func validateRejectsBadPluginSource() {
+        for source in ["./plugins/demo", ".", "../demo", "/tmp/demo", "plugins//demo"] {
+            #expect(reason { try validatePluginPack(plugin: "demo@pack", pluginSource: source, pluginManifestName: "demo") }?
+                .contains("pluginSource '\(source)' must be a path inside the pack") == true)
+        }
+        #expect(reason { try validatePluginPack(plugin: "demo@acme/plugins", pluginSource: "plugins/demo") }?
+            .contains("pluginSource applies only to a plugin the pack hosts ('demo@pack')") == true)
+    }
+
+    @Test("Validate ignores the pack's own marketplace.json, even one pointing the plugin at GitHub")
+    func validateIgnoresPackMarketplace() throws {
+        let tmpDir = try makeTmpDir()
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+        try writePluginManifest(at: tmpDir, name: "demo")
+        try #"{"name":"acme","plugins":[{"name":"demo","source":{"source":"github","repo":"acme/demo","ref":"stable"}}]}"#
+            .write(to: tmpDir.appendingPathComponent(".claude-plugin/marketplace.json"), atomically: true, encoding: .utf8)
+        let yaml = """
+        schemaVersion: 1
+        identifier: test-pack
+        displayName: Test Pack
+        description: A pack
+        components:
+          - id: plugin
+            description: Plugin
+            plugin: "demo@pack"
+        """
+        try yaml.write(to: tmpDir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8)
+        let env = Environment(home: tmpDir)
+        let loader = ExternalPackLoader(environment: env, registry: PackRegistryFile(path: env.packsRegistry))
+        #expect(try loader.validate(at: tmpDir).identifier == "test-pack")
     }
 
     @Test("Validate throws when techpack.yaml is missing")

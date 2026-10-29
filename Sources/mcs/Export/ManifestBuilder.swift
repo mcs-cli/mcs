@@ -499,8 +499,11 @@ struct ManifestBuilder {
         case let .brewInstall(package):
             yaml.line("    brew: \(package)")
 
-        case let .plugin(name):
+        case let .plugin(name, source):
             yaml.line("    plugin: \(yamlQuote(name))")
+            if let source {
+                yaml.line("    pluginSource: \(yamlQuote(source))")
+            }
 
         case let .copyPackFile(config):
             let key: String

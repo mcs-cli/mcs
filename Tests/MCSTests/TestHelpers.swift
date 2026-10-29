@@ -467,12 +467,11 @@ func runGit(_ arguments: [String], in directory: URL) throws -> String {
     return result.stdout
 }
 
-/// Write a pack's own `.claude-plugin/marketplace.json` listing `plugins` as `name: source`.
-func writePackMarketplace(at pack: URL, plugins: [String: Any]) throws {
-    let manifestURL = pack.appendingPathComponent(PackMarketplace.manifestPath)
+/// Write a plugin's `.claude-plugin/plugin.json` into `directory`, naming it `name`.
+func writePluginManifest(at directory: URL, name: String) throws {
+    let manifestURL = directory.appendingPathComponent(PackMarketplace.pluginManifestPath)
     try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let entries = plugins.sorted { $0.key < $1.key }.map { ["name": $0.key, "source": $0.value] }
-    try JSONSerialization.data(withJSONObject: ["name": "acme", "plugins": entries]).write(to: manifestURL)
+    try JSONSerialization.data(withJSONObject: ["name": name]).write(to: manifestURL)
 }
 
 /// Create a bare temp directory with a UUID-unique name.
