@@ -78,7 +78,8 @@ enum CrossPackPromptResolver {
     ///
     /// `fileDetect` priors are reusable only when this run's scan still finds the stored
     /// file: the scan stays dynamic, but a project that hasn't changed stops re-asking.
-    /// An empty scan re-asks, mirroring the executor's zero-match branch, which prompts.
+    /// An empty scan reuses the prior only while `PromptExecutor.fileDetectPriorIsValid` finds it
+    /// on disk; otherwise it re-asks, mirroring the executor's zero-match branch, which prompts.
     ///
     /// Type conflicts across packs (input vs select) fall back to input semantics.
     ///
@@ -89,17 +90,14 @@ enum CrossPackPromptResolver {
         projectPath: URL
     ) -> (reusableValues: [String: String], newDeclaredKeys: Set<String>) {
         var constrainedOptionsByKey: [String: Set<String>] = [:]
-        var detectedFilesByKey: [String: Set<String>] = [:]
+        var detectPatternsByKey: [String: [String]] = [:]
         for prompt in prompts {
             if prompt.type == .select, let options = prompt.options, !options.isEmpty {
                 constrainedOptionsByKey[prompt.key, default: []].formUnion(options.map(\.value))
             }
             // Only a prior can be validated against the scan, so a key without one skips it.
             if prompt.type == .fileDetect, priorValues[prompt.key] != nil {
-                let detected = PromptExecutor.detectFiles(
-                    matching: prompt.detectPatterns ?? ["*"], in: projectPath
-                )
-                detectedFilesByKey[prompt.key, default: []].formUnion(detected)
+                detectPatternsByKey[prompt.key, default: []].append(contentsOf: prompt.effectiveDetectPatterns)
             }
         }
 
@@ -118,7 +116,9 @@ enum CrossPackPromptResolver {
             let permitted: Bool = if answerableTypes.contains(.input) {
                 true
             } else if answerableTypes.contains(.fileDetect) {
-                detectedFilesByKey[key, default: []].contains(prior)
+                PromptExecutor.fileDetectPriorIsValid(
+                    prior, patterns: detectPatternsByKey[key, default: []], in: projectPath
+                )
             } else {
                 // No constraints → free-form; any constraint → prior must satisfy it.
                 constrained.isEmpty || constrained.contains(prior)

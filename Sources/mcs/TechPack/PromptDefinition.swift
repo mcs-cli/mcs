@@ -9,6 +9,11 @@ struct PromptDefinition: Codable, Equatable {
     let detectPatterns: [String]?
     let scriptCommand: String?
 
+    /// `detectPatterns`, or every file when the prompt declares none.
+    var effectiveDetectPatterns: [String] {
+        detectPatterns ?? ["*"]
+    }
+
     enum CodingKeys: String, CodingKey {
         case key
         case type
