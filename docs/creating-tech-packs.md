@@ -218,17 +218,18 @@ If the repository is both your pack and your plugin, mcs can load the plugin str
        pluginSource: plugins/my-plugin   # omit when the plugin is the repository root
    ```
 
-3. Run `mcs pack validate`. It fails if the directory is missing, leaves the pack, or has no `plugin.json` named `my-plugin`.
+3. Run `mcs pack validate`. It fails if `pluginSource` isn't a plain path (no leading `./` or trailing `/`), or if the directory is missing, leaves the pack, or has no `plugin.json` named `my-plugin`.
 
 Your `.claude-plugin/marketplace.json`, if you publish one, is left alone: mcs never reads it, so it can keep serving direct Claude Code installs from a GitHub source or a release branch.
 
 What changes for your users:
 
 - **The plugin id becomes `my-plugin@mcs-<pack-identifier>`.** mcs registers a marketplace of its own that links to the checkout, so it never collides with your public marketplace. Anything your README says about `claude plugin … my-plugin@<marketplace>` doesn't apply to pack installs. Skill and command names come from the plugin's own `name` and don't change.
-- **Trust covers every file git tracks in the plugin directory.** Any of them can run or load in every session, so a change to one asks for trust again on `mcs pack update`. A tracked symlink pointing outside the plugin directory makes the pack fail to load. When the plugin is the repository root, that's nearly every commit. If the user declines, the checkout goes back to the last trusted commit.
-- **Updates come from `mcs pack update`.** Claude Code reads the checkout in place, so the plugin's `version` doesn't gate anything, and mcs doesn't run `claude plugin update` for it.
+- **Trust covers every file git tracks in the plugin directory.** Any of them can run or load in every session, so a change to one asks for trust again on the next `mcs update` or `mcs pack update`. A tracked symlink pointing outside the plugin directory makes the pack fail to load. When the plugin is the repository root, that's nearly every commit, docs and tests included; move the plugin into a subdirectory with `pluginSource` if those commits shouldn't ask for trust. If the user declines, the checkout goes back to the last trusted commit.
+- **Updates come with the pack.** `mcs update` (or `mcs pack update`, which fetches without re-applying) moves the checkout, and the plugin with it. Claude Code reads the checkout in place, so the plugin's `version` doesn't gate anything, and mcs doesn't run `claude plugin update` for it.
 - **Switching an existing pack to `@pack` replaces the old install.** If mcs installed `my-plugin@<marketplace>` for the pack before, the next sync uninstalls that copy at that scope and installs the pack-hosted one. Claude Code keeps plugin data per plugin id, so the plugin starts with an empty data directory.
 - **Claude Code installs no Node.js dependencies for it.** A plugin loaded in place never gets the `package.json` install a copied plugin gets, so ship what the plugin needs or install it from a hook into `${CLAUDE_PLUGIN_DATA}`.
+- **`ignore:` doesn't narrow trust.** The plugin's directory needs no `ignore:` entries, and listing them changes neither trust nor what Claude Code loads. It does stop changes there from raising the "pack update available" notice, so leave plugin directories out of `ignore:` if users should hear about plugin changes.
 - **Files the plugin or Claude Code writes into the checkout don't affect trust,** as long as git doesn't track them. Trust hashes the files git tracks in the plugin directory, so keep build output, caches and `.claude-plugin/types/` in `.gitignore`.
 - **One version per machine.** There is one checkout per pack, so every project on the machine gets the same plugin version.
 
