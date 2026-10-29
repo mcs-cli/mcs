@@ -232,6 +232,7 @@ What changes for your users:
 - **`ignore:` doesn't narrow trust.** The plugin's directory needs no `ignore:` entries, and listing them changes neither trust nor what Claude Code loads. It does stop changes there from raising the "pack update available" notice, so leave plugin directories out of `ignore:` if users should hear about plugin changes.
 - **Files the plugin or Claude Code writes into the checkout don't affect trust,** as long as git doesn't track them. Trust hashes the files git tracks in the plugin directory, so keep build output, caches and `.claude-plugin/types/` in `.gitignore`.
 - **One version per machine.** There is one checkout per pack, so every project on the machine gets the same plugin version.
+- **The plugin follows the pack's ref, so point users at your release ref.** `mcs pack add owner/repo` without `--ref` tracks the default branch, which means unreleased code and a trust prompt on nearly every commit. If you release through a branch or tags, tell users to add the pack with `mcs pack add owner/repo --ref <release-branch-or-tag>`, or to set `ref:` in `mcs.yaml`.
 
 ### Hooks
 
