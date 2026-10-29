@@ -3,19 +3,8 @@ import Foundation
 import Testing
 
 struct PackMarketplaceTests {
-    private func manifest(_ plugin: ExternalInstallAction) -> ExternalPackManifest {
-        ExternalPackManifest(
-            schemaVersion: 1, identifier: "test", displayName: "Test", description: "Test",
-            author: nil, minMCSVersion: nil,
-            components: [ExternalComponentDefinition(
-                id: "test.plugin", displayName: "Plugin", description: "Plugin", type: .plugin, installAction: plugin
-            )],
-            templates: nil, prompts: nil, configureProject: nil, supplementaryDoctorChecks: nil, ignore: nil
-        )
-    }
-
-    private func resolve(_ source: String?, in pack: URL) throws -> PackMarketplace.HostedPlugin? {
-        try PackMarketplace.hostedPlugin(named: "demo", in: manifest(.plugin(name: "demo@pack", source: source)), packPath: pack)
+    private func resolve(_ source: String?, in pack: URL) throws -> PackMarketplace.HostedPlugin {
+        try PackMarketplace.hostedPlugin(named: "demo", source: source, packPath: pack)
     }
 
     @Test("Without a pluginSource the plugin is the pack root")
@@ -31,7 +20,7 @@ struct PackMarketplaceTests {
         let pack = try makeTmpDir(label: "pack-marketplace")
         defer { try? FileManager.default.removeItem(at: pack) }
         try writePluginManifest(at: pack.appendingPathComponent("plugins/demo"), name: "demo")
-        let plugin = try #require(try resolve("plugins/demo", in: pack))
+        let plugin = try resolve("plugins/demo", in: pack)
         #expect(plugin.relativePath == "plugins/demo")
         #expect(plugin.source.resolvingSymlinksInPath().path
             == pack.appendingPathComponent("plugins/demo").resolvingSymlinksInPath().path)
@@ -44,7 +33,7 @@ struct PackMarketplaceTests {
         try writePluginManifest(at: pack, name: "demo")
         try #"{"name":"acme","plugins":[{"name":"demo","source":{"source":"github","repo":"acme/demo","ref":"stable"}}]}"#
             .write(to: pack.appendingPathComponent(PackMarketplace.manifestPath), atomically: true, encoding: .utf8)
-        #expect(try resolve(nil, in: pack)?.relativePath == ".")
+        #expect(try resolve(nil, in: pack).relativePath == ".")
     }
 
     @Test("A missing directory, a missing or unreadable plugin.json, and a name mismatch are rejected")
@@ -63,13 +52,6 @@ struct PackMarketplaceTests {
         #expect(throws: PackMarketplace.Error.pluginManifestUnreadable(name: "demo", reason: "expected an object with a `name` string")) {
             try resolve(nil, in: pack)
         }
-    }
-
-    @Test("A plugin the manifest doesn't host resolves to nothing")
-    func notHosted() throws {
-        let pack = try makeTmpDir(label: "pack-marketplace")
-        defer { try? FileManager.default.removeItem(at: pack) }
-        #expect(try PackMarketplace.hostedPlugin(named: "demo", in: manifest(.plugin(name: "demo@acme/demo")), packPath: pack) == nil)
     }
 
     @Test("Linking writes a marketplace named for the pack that lists the linked plugin")

@@ -135,47 +135,18 @@ struct ExternalPackLoaderTests {
             .identifier == "test-pack")
     }
 
-    @Test("Validate rejects `@pack` without a matching plugin.json, and a hand-written `@mcs-` marketplace")
+    @Test("Validate rejects `@pack` without a plugin.json, and a hand-written `@mcs-` marketplace")
     func validateRejectsBadPackHostedPlugin() {
-        #expect(reason { try validatePluginPack(plugin: "demo@pack") }
-            == PackMarketplace.Error.pluginManifestMissing(name: "demo", path: ".claude-plugin/plugin.json").localizedDescription)
-        #expect(reason { try validatePluginPack(plugin: "demo@pack", pluginManifestName: "other") }
-            == PackMarketplace.Error.pluginNameMismatch(name: "demo", declared: "other").localizedDescription)
+        #expect(reason { try validatePluginPack(plugin: "demo@pack") } == "plugin 'demo' has no .claude-plugin/plugin.json")
         #expect(reason { try validatePluginPack(plugin: "demo@mcs-other") }?
             .contains("are reserved for mcs") == true)
     }
 
-    @Test("Validate rejects a pluginSource that isn't a plain path, or sits on a plugin the pack doesn't host")
+    @Test("Validate rejects a pluginSource the manifest rules refuse")
     func validateRejectsBadPluginSource() {
-        for source in ["./plugins/demo", ".", "../demo", "/tmp/demo", "plugins//demo"] {
-            #expect(reason { try validatePluginPack(plugin: "demo@pack", pluginSource: source, pluginManifestName: "demo") }?
-                .contains("pluginSource '\(source)' must be a path inside the pack") == true)
-        }
-        #expect(reason { try validatePluginPack(plugin: "demo@acme/plugins", pluginSource: "plugins/demo") }?
-            .contains("pluginSource applies only to a plugin the pack hosts ('demo@pack')") == true)
-    }
-
-    @Test("Validate ignores the pack's own marketplace.json, even one pointing the plugin at GitHub")
-    func validateIgnoresPackMarketplace() throws {
-        let tmpDir = try makeTmpDir()
-        defer { try? FileManager.default.removeItem(at: tmpDir) }
-        try writePluginManifest(at: tmpDir, name: "demo")
-        try #"{"name":"acme","plugins":[{"name":"demo","source":{"source":"github","repo":"acme/demo","ref":"stable"}}]}"#
-            .write(to: tmpDir.appendingPathComponent(".claude-plugin/marketplace.json"), atomically: true, encoding: .utf8)
-        let yaml = """
-        schemaVersion: 1
-        identifier: test-pack
-        displayName: Test Pack
-        description: A pack
-        components:
-          - id: plugin
-            description: Plugin
-            plugin: "demo@pack"
-        """
-        try yaml.write(to: tmpDir.appendingPathComponent("techpack.yaml"), atomically: true, encoding: .utf8)
-        let env = Environment(home: tmpDir)
-        let loader = ExternalPackLoader(environment: env, registry: PackRegistryFile(path: env.packsRegistry))
-        #expect(try loader.validate(at: tmpDir).identifier == "test-pack")
+        #expect(reason { try validatePluginPack(plugin: "demo@pack", pluginSource: "./plugins/demo", pluginManifestName: "demo") }
+            == "Component 'test-pack.plugin': pluginSource './plugins/demo' must be a path inside the pack such as 'plugins/demo'"
+            + " (no leading './', '.', '..' or '/'); leave it out for the pack root")
     }
 
     @Test("Validate throws when techpack.yaml is missing")

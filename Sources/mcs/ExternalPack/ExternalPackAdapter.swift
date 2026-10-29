@@ -154,11 +154,11 @@ struct ExternalPackAdapter: TechPack {
         guard var action = convertInstallAction(ext.installAction) else { return nil }
 
         var pluginSource: URL?
-        if case let .plugin(name, _) = ext.installAction, PluginRef(name).isPackToken {
+        if case let .plugin(name, source) = ext.installAction, PluginRef(name).isPackToken {
             let bareName = PluginRef(name).bareName
             action = .plugin(name: PackMarketplace.pluginID(bareName: bareName, packID: manifest.identifier))
             do {
-                pluginSource = try PackMarketplace.hostedPlugin(named: bareName, in: manifest, packPath: packPath)?.source
+                pluginSource = try PackMarketplace.hostedPlugin(named: bareName, source: source, packPath: packPath).source
             } catch {
                 output.warn("\(manifest.displayName): plugin '\(bareName)' — \(error.localizedDescription)")
             }

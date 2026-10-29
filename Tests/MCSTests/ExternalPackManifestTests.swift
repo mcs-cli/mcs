@@ -748,6 +748,18 @@ struct ExternalPackManifestTests {
         #expect(reencoded == .plugin(name: "long@pack", source: "plugins/long"))
     }
 
+    @Test("pluginSource must be a plain path inside the pack, on a plugin the pack hosts")
+    func pluginSourceRules() {
+        #expect(pluginSourceRejectionReason("plugins/demo", pluginName: "demo@pack") == nil)
+        for source in ["./plugins/demo", ".", "", "../demo", "plugins/../demo", "/tmp/demo", "plugins//demo", "plugins/demo/"] {
+            #expect(pluginSourceRejectionReason(source, pluginName: "demo@pack")
+                == "pluginSource '\(source)' must be a path inside the pack such as 'plugins/demo'"
+                + " (no leading './', '.', '..' or '/'); leave it out for the pack root")
+        }
+        #expect(pluginSourceRejectionReason("plugins/demo", pluginName: "demo@acme/plugins")
+            == "pluginSource applies only to a plugin the pack hosts ('demo@pack')")
+    }
+
     @Test("pluginSource without the plugin shorthand fails to decode")
     func pluginSourceWithoutPlugin() {
         let yaml = """

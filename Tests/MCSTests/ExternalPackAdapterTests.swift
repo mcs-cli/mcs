@@ -729,7 +729,7 @@ struct ExternalPackAdapterTests {
     func packHostedPluginFromManifest() throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
-        try writePluginManifest(at: tmpDir, name: "demo")
+        try writePluginManifest(at: tmpDir.appendingPathComponent("plugins/demo"), name: "demo")
         let yaml = """
         schemaVersion: 1
         identifier: test-pack
@@ -739,6 +739,7 @@ struct ExternalPackAdapterTests {
           - id: plugin
             description: The plugin
             plugin: "demo@pack"
+            pluginSource: plugins/demo
         """
         let file = tmpDir.appendingPathComponent("techpack.yaml")
         try yaml.write(to: file, atomically: true, encoding: .utf8)
@@ -751,6 +752,7 @@ struct ExternalPackAdapterTests {
             return
         }
         #expect(name == "demo@mcs-test-pack")
-        #expect(component.pluginSource == tmpDir)
+        #expect(component.pluginSource?.resolvingSymlinksInPath().path
+            == tmpDir.appendingPathComponent("plugins/demo").resolvingSymlinksInPath().path)
     }
 }

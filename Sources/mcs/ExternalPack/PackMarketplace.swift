@@ -62,24 +62,15 @@ enum PackMarketplace {
     /// Every `name@pack` plugin `manifest` declares, resolved against `packPath`.
     static func hostedPlugins(in manifest: ExternalPackManifest, packPath: URL) throws -> [HostedPlugin] {
         try (manifest.components ?? []).compactMap { component in
-            guard case let .plugin(name, source) = component.installAction, PluginRef(name).isPackToken else { return nil }
-            return try resolve(PluginRef(name).bareName, source: source, packPath: packPath)
-        }
-    }
-
-    /// The `name@pack` plugin named `pluginName` in `manifest`, or nil when it declares none.
-    static func hostedPlugin(named pluginName: String, in manifest: ExternalPackManifest, packPath: URL) throws -> HostedPlugin? {
-        for component in manifest.components ?? [] {
-            guard case let .plugin(name, source) = component.installAction else { continue }
+            guard case let .plugin(name, source) = component.installAction else { return nil }
             let ref = PluginRef(name)
-            if ref.isPackToken, ref.bareName == pluginName {
-                return try resolve(pluginName, source: source, packPath: packPath)
-            }
+            return ref.isPackToken ? try hostedPlugin(named: ref.bareName, source: source, packPath: packPath) : nil
         }
-        return nil
     }
 
-    private static func resolve(_ pluginName: String, source: String?, packPath: URL) throws -> HostedPlugin {
+    /// The plugin in `source` (the pack root when nil), checked to be a directory in the pack whose
+    /// plugin.json names it `pluginName`.
+    static func hostedPlugin(named pluginName: String, source: String?, packPath: URL) throws -> HostedPlugin {
         let directory: URL
         if let source {
             guard let resolved = PathContainment.safePath(relativePath: source, within: packPath) else {
@@ -94,29 +85,30 @@ enum PackMarketplace {
         guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw Error.sourceMissing(pluginName)
         }
-        try verifyPluginManifest(pluginName, in: directory, relativeSource: source)
-        return HostedPlugin(name: pluginName, source: directory, relativePath: source ?? ".")
+        let plugin = HostedPlugin(name: pluginName, source: directory, relativePath: source ?? ".")
+        try verifyPluginManifest(of: plugin)
+        return plugin
     }
 
-    /// The generated marketplace lists the plugin under `pluginName`, so a plugin.json naming it
+    /// The generated marketplace lists the plugin under its name, so a plugin.json naming it
     /// otherwise would be installed under one id and identify itself by another.
-    private static func verifyPluginManifest(_ pluginName: String, in directory: URL, relativeSource: String?) throws {
-        let manifestURL = directory.appendingPathComponent(pluginManifestPath)
+    private static func verifyPluginManifest(of plugin: HostedPlugin) throws {
+        let manifestURL = plugin.source.appendingPathComponent(pluginManifestPath)
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            let path = relativeSource.map { "\($0)/\(pluginManifestPath)" } ?? pluginManifestPath
-            throw Error.pluginManifestMissing(name: pluginName, path: path)
+            let path = plugin.relativePath == "." ? pluginManifestPath : "\(plugin.relativePath)/\(pluginManifestPath)"
+            throw Error.pluginManifestMissing(name: plugin.name, path: path)
         }
         let object: Any
         do {
             object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
         } catch {
-            throw Error.pluginManifestUnreadable(name: pluginName, reason: error.localizedDescription)
+            throw Error.pluginManifestUnreadable(name: plugin.name, reason: error.localizedDescription)
         }
         guard let declared = (object as? [String: Any])?["name"] as? String else {
-            throw Error.pluginManifestUnreadable(name: pluginName, reason: "expected an object with a `name` string")
+            throw Error.pluginManifestUnreadable(name: plugin.name, reason: "expected an object with a `name` string")
         }
-        guard declared == pluginName else {
-            throw Error.pluginNameMismatch(name: pluginName, declared: declared)
+        guard declared == plugin.name else {
+            throw Error.pluginNameMismatch(name: plugin.name, declared: declared)
         }
     }
 

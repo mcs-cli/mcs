@@ -74,7 +74,7 @@ extension ExternalPackManifest {
                 seenComponentIDs.insert(component.id)
 
                 if case let .plugin(name, source?) = component.installAction,
-                   let reason = Self.pluginSourceRejectionReason(source, pluginName: name) {
+                   let reason = pluginSourceRejectionReason(source, pluginName: name) {
                     throw ManifestError.invalidPluginSource(componentID: component.id, reason: reason)
                 }
 
@@ -452,25 +452,6 @@ extension ExternalPackManifest {
             supplementaryDoctorChecks: supplementaryDoctorChecks,
             ignore: ignore
         )
-    }
-}
-
-extension ExternalPackManifest {
-    /// Spelled like every other pack-relative `source`, so `.`, `./x` and `..` are refused rather
-    /// than normalised; leaving the key out is how a manifest names the pack root.
-    static func pluginSourceRejectionReason(_ source: String, pluginName: String) -> String? {
-        let ref = PluginRef(pluginName)
-        guard ref.isPackToken else {
-            return "pluginSource applies only to a plugin the pack hosts ('\(ref.bareName)@\(Constants.Plugins.packToken)')"
-        }
-        let segments = source.split(separator: "/", omittingEmptySubsequences: false)
-        let isPlainRelative = !source.isEmpty && !source.hasPrefix("/")
-            && !segments.contains { $0.isEmpty || $0 == "." || $0 == ".." }
-        guard isPlainRelative else {
-            return "pluginSource '\(source)' must be a path inside the pack such as 'plugins/\(ref.bareName)'"
-                + " (no leading './', '.', '..' or '/'); leave it out for the pack root"
-        }
-        return nil
     }
 }
 
@@ -989,6 +970,24 @@ enum ExternalCopyFileType: String, Codable {
 }
 
 // MARK: - Referenced Pack Files
+
+/// Unlike the other pack-relative sources, `./x` and `.` are refused rather than normalised: the
+/// value names a directory Claude Code loads in place, so there is one spelling for it, and leaving
+/// the key out is how a manifest names the pack root.
+func pluginSourceRejectionReason(_ source: String, pluginName: String) -> String? {
+    let ref = PluginRef(pluginName)
+    guard ref.isPackToken else {
+        return "pluginSource applies only to a plugin the pack hosts ('\(ref.bareName)@\(Constants.Plugins.packToken)')"
+    }
+    // An empty string and a leading `/` both split into an empty segment.
+    let isPlainRelative = !source.split(separator: "/", omittingEmptySubsequences: false)
+        .contains { $0.isEmpty || $0 == "." || $0 == ".." }
+    guard isPlainRelative else {
+        return "pluginSource '\(source)' must be a path inside the pack such as 'plugins/\(ref.bareName)'"
+            + " (no leading './', '.', '..' or '/'); leave it out for the pack root"
+    }
+    return nil
+}
 
 /// Normalize a pack-relative path so equivalent expressions collapse to the same key.
 /// Trims whitespace and strips a leading `./` so `hooks/foo.sh`, `./hooks/foo.sh`, and
