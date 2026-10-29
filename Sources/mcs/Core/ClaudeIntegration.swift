@@ -9,10 +9,12 @@ protocol ClaudeCLI: Sendable {
     @discardableResult
     func mcpRemove(name: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
-    func pluginMarketplaceAdd(repo: String) -> ShellResult
+    func pluginMarketplaceAdd(source: String) -> ShellResult
     func pluginMarketplaceList() -> ShellResult
     @discardableResult
     func pluginMarketplaceUpdate(name: String) -> ShellResult
+    @discardableResult
+    func pluginMarketplaceRemove(name: String) -> ShellResult
     func pluginList(workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult
@@ -20,6 +22,17 @@ protocol ClaudeCLI: Sendable {
     func pluginRemove(id: String, scope: String, workingDirectory: URL?) -> ShellResult
     @discardableResult
     func pluginUpdate(id: String, scope: String, workingDirectory: URL?) -> ShellResult
+}
+
+extension ClaudeCLI {
+    /// `claude plugin marketplace list --json`, decoded.
+    func marketplaces() throws -> [PluginMarketplace] {
+        let result = pluginMarketplaceList()
+        guard result.succeeded else {
+            throw PluginListing.Failure(errorDescription: String(result.stderr.prefix(200)))
+        }
+        return try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
+    }
 }
 
 /// Wrapper for the `claude` CLI to manage MCP servers and plugins.
@@ -74,12 +87,12 @@ struct ClaudeIntegration: ClaudeCLI {
 
     // MARK: - Plugins
 
-    /// Register a plugin marketplace.
+    /// Register a plugin marketplace from a GitHub `org/repo`, a URL or a local directory.
     @discardableResult
-    func pluginMarketplaceAdd(repo: String) -> ShellResult {
+    func pluginMarketplaceAdd(source: String) -> ShellResult {
         shell.run(
             Constants.CLI.env,
-            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "add", repo],
+            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "add", source],
             additionalEnvironment: claudeEnv
         )
     }
@@ -99,6 +112,16 @@ struct ClaudeIntegration: ClaudeCLI {
         shell.run(
             Constants.CLI.env,
             arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "update", name],
+            additionalEnvironment: claudeEnv
+        )
+    }
+
+    /// Unregister a marketplace. Claude Code uninstalls its plugins from every scope.
+    @discardableResult
+    func pluginMarketplaceRemove(name: String) -> ShellResult {
+        shell.run(
+            Constants.CLI.env,
+            arguments: [Constants.CLI.claudeCommand, "plugin", "marketplace", "remove", name],
             additionalEnvironment: claudeEnv
         )
     }

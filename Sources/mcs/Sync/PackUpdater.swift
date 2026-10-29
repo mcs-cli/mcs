@@ -88,6 +88,34 @@ struct PackUpdater {
         )
     }
 
+    /// A pack-hosted plugin loads straight from the checkout, so leaving it at the declined commit
+    /// would run exactly the code the user just refused.
+    private func restoreTrustedCheckout(entry: PackRegistryFile.PackEntry, packPath: URL) {
+        do {
+            try fetcher.reset(packPath: packPath, to: entry.commitSHA)
+            return
+        } catch {
+            output.warn("\(entry.displayName): could not return to the trusted commit: \(error.localizedDescription)")
+        }
+        // What is linked now, not what the declined manifest declares: a plugin it renamed or
+        // dropped would otherwise stay linked to the declined checkout.
+        let linked: [String]
+        do {
+            linked = try PackMarketplace.linkedPlugins(packID: entry.identifier, environment: environment)
+        } catch {
+            output.error("  Could not read the plugins linked from \(entry.displayName): \(error.localizedDescription)")
+            return
+        }
+        for name in linked {
+            do {
+                try PackMarketplace.unlink(pluginName: name, packID: entry.identifier, environment: environment)
+                output.warn("  Plugin '\(name)' is unlinked until the pack is trusted again — run 'mcs update'")
+            } catch {
+                output.error("  Could not unlink plugin '\(name)': \(error.localizedDescription) — it still loads the declined code")
+            }
+        }
+    }
+
     /// Without a re-clone every `git` call against the deleted checkout fails, and no command
     /// ever brings the pack back. Clones at the recorded ref and re-verify trust against the recorded hashes, so an intact
     /// copy of already-trusted content does not prompt again.
@@ -192,6 +220,7 @@ struct PackUpdater {
                 packPath: packPath,
                 items: newItems
             ) else {
+                restoreTrustedCheckout(entry: entry, packPath: packPath)
                 return .trustDeclined
             }
         }

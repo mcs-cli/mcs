@@ -492,7 +492,7 @@ enum ConfiguratorSupport {
         artifacts: inout PackArtifactRecord,
         output: CLIOutput
     ) -> ComponentExecutor.PluginInstallOutcome {
-        let outcome = executor.installPlugin(name, scope: scope)
+        let outcome = executor.installPlugin(name, scope: scope, hostedSource: component.pluginSource)
         switch outcome {
         case .installed:
             artifacts.recordPlugin(name)

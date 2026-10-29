@@ -101,6 +101,8 @@ struct PluginCheck: DoctorCheck {
     let listing: PluginListing
     /// Where the global scope lists from: anywhere else, a project's settings would decide `enabled`.
     var homeDirectory = URL(fileURLWithPath: NSHomeDirectory())
+    /// For a pack-hosted plugin, the checkout directory Claude Code must be reading it from.
+    var pluginSource: URL?
 
     var name: String {
         pluginRef.bareName
@@ -123,7 +125,15 @@ struct PluginCheck: DoctorCheck {
         }
 
         let expectedScope = projectRoot == nil ? Constants.PluginScope.user : Constants.PluginScope.local
-        if installsHere.contains(where: { $0.enabled && $0.scope == expectedScope }) {
+        if let install = installsHere.first(where: { $0.enabled && $0.scope == expectedScope }) {
+            if let pluginSource, !isRead(install, from: pluginSource) {
+                // Loading through a link that leaves its marketplace is Claude Code behaviour the docs
+                // don't promise; this is where a release that stops honouring it shows up.
+                return .fail(
+                    "not loaded from the pack checkout — run 'mcs sync'; if it persists, "
+                        + "this Claude Code version may not load linked plugins"
+                )
+            }
             return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
         }
         // Installed at another scope, but it still loads here.
@@ -136,6 +146,11 @@ struct PluginCheck: DoctorCheck {
             return .warn("installed but disabled — enable with: claude plugin enable \(disabled.id) -s \(disabled.scope)")
         }
         return .fail("not installed")
+    }
+
+    private func isRead(_ install: InstalledPlugin, from source: URL) -> Bool {
+        guard let folder = install.readFromFolder else { return false }
+        return URL(fileURLWithPath: folder).resolvingSymlinksInPath().path == source.resolvingSymlinksInPath().path
     }
 
     func fix() -> FixResult {

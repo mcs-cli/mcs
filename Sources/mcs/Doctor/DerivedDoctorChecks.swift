@@ -21,7 +21,8 @@ extension ComponentDefinition {
                 projectRoot: projectRoot,
                 listing: pluginListing
                     ?? PluginListing(claudeCLI: ClaudeIntegration(shell: ShellRunner(environment: environment))),
-                homeDirectory: environment.homeDirectory
+                homeDirectory: environment.homeDirectory,
+                pluginSource: pluginSource
             )
 
         case let .brewInstall(package):

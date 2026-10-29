@@ -4732,7 +4732,7 @@ struct SettingsUserEditTests {
 // MARK: - Plugins install per scope
 
 struct PluginScopeLifecycleTests {
-    private func pluginPack(_ identifier: String, plugin: String = "lint@acme") -> MockTechPack {
+    private func pluginPack(_ identifier: String, plugin: String = "lint@acme", pluginSource: URL? = nil) -> MockTechPack {
         MockTechPack(
             identifier: identifier,
             displayName: identifier,
@@ -4742,7 +4742,8 @@ struct PluginScopeLifecycleTests {
                 description: "Plugin",
                 type: .plugin,
                 packIdentifier: identifier,
-                installAction: .plugin(name: plugin)
+                installAction: .plugin(name: plugin),
+                pluginSource: pluginSource
             )]
         )
     }
@@ -4816,6 +4817,71 @@ struct PluginScopeLifecycleTests {
         #expect(changes.map(\.to) == ["2.0.0", "2.0.0"])
         var doctor = bed.makeDoctorRunner(registry: registry)
         #expect(try doctor.run().issues == 0)
+    }
+
+    private func packHostedPack(_ identifier: String, source: URL) -> MockTechPack {
+        pluginPack(identifier, plugin: PackMarketplace.pluginID(bareName: "demo", packID: identifier), pluginSource: source)
+    }
+
+    private func makePluginSource(in bed: LifecycleTestBed) throws -> URL {
+        let source = bed.home.appendingPathComponent("pack-checkout")
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("skills"), withIntermediateDirectories: true)
+        return source
+    }
+
+    @Test("A pack-hosted plugin installs from the pack's own marketplace, loads from the checkout, and is removed with the pack")
+    func packHostedLifecycle() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try packHostedPack("xcrew", source: makePluginSource(in: bed))
+        let registry = TechPackRegistry(packs: [pack])
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        let wrapper = PackMarketplace.wrapperDirectory(packID: "xcrew", environment: bed.env)
+        #expect(bed.mockCLI.marketplaceAddCalls == [wrapper.path])
+        #expect(bed.mockCLI.pluginInstallCalls.map(\.id) == ["demo@mcs-xcrew"])
+        #expect(try bed.projectState().artifacts(for: "xcrew")?.plugins == ["demo@mcs-xcrew"])
+        var doctor = bed.makeDoctorRunner(registry: registry)
+        #expect(try doctor.run().issues == 0)
+
+        try bed.makeConfigurator(registry: registry).configure(packs: [], confirmRemovals: false)
+        RemovePack.removePackMarketplace(
+            "xcrew", env: bed.env, claudeCLI: bed.mockCLI, output: CLIOutput(colorsEnabled: false, interactiveStdin: false)
+        )
+        #expect(bed.mockCLI.marketplaceRemoveCalls == ["mcs-xcrew"])
+        #expect(!FileManager.default.fileExists(atPath: wrapper.path))
+    }
+
+    @Test("Doctor fails a pack-hosted plugin that Claude Code is not reading from the checkout")
+    func packHostedNotReadInPlace() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try packHostedPack("xcrew", source: makePluginSource(in: bed))
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+
+        bed.mockCLI.installedPlugins = bed.mockCLI.installedPlugins.map {
+            InstalledPlugin(id: $0.id, scope: $0.scope, enabled: $0.enabled, projectPath: $0.projectPath)
+        }
+
+        var doctor = bed.makeDoctorRunner(registry: registry)
+        #expect(try doctor.run().issues == 1)
+    }
+
+    @Test("Switching a plugin to `@pack` uninstalls the marketplace copy the pack installed")
+    func switchToPackHostedSwapsInstalls() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let external = pluginPack("xcrew", plugin: "demo@acme")
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [external])).configure(packs: [external], confirmRemovals: false)
+
+        let hosted = try packHostedPack("xcrew", source: makePluginSource(in: bed))
+        try bed.makeConfigurator(registry: TechPackRegistry(packs: [hosted])).configure(packs: [hosted], confirmRemovals: false)
+
+        #expect(bed.mockCLI.pluginRemoveCalls.map(\.id) == ["demo@acme"])
+        #expect(bed.mockCLI.installedPlugins.map(\.id) == ["demo@mcs-xcrew"])
+        #expect(try bed.projectState().artifacts(for: "xcrew")?.plugins == ["demo@mcs-xcrew"])
     }
 
     @Test("An install mcs didn't make is neither recorded nor removed")

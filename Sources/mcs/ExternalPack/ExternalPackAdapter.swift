@@ -151,7 +151,18 @@ struct ExternalPackAdapter: TechPack {
     // MARK: - Component Conversion
 
     private func convertComponent(_ ext: ExternalComponentDefinition) -> ComponentDefinition? {
-        guard let action = convertInstallAction(ext.installAction) else { return nil }
+        guard var action = convertInstallAction(ext.installAction) else { return nil }
+
+        var pluginSource: URL?
+        if case let .plugin(name) = action, PluginRef(name).isPackToken {
+            let bareName = PluginRef(name).bareName
+            action = .plugin(name: PackMarketplace.pluginID(bareName: bareName, packID: manifest.identifier))
+            do {
+                pluginSource = try PackMarketplace.hostedPlugin(named: bareName, in: packPath).source
+            } catch {
+                output.warn("\(manifest.displayName): plugin '\(bareName)' — \(error.localizedDescription)")
+            }
+        }
 
         let checksDefinitions = ext.doctorChecks
         let runner = scriptRunner
@@ -174,6 +185,7 @@ struct ExternalPackAdapter: TechPack {
             packIdentifier: manifest.identifier,
             hookRegistration: ext.hookRegistration,
             installAction: action,
+            pluginSource: pluginSource,
             supplementaryChecks: supplementary
         )
     }

@@ -71,11 +71,38 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     var latestPluginVersions: [String: String] = [:]
 
     @discardableResult
-    func pluginMarketplaceAdd(repo: String) -> ShellResult {
-        marketplaceAddCalls.append(repo)
-        if result.succeeded, let marketplace = marketplacesRegisteredOnAdd[repo],
-           !marketplaces.contains(marketplace) {
+    func pluginMarketplaceAdd(source: String) -> ShellResult {
+        marketplaceAddCalls.append(source)
+        guard result.succeeded else { return result }
+        if let marketplace = marketplacesRegisteredOnAdd[source], !marketplaces.contains(marketplace) {
             marketplaces.append(marketplace)
+        } else if source.hasPrefix("/"), let name = Self.directoryMarketplaceName(at: source) {
+            // Like the real CLI, a directory marketplace is named by its manifest and read in place.
+            directoryMarketplaces[name] = source
+            marketplaces.append(PluginMarketplace(name: name, repo: nil))
+        }
+        return result
+    }
+
+    /// Directory marketplaces registered through `marketplace add`, by name.
+    var directoryMarketplaces: [String: String] = [:]
+
+    private static func directoryMarketplaceName(at path: String) -> String? {
+        let manifest = URL(fileURLWithPath: path).appendingPathComponent(PackMarketplace.manifestPath)
+        guard let data = FileManager.default.contents(atPath: manifest.path),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return object["name"] as? String
+    }
+
+    var marketplaceRemoveCalls: [String] = []
+
+    @discardableResult
+    func pluginMarketplaceRemove(name: String) -> ShellResult {
+        marketplaceRemoveCalls.append(name)
+        if result.succeeded {
+            marketplaces.removeAll { $0.name == name }
+            installedPlugins.removeAll { PluginRef($0.id).marketplaceName == name }
         }
         return result
     }
@@ -115,7 +142,7 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
             let here = plugin.isInstall(atScope: plugin.scope, projectDirectory: workingDirectory)
             return InstalledPlugin(
                 id: plugin.id, scope: plugin.scope, enabled: plugin.enabled && here, projectPath: plugin.projectPath,
-                version: plugin.version
+                version: plugin.version, readFromFolder: plugin.readFromFolder
             )
         })
     }
@@ -124,9 +151,12 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
     func pluginInstall(id: String, scope: String, workingDirectory: URL?) -> ShellResult {
         pluginInstallCalls.append(PluginCall(id: id, scope: scope, workingDirectory: workingDirectory))
         if result.succeeded {
+            let ref = PluginRef(id)
+            let folder = ref.marketplaceName.flatMap { directoryMarketplaces[$0] }.map { "\($0)/plugins/\(ref.bareName)" }
             installedPlugins.append(InstalledPlugin(
                 id: id, scope: scope, enabled: true,
-                projectPath: scope == Constants.PluginScope.local ? workingDirectory?.path : nil
+                projectPath: scope == Constants.PluginScope.local ? workingDirectory?.path : nil,
+                readFromFolder: folder
             ))
         }
         return result
@@ -420,6 +450,14 @@ func preparePackDir(home: URL, identifier: String) throws {
 // MARK: - Temp Directory Helpers
 
 /// Create a bare temp directory with a UUID-unique name.
+/// Write a pack's own `.claude-plugin/marketplace.json` listing `plugins` as `name: source`.
+func writePackMarketplace(at pack: URL, plugins: [String: Any]) throws {
+    let manifestURL = pack.appendingPathComponent(PackMarketplace.manifestPath)
+    try FileManager.default.createDirectory(at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let entries = plugins.sorted { $0.key < $1.key }.map { ["name": $0.key, "source": $0.value] }
+    try JSONSerialization.data(withJSONObject: ["name": "acme", "plugins": entries]).write(to: manifestURL)
+}
+
 func makeTmpDir(label: String = "test") throws -> URL {
     let dir = FileManager.default.temporaryDirectory
         .appendingPathComponent("mcs-\(label)-\(UUID().uuidString)")

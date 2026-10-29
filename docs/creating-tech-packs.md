@@ -204,6 +204,29 @@ The pack does not pin the plugin's version. The plugin follows its marketplace: 
 
 Plugin content is not covered by the pack's trust prompt. Users approve the pack's own scripts, but a plugin's hooks and MCP servers come from its marketplace and are never shown for review.
 
+#### Ship a plugin from the pack's own repo
+
+If the repository is both your pack and your plugin's marketplace, mcs can load the plugin straight from the pack's checkout. The plugin then matches the pack's `ref:` exactly, and users review its code in the pack's trust prompt.
+
+1. Keep a `.claude-plugin/marketplace.json` that lists the plugin with a relative `source`. `"./"` means the plugin is the repository root.
+2. Declare the plugin with the `pack` token:
+
+   ```yaml
+     - id: plugin
+       description: The plugin's servers, hooks and skills
+       plugin: "my-plugin@pack"
+   ```
+
+3. Run `mcs pack validate`. It fails if the marketplace doesn't list `my-plugin` with a relative source inside the pack.
+
+What changes for your users:
+
+- **The plugin id becomes `my-plugin@mcs-<pack-identifier>`.** mcs registers a marketplace of its own that links to the checkout, so it never collides with your public marketplace. Anything your README says about `claude plugin … my-plugin@<marketplace>` doesn't apply to pack installs. Skill and command names come from the plugin's own `name` and don't change.
+- **Trust covers the whole plugin directory.** Every file under it can run or load in every session, so any change there asks for trust again on `mcs pack update`. With `source: "./"` that's nearly every commit. If the user declines, the checkout goes back to the last trusted commit.
+- **Updates come from `mcs pack update`.** Claude Code reads the checkout in place, so the plugin's `version` doesn't gate anything, and mcs doesn't run `claude plugin update` for it.
+- **Switching an existing pack to `@pack` replaces the old install.** If mcs installed `my-plugin@<marketplace>` for the pack before, the next sync uninstalls that copy at that scope and installs the pack-hosted one. Claude Code keeps plugin data per plugin id, so the plugin starts with an empty data directory.
+- **One version per machine.** There is one checkout per pack, so every project on the machine gets the same plugin version.
+
 ### Hooks
 
 Hook scripts run at specific Claude Code lifecycle events:

@@ -53,6 +53,21 @@ struct PluginRef: Equatable {
         }
     }
 
+    /// Whether the manifest declared `name@pack`, before the adapter resolves it to the pack's marketplace.
+    var isPackToken: Bool {
+        marketplaceName == Constants.Plugins.packToken
+    }
+
+    /// The pack whose checkout this plugin loads from, through the marketplace mcs generates for it.
+    var hostingPackID: String? {
+        guard let marketplaceName, marketplaceName.hasPrefix(Constants.Plugins.packMarketplacePrefix) else { return nil }
+        return String(marketplaceName.dropFirst(Constants.Plugins.packMarketplacePrefix.count))
+    }
+
+    var isPackHosted: Bool {
+        hostingPackID != nil
+    }
+
     /// Whether `marketplaceRepo` names a repo `claude plugin marketplace add` can register.
     var hasMarketplaceRepo: Bool {
         marketplaceRepo.contains("/")
@@ -63,6 +78,13 @@ struct PluginRef: Equatable {
         if let marketplaceName { return "\(bareName)@\(marketplaceName)" }
         let repo = marketplaceRepo.lowercased()
         return marketplaces.first { $0.repo?.lowercased() == repo }.map { "\(bareName)@\($0.name)" }
+    }
+
+    /// Matched by name, except that a pack-hosted install and a marketplace install are different
+    /// plugins: a pack switching to `@pack` must drop the old install, not carry it over beside
+    /// the new one, where Claude Code would load only one copy's hooks.
+    func isSamePlugin(as other: PluginRef) -> Bool {
+        bareName == other.bareName && isPackHosted == other.isPackHosted
     }
 
     /// Whether `id` (`name@marketplace`) is this plugin.
@@ -88,6 +110,8 @@ struct InstalledPlugin: Codable, Equatable {
     /// The project a `local`- or `project`-scoped install belongs to.
     let projectPath: String?
     var version: String?
+    /// Set when the plugin loads in place from a local marketplace folder rather than a cached copy.
+    var readFromFolder: String?
 
     /// Whether this install is at `scope` and, unless that is `user`, belongs to `projectDirectory`.
     func isInstall(atScope scope: String, projectDirectory: URL?) -> Bool {
@@ -150,8 +174,8 @@ final class PluginListing: @unchecked Sendable {
 
 extension PackArtifactRecord {
     func ownsPlugin(_ name: String) -> Bool {
-        let bareName = PluginRef(name).bareName
-        return plugins.contains { PluginRef($0).bareName == bareName }
+        let ref = PluginRef(name)
+        return plugins.contains { PluginRef($0).isSamePlugin(as: ref) }
     }
 
     /// A re-sync finds an owned plugin already installed and does not record it again, so ownership
@@ -163,10 +187,10 @@ extension PackArtifactRecord {
 
 extension TechPack {
     func declaresPlugin(_ name: String) -> Bool {
-        let bareName = PluginRef(name).bareName
+        let ref = PluginRef(name)
         return components.contains { component in
             guard case let .plugin(declared) = component.installAction else { return false }
-            return PluginRef(declared).bareName == bareName
+            return PluginRef(declared).isSamePlugin(as: ref)
         }
     }
 }

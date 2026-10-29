@@ -122,6 +122,24 @@ struct PackFetcher {
         )
     }
 
+    /// Move the checkout back to `commitSHA`. A shallow fetch may have dropped it locally, so a
+    /// failed reset fetches that exact commit before retrying.
+    func reset(packPath: URL, to commitSHA: String) throws {
+        try ensureGitAvailable()
+        let git = { (arguments: [String]) in
+            shell.run(shell.environment.gitPath, arguments: arguments, workingDirectory: packPath.path)
+        }
+        if git(["reset", "--hard", commitSHA]).succeeded { return }
+        let fetchResult = git(["fetch", "--depth", "1", "origin", commitSHA])
+        guard fetchResult.succeeded else {
+            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr)
+        }
+        let resetResult = git(["reset", "--hard", commitSHA])
+        guard resetResult.succeeded else {
+            throw PackFetchError.updateFailed(path: packPath.path, stderr: resetResult.stderr)
+        }
+    }
+
     // MARK: - Current Commit
 
     /// Get the current commit SHA of a pack checkout.

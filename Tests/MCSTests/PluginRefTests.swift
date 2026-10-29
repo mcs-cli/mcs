@@ -56,4 +56,10 @@ struct PluginRefTests {
         #expect(PluginRef("lint@org/repo").matches(id: "lint@whatever"))
         #expect(!PluginRef("lint@acme").matches(id: "lint-extra@acme"))
     }
+
+    @Test("A pack-hosted plugin and a marketplace plugin of the same name are different plugins")
+    func samePluginAcrossHosting() {
+        #expect(!PluginRef("xcrew@mcs-xcrew").isSamePlugin(as: PluginRef("xcrew@breferrari/xcrew")))
+        #expect(PluginRef("lint@org/repo").isSamePlugin(as: PluginRef("lint@acme")))
+    }
 }

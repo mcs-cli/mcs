@@ -124,7 +124,9 @@ Infers: `type: mcpServer`, `installAction: mcpServer`
 
 Infers: `type: plugin`, `installAction: plugin`
 
-The plugin's version follows its marketplace, not the pack's `ref:`. `mcs update` moves it to the marketplace's current version. When mcs registers the marketplace itself, it also turns on Claude Code's background auto-update for it (`extraKnownMarketplaces.<name>.autoUpdate` in `~/.claude/settings.json`). A marketplace that was already registered keeps the user's setting. Plugin content is not covered by pack trust review.
+**Plugin hosted by the pack itself.** When the pack's repository is also the plugin's marketplace, declare it as `plugin: "<name>@pack"`. The pack must have `.claude-plugin/marketplace.json` listing `<name>` with a relative `source` inside the pack (`"./"` for the repository root). mcs then loads the plugin straight from the pack's checkout, so it always matches the pack's `ref:`. Its whole source directory is covered by the pack's trust prompt, hidden files included, and Claude Code shows it as `<name>@mcs-<pack-identifier>`. Marketplace names starting with `mcs-` are reserved; `mcs pack validate` rejects a manifest that declares one.
+
+For any other plugin, the version follows its marketplace, not the pack's `ref:`. `mcs update` moves it to the marketplace's current version. When mcs registers the marketplace itself, it also turns on Claude Code's background auto-update for it (`extraKnownMarketplaces.<name>.autoUpdate` in `~/.claude/settings.json`). A marketplace that was already registered keeps the user's setting. Plugin content is not covered by pack trust review.
 
 ---
 

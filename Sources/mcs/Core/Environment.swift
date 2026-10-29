@@ -72,6 +72,11 @@ struct Environment {
         mcsDirectory.appendingPathComponent(Constants.ExternalPacks.packsDirectory)
     }
 
+    /// Generated marketplaces for pack-hosted plugins (`~/.mcs/marketplaces/`).
+    var packMarketplacesDirectory: URL {
+        mcsDirectory.appendingPathComponent(Constants.Plugins.packMarketplacesDirectory)
+    }
+
     /// Whether the `MCS_DEBUG` env var is set. Used to gate developer-facing diagnostic
     /// emits (e.g. stderr writes for non-fatal failures that would otherwise be silent).
     /// Production runs are unaffected; CI and developer shells can opt in by exporting

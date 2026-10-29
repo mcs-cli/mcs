@@ -82,7 +82,8 @@ struct PluginRefresher {
         let declared = state.configuredPacks.sorted().flatMap { state.artifacts(for: $0)?.plugins ?? [] }
         guard !declared.isEmpty else { return [] }
 
-        let refs = declared.map(PluginRef.init)
+        // A pack-hosted plugin loads from the checkout, so `mcs pack update` is what moves it.
+        let refs = declared.map(PluginRef.init).filter { !$0.isPackHosted }
         var marketplaces: [PluginMarketplace] = []
         if refs.contains(where: { $0.marketplaceName == nil }) {
             marketplaces = listMarketplaces()
@@ -99,15 +100,10 @@ struct PluginRefresher {
     }
 
     private func listMarketplaces() -> [PluginMarketplace] {
-        let result = claudeCLI.pluginMarketplaceList()
-        guard result.succeeded else {
-            output.warn("  Could not list plugin marketplaces: \(String(result.stderr.prefix(200)))")
-            return []
-        }
         do {
-            return try JSONDecoder().decode([PluginMarketplace].self, from: Data(result.stdout.utf8))
+            return try claudeCLI.marketplaces()
         } catch {
-            output.warn("  Could not read the plugin marketplace list: \(error.localizedDescription)")
+            output.warn("  Could not list plugin marketplaces: \(error.localizedDescription)")
             return []
         }
     }

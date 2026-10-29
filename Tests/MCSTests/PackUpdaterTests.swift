@@ -609,6 +609,8 @@ struct PackUpdaterTests {
             return
         }
         #expect(!result.isHardFailure)
+        // A pack-hosted plugin loads from the checkout, so a declined commit must not stay on disk.
+        #expect(try fix.fetcher.currentCommit(at: packPath) == fix.initialSHA)
     }
 
     /// The mirror of `trustDeclined`, and the second of the two trust surfaces
