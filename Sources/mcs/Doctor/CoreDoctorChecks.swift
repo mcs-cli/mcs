@@ -101,8 +101,8 @@ struct PluginCheck: DoctorCheck {
     let listing: PluginListing
     /// Where the global scope lists from: anywhere else, a project's settings would decide `enabled`.
     var homeDirectory = URL(fileURLWithPath: NSHomeDirectory())
-    /// For a pack-hosted plugin, the checkout directory Claude Code must be reading it from.
-    var pluginSource: URL?
+    /// For a pack-hosted plugin, the marketplace copy Claude Code must be reading it from.
+    var pluginFolder: URL?
 
     var name: String {
         pluginRef.bareName
@@ -125,20 +125,21 @@ struct PluginCheck: DoctorCheck {
         }
 
         let expectedScope = projectRoot == nil ? Constants.PluginScope.user : Constants.PluginScope.local
-        if let install = installsHere.first(where: { $0.enabled && $0.scope == expectedScope }) {
-            if let pluginSource, !isRead(install, from: pluginSource) {
-                // Loading through a link that leaves its marketplace is Claude Code behaviour the docs
-                // don't promise; this is where a release that stops honouring it shows up.
-                return .fail(
-                    "not loaded from the pack checkout — run 'mcs sync'; if it persists, "
-                        + "this Claude Code version may not load linked plugins"
-                )
+        // An install at another scope still loads here.
+        let loaded = installsHere.first { $0.enabled && $0.scope == expectedScope } ?? installsHere.first(where: \.enabled)
+        if let loaded {
+            // Enabled and listed, yet Claude Code may still have dropped hooks or modules it refused.
+            if let error = loaded.errors?.first {
+                // A re-sync re-copies a pack-hosted plugin; any other plugin needs its own fix.
+                return .fail("Claude Code could not load it: \(error)" + (pluginFolder == nil ? "" : " — run 'mcs sync'"))
+            }
+            guard loaded.scope == expectedScope else {
+                return .pass("enabled (\(loaded.scope) scope)")
+            }
+            if let pluginFolder, !isRead(loaded, from: pluginFolder) {
+                return .fail("not loaded from mcs's copy of the pack — run 'mcs sync'")
             }
             return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
-        }
-        // Installed at another scope, but it still loads here.
-        if let other = installsHere.first(where: \.enabled) {
-            return .pass("enabled (\(other.scope) scope)")
         }
         // Disabling is the user's choice and a re-sync would not undo it, so this only warns. A
         // disabled copy elsewhere doesn't count: the missing install here is what a re-sync restores.
@@ -148,9 +149,12 @@ struct PluginCheck: DoctorCheck {
         return .fail("not installed")
     }
 
-    private func isRead(_ install: InstalledPlugin, from source: URL) -> Bool {
-        guard let folder = install.readFromFolder else { return false }
-        return URL(fileURLWithPath: folder).resolvingSymlinksInPath().path == source.resolvingSymlinksInPath().path
+    /// A symlink left by mcs 2026.10.30 resolves to the checkout on both sides, so it must not count.
+    private func isRead(_ install: InstalledPlugin, from copy: URL) -> Bool {
+        guard let folder = install.readFromFolder,
+              (try? copy.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == false
+        else { return false }
+        return URL(fileURLWithPath: folder).resolvingSymlinksInPath().path == copy.resolvingSymlinksInPath().path
     }
 
     func fix() -> FixResult {

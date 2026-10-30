@@ -161,7 +161,7 @@ struct ComponentExecutor {
         do {
             wrapper = try PackMarketplace.link(pluginName: ref.bareName, to: source, packID: packID, environment: environment)
         } catch {
-            output.warn("Could not link plugin '\(ref.bareName)' from its pack: \(error.localizedDescription)")
+            output.warn("Could not copy plugin '\(ref.bareName)' from its pack: \(error.localizedDescription)")
             return false
         }
         guard let registered = registeredMarketplaces() else { return false }

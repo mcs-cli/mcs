@@ -1,11 +1,11 @@
 import Foundation
 
-/// The marketplace mcs generates so Claude Code loads a pack's `name@pack` plugins from its checkout.
+/// The marketplace mcs generates so Claude Code loads a copy of each of a pack's `name@pack` plugins.
 ///
 /// The plugin's directory comes from the pack's techpack.yaml, never from the pack's own
 /// `.claude-plugin/marketplace.json`: a repo that is also a public marketplace keeps that catalog
 /// pointed wherever direct Claude Code installs need it (a release branch, say). The generated
-/// marketplace links to the checkout instead of registering it directly, because a second
+/// marketplace holds copies instead of registering the checkout directly, because a second
 /// registration under the author's marketplace name would collide with an existing one, whose
 /// removal uninstalls its plugins.
 enum PackMarketplace {
@@ -112,37 +112,51 @@ enum PackMarketplace {
         }
     }
 
-    /// Link `pluginName` to `source` in the pack's generated marketplace. Returns the marketplace
+    /// Where mcs keeps its copy of a pack-hosted plugin, and where Claude Code must read it from.
+    static func pluginDirectory(pluginName: String, packID: String, environment: Environment) -> URL {
+        wrapperDirectory(packID: packID, environment: environment)
+            .appendingPathComponent("plugins").appendingPathComponent(pluginName)
+    }
+
+    /// Copy `pluginName` from `source` into the pack's generated marketplace. Returns the marketplace
     /// directory to register with `claude plugin marketplace add`.
+    ///
+    /// A copy, not a symlink: Claude Code resolves symlinks and refuses any plugin path that then
+    /// lands outside the marketplace, which drops hook modules and anything else loaded by path.
     static func link(pluginName: String, to source: URL, packID: String, environment: Environment) throws -> URL {
         let wrapper = wrapperDirectory(packID: packID, environment: environment)
-        let pluginsDir = wrapper.appendingPathComponent("plugins")
-        let link = pluginsDir.appendingPathComponent(pluginName)
+        let destination = pluginDirectory(pluginName: pluginName, packID: packID, environment: environment)
         let fm = FileManager.default
-        // Untouched when already current, so a re-sync never makes the marketplace look changed.
-        let isCurrent = (try? fm.destinationOfSymbolicLink(atPath: link.path)) == source.path
-        if isCurrent, fm.fileExists(atPath: wrapper.appendingPathComponent(manifestPath).path) {
-            return wrapper
-        }
-        if !isCurrent {
-            try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
-            if isSymbolicLink(link) || fm.fileExists(atPath: link.path) {
-                try fm.removeItem(at: link)
+        let fingerprint = try Data(sourceFingerprint(of: source).utf8)
+        // Untouched when already current, so a re-sync never makes the marketplace look changed. A
+        // legacy symlink points at the source, which never carries the fingerprint, so it is replaced.
+        if fm.contents(atPath: destination.appendingPathComponent(fingerprintFile).path) != fingerprint {
+            let staging = destination.deletingLastPathComponent().appendingPathComponent(".\(pluginName).staging")
+            // A run that failed mid-copy leaves this behind; it is hidden from `linkNames`.
+            if entryExists(staging) {
+                try fm.removeItem(at: staging)
             }
-            try fm.createSymbolicLink(at: link, withDestinationURL: source)
+            try fm.createDirectory(at: staging, withIntermediateDirectories: true)
+            for item in try fm.contentsOfDirectory(atPath: source.path) where item != ".git" {
+                try fm.copyItem(at: source.appendingPathComponent(item), to: staging.appendingPathComponent(item))
+            }
+            try fingerprint.write(to: staging.appendingPathComponent(fingerprintFile))
+            if entryExists(destination) {
+                try fm.removeItem(at: destination)
+            }
+            try fm.moveItem(at: staging, to: destination)
         }
         try writeManifest(packID: packID, wrapper: wrapper)
         return wrapper
     }
 
     /// Stop Claude Code loading the plugin without uninstalling it, so its options and data survive
-    /// until a trusted sync links it again.
+    /// until a trusted sync copies it again.
     static func unlink(pluginName: String, packID: String, environment: Environment) throws {
-        let wrapper = wrapperDirectory(packID: packID, environment: environment)
-        let link = wrapper.appendingPathComponent("plugins").appendingPathComponent(pluginName)
-        guard isSymbolicLink(link) else { return }
-        try FileManager.default.removeItem(at: link)
-        try writeManifest(packID: packID, wrapper: wrapper)
+        let entry = pluginDirectory(pluginName: pluginName, packID: packID, environment: environment)
+        guard entryExists(entry) else { return }
+        try FileManager.default.removeItem(at: entry)
+        try writeManifest(packID: packID, wrapper: wrapperDirectory(packID: packID, environment: environment))
     }
 
     /// Unregister the pack's generated marketplace and delete it. Claude Code uninstalls its
@@ -168,11 +182,42 @@ enum PackMarketplace {
         try linkNames(in: wrapperDirectory(packID: packID, environment: environment).appendingPathComponent("plugins"))
     }
 
+    /// Copied plugins, plus symlinks an older mcs left so they are found and replaced.
     private static func linkNames(in pluginsDir: URL) throws -> [String] {
         guard FileManager.default.fileExists(atPath: pluginsDir.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(atPath: pluginsDir.path)
-            .filter { isSymbolicLink(pluginsDir.appendingPathComponent($0)) }
+            .filter { name in
+                guard !name.hasPrefix(".") else { return false }
+                let url = pluginsDir.appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                return isSymbolicLink(url)
+                    || (FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+            }
             .sorted()
+    }
+
+    /// Path, size, modification time and file number of every entry the copy takes (all but the
+    /// top-level `.git`): a checkout move or an edit changes at least one of them, and nothing is read.
+    private static func sourceFingerprint(of source: URL) throws -> String {
+        let fm = FileManager.default
+        let root = source.resolvingSymlinksInPath()
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil, options: []) else {
+            throw MCSError.fileOperationFailed(path: root.path, reason: "Could not enumerate the plugin directory")
+        }
+        var lines: [String] = []
+        while let url = enumerator.nextObject() as? URL {
+            if enumerator.level == 1, url.lastPathComponent == ".git" {
+                enumerator.skipDescendants()
+                continue
+            }
+            let attributes = try fm.attributesOfItem(atPath: url.path)
+            let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+            let relative = PathContainment.relativePath(of: url.path, within: root.path)
+            lines.append("\(relative)\u{0}\(size)\u{0}\(modified)\u{0}\(fileNumber)")
+        }
+        return FileHasher.sha256(data: Data(lines.sorted().joined(separator: "\n").utf8))
     }
 
     private static func writeManifest(packID: String, wrapper: URL) throws {
@@ -180,18 +225,26 @@ enum PackMarketplace {
         let manifest: [String: Any] = [
             "name": marketplaceName(packID: packID),
             "owner": ["name": "mcs"],
-            "metadata": ["description": "Plugins hosted by the \(packID) tech pack, loaded from its mcs checkout"],
+            "metadata": ["description": "Plugins hosted by the \(packID) tech pack, copied from its mcs checkout"],
             "plugins": names.map { ["name": $0, "source": "./plugins/\($0)"] },
         ]
         let manifestURL = wrapper.appendingPathComponent(manifestPath)
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+        guard FileManager.default.contents(atPath: manifestURL.path) != data else { return }
         try FileManager.default.createDirectory(
             at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: manifestURL, options: .atomic)
     }
 
+    private static let fingerprintFile = ".mcs-fingerprint"
+
     private static func isSymbolicLink(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    }
+
+    /// Without following a final symlink, so a legacy link to a moved checkout still counts.
+    private static func entryExists(_ url: URL) -> Bool {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil
     }
 }

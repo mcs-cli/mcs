@@ -113,6 +113,8 @@ struct InstalledPlugin: Codable, Equatable {
     var version: String?
     /// Set when the plugin loads in place from a local marketplace folder rather than a cached copy.
     var readFromFolder: String?
+    /// Why Claude Code refused part or all of the plugin, e.g. a path that escapes its directory.
+    var errors: [String]?
 
     /// Whether this install is at `scope` and, unless that is `user`, belongs to `projectDirectory`.
     func isInstall(atScope scope: String, projectDirectory: URL?) -> Bool {

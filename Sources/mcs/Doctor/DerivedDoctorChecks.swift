@@ -22,7 +22,9 @@ extension ComponentDefinition {
                 listing: pluginListing
                     ?? PluginListing(claudeCLI: ClaudeIntegration(shell: ShellRunner(environment: environment))),
                 homeDirectory: environment.homeDirectory,
-                pluginSource: pluginSource
+                pluginFolder: PluginRef(pluginName).hostingPackID.map {
+                    PackMarketplace.pluginDirectory(pluginName: PluginRef(pluginName).bareName, packID: $0, environment: environment)
+                }
             )
 
         case let .brewInstall(package):

@@ -27,7 +27,7 @@ struct PackUpdater {
         case trustDeclined // user declined the trust prompt — expected, zero exit
         case internalError(underlying: Error) // script analysis / trust prompt crashed
         /// The update did not land and the checkout could not return to the trusted commit, so
-        /// its pack-hosted plugins stay unlinked.
+        /// its pack-hosted plugins stay removed.
         case restoreFailed(underlying: Error)
     }
 
@@ -67,10 +67,8 @@ struct PackUpdater {
         let result: UpdateResult
         if target != head || head != entry.commitSHA {
             // The checkout is about to hold content not yet trusted — or already does, when an
-            // older mcs left it ahead of the registry after a declined prompt. A pack-hosted plugin
-            // loads straight from it, so it is unlinked first and linked again only once the
-            // content is trusted; otherwise a session starting while the prompt waits, or after an
-            // interrupted run, loads unreviewed code.
+            // older mcs left it ahead of the registry after a declined prompt. Pack-hosted plugin
+            // copies are removed while it moves and made again once the new commit is trusted.
             do {
                 try unlink(linked, of: entry)
             } catch {
@@ -86,7 +84,7 @@ struct PackUpdater {
                 result = .fetchFailed(underlying: error)
             }
         } else {
-            // No new commit, so plugins stay linked. Recorded trust may still not describe what is
+            // No new commit, so plugin copies stay. Recorded trust may still not describe what is
             // on disk — a registry SHA advanced without re-trust, a map naming files a past update
             // renamed, or local edits. Without this check the loader's "run 'mcs pack update' to
             // re-trust" advice is a dead end: refused at load, "already up to date" forever.
@@ -115,13 +113,13 @@ struct PackUpdater {
                 try fetcher.reset(packPath: packPath, to: entry.commitSHA)
             } catch {
                 output.warn("  \(entry.displayName): could not return to the trusted commit: \(error.localizedDescription)")
-                // Without a linked plugin nothing loads what is on disk: the pack itself refuses
-                // untrusted content at load, so a warning is enough.
+                // With no plugin copies, the pack itself refuses untrusted content at load, so a
+                // warning is enough.
                 guard linked.isEmpty else {
                     do {
                         try unlink(linked, of: entry)
                     } catch {
-                        output.error("  Could not unlink \(entry.displayName)'s plugins: \(error.localizedDescription)")
+                        output.error("  Could not remove \(entry.displayName)'s plugin copies: \(error.localizedDescription)")
                     }
                     return .restoreFailed(underlying: error)
                 }
@@ -140,8 +138,8 @@ struct PackUpdater {
         }
     }
 
-    /// Links the plugins the checkout's manifest hosts now, so one an update renamed or added is
-    /// linked and one it dropped stays unlinked until sync uninstalls it.
+    /// Copies the plugins the checkout's manifest hosts now, so one an update renamed or added is
+    /// copied and one it dropped stays removed until sync uninstalls it.
     private func relinkHostedPlugins(entry: PackRegistryFile.PackEntry, packPath: URL, registry: PackRegistryFile) {
         do {
             let manifest = try ExternalPackLoader(environment: environment, registry: registry).validate(at: packPath)
@@ -151,7 +149,7 @@ struct PackUpdater {
                 )
             }
         } catch {
-            output.warn("  \(entry.displayName): its plugins stay unlinked until 'mcs sync': \(error.localizedDescription)")
+            output.warn("  \(entry.displayName): its plugins stay removed until 'mcs sync': \(error.localizedDescription)")
         }
     }
 
@@ -357,7 +355,7 @@ extension PackUpdater.UpdateResult {
         case let .internalError(error):
             "could not verify pack scripts — \(error.localizedDescription)"
         case let .restoreFailed(error):
-            "could not return to the trusted commit, its plugins stay unlinked — \(error.localizedDescription)"
+            "could not return to the trusted commit, its plugins stay removed — \(error.localizedDescription)"
         }
     }
 }

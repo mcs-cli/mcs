@@ -142,7 +142,7 @@ final class MockClaudeCLI: ClaudeCLI, @unchecked Sendable {
             let here = plugin.isInstall(atScope: plugin.scope, projectDirectory: workingDirectory)
             return InstalledPlugin(
                 id: plugin.id, scope: plugin.scope, enabled: plugin.enabled && here, projectPath: plugin.projectPath,
-                version: plugin.version, readFromFolder: plugin.readFromFolder
+                version: plugin.version, readFromFolder: plugin.readFromFolder, errors: plugin.errors
             )
         })
     }

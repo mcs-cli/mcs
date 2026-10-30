@@ -106,20 +106,31 @@ You can also manually install a plugin:
 claude plugin install <plugin-name>@<org>
 ```
 
-### Plugin "not loaded from the pack checkout"
+### Plugin "not loaded from mcs's copy of the pack"
 
-**Symptom**: `mcs doctor` fails a plugin declared as `<name>@pack` with "not loaded from the pack checkout".
+**Symptom**: `mcs doctor` fails a plugin declared as `<name>@pack` with "not loaded from mcs's copy of the pack".
 
-**Cause**: mcs links the plugin into its own marketplace at `~/.mcs/marketplaces/<pack-id>/`, and Claude Code should report it as read from that folder. Common causes:
-- The link or the marketplace registration was removed by hand.
-- An update that didn't end trusted couldn't return the checkout to its trusted commit, so the plugin was left unlinked.
-- The installed Claude Code version no longer loads linked plugins in place.
+**Cause**: mcs copies the plugin into its own marketplace at `~/.mcs/marketplaces/<pack-id>/plugins/<name>`, and Claude Code should report it as read from that folder. Common causes:
+- The copy or the marketplace registration was removed by hand.
+- An update that didn't end trusted couldn't return the checkout to its trusted commit, so the plugin was left removed.
 
-**Fix**: Re-run sync, which re-links and re-registers it:
+**Fix**: Re-run sync, which copies the plugin again and re-registers the marketplace:
 ```bash
 mcs sync
 ```
-If it still fails, check `claude plugin list --json` for the plugin's `readFromFolder`. Without one, this Claude Code version isn't loading the plugin from the pack.
+If it still fails, check `claude plugin list --json` for the plugin's `readFromFolder`.
+
+### Plugin "Claude Code could not load it"
+
+**Symptom**: `mcs doctor` fails a plugin with "Claude Code could not load it: …", quoting the error `claude plugin list --json` reports. The plugin shows as enabled, but part of it (often a hook module) is missing from sessions.
+
+**Cause**: Claude Code refused a piece of the plugin. A pack-hosted plugin installed by mcs 2026.10.30 is a symlink to the pack checkout, and Claude Code refuses plugin paths that resolve outside the marketplace (`Path escapes plugin directory`).
+
+**Fix**: Re-run sync, which replaces the symlink with a copy, then restart Claude Code:
+```bash
+mcs sync
+```
+For a plugin from another marketplace, the error names the file to fix in that plugin.
 
 ### Projects on one machine get the same pack-hosted plugin version
 
