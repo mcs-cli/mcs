@@ -112,36 +112,51 @@ enum PackMarketplace {
         }
     }
 
-    /// Link `pluginName` to `source` in the pack's generated marketplace. Returns the marketplace
+    /// Copy `pluginName` from `source` into the pack's generated marketplace. Returns the marketplace
     /// directory to register with `claude plugin marketplace add`.
+    ///
+    /// A copy, not a symlink: Claude Code resolves symlinks and refuses any plugin path that then
+    /// lands outside the marketplace, which drops hook modules and anything else loaded by path.
     static func link(pluginName: String, to source: URL, packID: String, environment: Environment) throws -> URL {
         let wrapper = wrapperDirectory(packID: packID, environment: environment)
         let pluginsDir = wrapper.appendingPathComponent("plugins")
-        let link = pluginsDir.appendingPathComponent(pluginName)
+        let destination = pluginsDir.appendingPathComponent(pluginName)
+        let fingerprintURL = pluginsDir.appendingPathComponent(".\(pluginName).fingerprint")
         let fm = FileManager.default
+        let fingerprint = try sourceFingerprint(of: source)
         // Untouched when already current, so a re-sync never makes the marketplace look changed.
-        let isCurrent = (try? fm.destinationOfSymbolicLink(atPath: link.path)) == source.path
-        if isCurrent, fm.fileExists(atPath: wrapper.appendingPathComponent(manifestPath).path) {
-            return wrapper
-        }
+        let isCurrent = !isSymbolicLink(destination) && fm.fileExists(atPath: destination.path)
+            && fm.contents(atPath: fingerprintURL.path) == Data(fingerprint.utf8)
         if !isCurrent {
             try fm.createDirectory(at: pluginsDir, withIntermediateDirectories: true)
-            if isSymbolicLink(link) || fm.fileExists(atPath: link.path) {
-                try fm.removeItem(at: link)
+            let staging = pluginsDir.appendingPathComponent(".\(pluginName).staging-\(UUID().uuidString)")
+            defer { removeStaging(staging) }
+            try fm.createDirectory(at: staging, withIntermediateDirectories: false)
+            for item in try fm.contentsOfDirectory(atPath: source.path) where item != ".git" {
+                try fm.copyItem(at: source.appendingPathComponent(item), to: staging.appendingPathComponent(item))
             }
-            try fm.createSymbolicLink(at: link, withDestinationURL: source)
+            if isSymbolicLink(destination) || fm.fileExists(atPath: destination.path) {
+                try fm.removeItem(at: destination)
+            }
+            try fm.moveItem(at: staging, to: destination)
+            try Data(fingerprint.utf8).write(to: fingerprintURL, options: .atomic)
         }
         try writeManifest(packID: packID, wrapper: wrapper)
         return wrapper
     }
 
     /// Stop Claude Code loading the plugin without uninstalling it, so its options and data survive
-    /// until a trusted sync links it again.
+    /// until a trusted sync copies it again.
     static func unlink(pluginName: String, packID: String, environment: Environment) throws {
         let wrapper = wrapperDirectory(packID: packID, environment: environment)
-        let link = wrapper.appendingPathComponent("plugins").appendingPathComponent(pluginName)
-        guard isSymbolicLink(link) else { return }
-        try FileManager.default.removeItem(at: link)
+        let pluginsDir = wrapper.appendingPathComponent("plugins")
+        let entry = pluginsDir.appendingPathComponent(pluginName)
+        guard isSymbolicLink(entry) || FileManager.default.fileExists(atPath: entry.path) else { return }
+        try FileManager.default.removeItem(at: entry)
+        let fingerprintURL = pluginsDir.appendingPathComponent(".\(pluginName).fingerprint")
+        if FileManager.default.fileExists(atPath: fingerprintURL.path) {
+            try FileManager.default.removeItem(at: fingerprintURL)
+        }
         try writeManifest(packID: packID, wrapper: wrapper)
     }
 
@@ -168,11 +183,55 @@ enum PackMarketplace {
         try linkNames(in: wrapperDirectory(packID: packID, environment: environment).appendingPathComponent("plugins"))
     }
 
+    /// Copied plugins, plus symlinks an older mcs left so they are found and replaced.
     private static func linkNames(in pluginsDir: URL) throws -> [String] {
         guard FileManager.default.fileExists(atPath: pluginsDir.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(atPath: pluginsDir.path)
-            .filter { isSymbolicLink(pluginsDir.appendingPathComponent($0)) }
+            .filter { name in
+                guard !name.hasPrefix(".") else { return false }
+                let url = pluginsDir.appendingPathComponent(name)
+                var isDirectory: ObjCBool = false
+                return isSymbolicLink(url)
+                    || (FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+            }
             .sorted()
+    }
+
+    /// Path, size, modification time and file number of every entry under `source` except `.git`:
+    /// a checkout move or an edit changes at least one of them, and nothing is read.
+    private static func sourceFingerprint(of source: URL) throws -> String {
+        let fm = FileManager.default
+        let root = source.resolvingSymlinksInPath()
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil, options: []) else {
+            throw MCSError.fileOperationFailed(path: root.path, reason: "Could not enumerate the plugin directory")
+        }
+        var lines: [String] = []
+        while let url = enumerator.nextObject() as? URL {
+            if url.lastPathComponent == ".git" {
+                enumerator.skipDescendants()
+                continue
+            }
+            let attributes = try fm.attributesOfItem(atPath: url.path)
+            let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+            let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+            let fileNumber = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
+            let relative = PathContainment.relativePath(of: url.path, within: root.path)
+            lines.append("\(relative)\u{0}\(size)\u{0}\(modified)\u{0}\(fileNumber)")
+        }
+        return FileHasher.sha256(data: Data(lines.sorted().joined(separator: "\n").utf8))
+    }
+
+    /// Runs from a `defer`, so it can't throw; a leftover is hidden from `linkNames` and from the
+    /// manifest, so it never changes what Claude Code loads.
+    private static func removeStaging(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            if Environment.isDebugMode {
+                FileHandle.standardError.write(Data("mcs: could not remove \(url.path): \(error.localizedDescription)\n".utf8))
+            }
+        }
     }
 
     private static func writeManifest(packID: String, wrapper: URL) throws {
@@ -180,14 +239,15 @@ enum PackMarketplace {
         let manifest: [String: Any] = [
             "name": marketplaceName(packID: packID),
             "owner": ["name": "mcs"],
-            "metadata": ["description": "Plugins hosted by the \(packID) tech pack, loaded from its mcs checkout"],
+            "metadata": ["description": "Plugins hosted by the \(packID) tech pack, copied from its mcs checkout"],
             "plugins": names.map { ["name": $0, "source": "./plugins/\($0)"] },
         ]
         let manifestURL = wrapper.appendingPathComponent(manifestPath)
+        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+        guard FileManager.default.contents(atPath: manifestURL.path) != data else { return }
         try FileManager.default.createDirectory(
             at: manifestURL.deletingLastPathComponent(), withIntermediateDirectories: true
         )
-        let data = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         try data.write(to: manifestURL, options: .atomic)
     }
 

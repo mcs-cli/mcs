@@ -4851,7 +4851,7 @@ struct PluginScopeLifecycleTests {
         #expect(!FileManager.default.fileExists(atPath: wrapper.path))
     }
 
-    @Test("Doctor fails a pack-hosted plugin that Claude Code is not reading from the checkout")
+    @Test("Doctor fails a pack-hosted plugin that Claude Code is not reading from mcs's copy")
     func packHostedNotReadInPlace() throws {
         let bed = try LifecycleTestBed()
         defer { bed.cleanup() }
@@ -4870,7 +4870,38 @@ struct PluginScopeLifecycleTests {
             Issue.record("Expected the plugin check to fail")
             return
         }
-        #expect(message.hasPrefix("not loaded from the pack checkout"))
+        #expect(message == "not loaded from mcs's copy of the pack — run 'mcs sync'")
+    }
+
+    @Test("Doctor fails an enabled plugin that Claude Code reports load errors for")
+    func pluginLoadErrorsFailDoctor() throws {
+        let bed = try LifecycleTestBed()
+        defer { bed.cleanup() }
+        let pack = try packHostedPack("xcrew", source: makePluginSource(in: bed))
+        let registry = TechPackRegistry(packs: [pack])
+        try bed.makeConfigurator(registry: registry).configure(packs: [pack], confirmRemovals: false)
+        let check = try #require(pack.components.first?.deriveDoctorCheck(
+            projectRoot: bed.project, environment: bed.env, pluginListing: PluginListing(claudeCLI: bed.mockCLI)
+        ))
+        guard case .pass = check.check() else {
+            Issue.record("Expected the freshly synced plugin to pass")
+            return
+        }
+
+        let error = "Path escapes plugin directory: ./mod/register.ts (hooks)"
+        bed.mockCLI.installedPlugins = bed.mockCLI.installedPlugins.map {
+            var plugin = $0
+            plugin.errors = [error]
+            return plugin
+        }
+        let recheck = try #require(pack.components.first?.deriveDoctorCheck(
+            projectRoot: bed.project, environment: bed.env, pluginListing: PluginListing(claudeCLI: bed.mockCLI)
+        ))
+        guard case let .fail(message) = recheck.check() else {
+            Issue.record("Expected the plugin check to fail on a load error")
+            return
+        }
+        #expect(message == "Claude Code could not load it: \(error) — run 'mcs sync'")
     }
 
     @Test("Removing one of two packs hosting a same-named plugin uninstalls only that pack's copy")

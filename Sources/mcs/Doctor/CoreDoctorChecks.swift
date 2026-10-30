@@ -101,8 +101,8 @@ struct PluginCheck: DoctorCheck {
     let listing: PluginListing
     /// Where the global scope lists from: anywhere else, a project's settings would decide `enabled`.
     var homeDirectory = URL(fileURLWithPath: NSHomeDirectory())
-    /// For a pack-hosted plugin, the checkout directory Claude Code must be reading it from.
-    var pluginSource: URL?
+    /// For a pack-hosted plugin, the marketplace copy Claude Code must be reading it from.
+    var pluginFolder: URL?
 
     var name: String {
         pluginRef.bareName
@@ -126,13 +126,12 @@ struct PluginCheck: DoctorCheck {
 
         let expectedScope = projectRoot == nil ? Constants.PluginScope.user : Constants.PluginScope.local
         if let install = installsHere.first(where: { $0.enabled && $0.scope == expectedScope }) {
-            if let pluginSource, !isRead(install, from: pluginSource) {
-                // Loading through a link that leaves its marketplace is Claude Code behaviour the docs
-                // don't promise; this is where a release that stops honouring it shows up.
-                return .fail(
-                    "not loaded from the pack checkout — run 'mcs sync'; if it persists, "
-                        + "this Claude Code version may not load linked plugins"
-                )
+            // Enabled and listed, yet Claude Code may still have dropped hooks or modules it refused.
+            if let error = install.errors?.first {
+                return .fail("Claude Code could not load it: \(error) — run 'mcs sync'")
+            }
+            if let pluginFolder, !isRead(install, from: pluginFolder) {
+                return .fail("not loaded from mcs's copy of the pack — run 'mcs sync'")
             }
             return .pass(projectRoot == nil ? "enabled" : "enabled (project)")
         }
