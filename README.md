@@ -13,7 +13,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Homebrew](https://img.shields.io/badge/Homebrew-tap-FBB040.svg?logo=homebrew&logoColor=white)](https://github.com/mcs-cli/homebrew-tap)
 [![Tech Packs](https://img.shields.io/badge/Tech_Packs-Browse-8B5CF6.svg)](https://techpacks.mcs-cli.dev)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mcs-cli/mcs)
+[![Ask DeepWiki](https://img.shields.io/badge/Ask-DeepWiki-blue.svg)](https://deepwiki.com/mcs-cli/mcs)
 
 </div>
 
