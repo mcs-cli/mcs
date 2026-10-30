@@ -121,6 +121,7 @@ struct ListPacksStatusTests {
         identifier: String = "test-pack",
         sourceURL: String = "https://github.com/user/repo.git",
         localPath: String = "test-pack",
+        ref: String? = nil,
         isLocal: Bool? = nil
     ) -> PackRegistryFile.PackEntry {
         PackRegistryFile.PackEntry(
@@ -128,7 +129,7 @@ struct ListPacksStatusTests {
             displayName: "Test Pack",
             author: nil,
             sourceURL: sourceURL,
-            ref: nil,
+            ref: ref,
             commitSHA: isLocal == true ? Constants.ExternalPacks.localCommitSentinel : "abc123",
             localPath: localPath,
             addedAt: "2026-01-01T00:00:00Z",
@@ -137,8 +138,14 @@ struct ListPacksStatusTests {
         )
     }
 
-    @Test("Returns source URL for valid git pack with manifest")
-    func validGitPack() throws {
+    @Test(
+        "Returns source URL, ref when set, and short SHA for valid git pack with manifest",
+        arguments: [
+            (nil, "https://github.com/user/repo (abc123)"),
+            ("v1.2.0", "https://github.com/user/repo@v1.2.0 (abc123)"),
+        ] as [(String?, String)]
+    )
+    func validGitPack(ref: String?, expected: String) throws {
         let tmpDir = try makeTmpDir()
         defer { try? FileManager.default.removeItem(at: tmpDir) }
         let env = Environment(home: tmpDir)
@@ -151,9 +158,8 @@ struct ListPacksStatusTests {
             atomically: true, encoding: .utf8
         )
 
-        let entry = makeEntry()
-        let status = ListPacks().packStatus(entry: entry, env: env)
-        #expect(status == "https://github.com/user/repo.git")
+        let status = ListPacks().packStatus(entry: makeEntry(ref: ref), env: env)
+        #expect(status == expected)
     }
 
     @Test("Returns local indicator for valid local pack")

@@ -177,6 +177,8 @@ mcs pack list --json             # Machine-readable JSON output
 |------|-------------|
 | `--json` | Print the registered packs as a JSON array instead of human-readable text. |
 
+In the text output, a git pack shows as `source@ref (short-sha)`, with the source's `.git` suffix dropped; `@ref` appears only when the pack was added with `--ref`.
+
 With `--json`, each array element has these fields:
 
 | Field | Type | Description |

@@ -633,7 +633,8 @@ struct ListPacks: ParsableCommand {
     }
 
     func packStatus(entry: PackRegistryFile.PackEntry, env: Environment) -> String {
-        switch (packHealth(entry: entry, env: env), entry.isLocalPack) {
+        let refSuffix = entry.ref.map { $0.isEmpty ? "" : "@\($0)" } ?? ""
+        return switch (packHealth(entry: entry, env: env), entry.isLocalPack) {
         case (.invalidPath, true):
             "(invalid local path: \(entry.localPath))"
         case (.invalidPath, false):
@@ -647,7 +648,7 @@ struct ListPacks: ParsableCommand {
         case (.ok, true):
             "\(entry.sourceURL) (local)"
         case (.ok, false):
-            entry.sourceURL
+            "\(entry.sourceURL.strippingGitSuffix)\(refSuffix) (\(entry.shortSHA))"
         }
     }
 }
