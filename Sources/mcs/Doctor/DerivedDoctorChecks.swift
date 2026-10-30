@@ -22,7 +22,9 @@ extension ComponentDefinition {
                 listing: pluginListing
                     ?? PluginListing(claudeCLI: ClaudeIntegration(shell: ShellRunner(environment: environment))),
                 homeDirectory: environment.homeDirectory,
-                pluginFolder: hostedPluginFolder(PluginRef(pluginName), environment: environment)
+                pluginFolder: PluginRef(pluginName).hostingPackID.map {
+                    PackMarketplace.pluginDirectory(pluginName: PluginRef(pluginName).bareName, packID: $0, environment: environment)
+                }
             )
 
         case let .brewInstall(package):
@@ -51,14 +53,5 @@ extension ComponentDefinition {
         case .shellCommand, .settingsMerge, .gitignoreEntries:
             return nil
         }
-    }
-}
-
-private extension ComponentDefinition {
-    /// Where mcs copies a pack-hosted plugin; nil for a marketplace plugin.
-    func hostedPluginFolder(_ ref: PluginRef, environment: Environment) -> URL? {
-        guard pluginSource != nil, let packID = ref.hostingPackID else { return nil }
-        return PackMarketplace.wrapperDirectory(packID: packID, environment: environment)
-            .appendingPathComponent("plugins").appendingPathComponent(ref.bareName)
     }
 }
