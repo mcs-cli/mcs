@@ -125,6 +125,18 @@ enum ConfiguratorSupport {
         })
     }
 
+    /// Write a file that may hold user content, backing up the previous version first. An unchanged
+    /// file is left alone so a scheduled re-run never piles up backups. Returns whether it wrote.
+    static func writeIfChanged(_ content: String, existing: String?, to url: URL) throws -> Bool {
+        guard content != existing else { return false }
+        if existing != nil {
+            var backup = Backup()
+            try backup.backupFile(at: url)
+        }
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        return true
+    }
+
     /// Packs that may not be added to `scope` because their manifest excludes it.
     ///
     /// Same transition rule as `globallyBlockedIDs`: a pack already configured in the scope is

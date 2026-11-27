@@ -309,6 +309,16 @@ struct SyncCommand: LockedCommand {
         return resolvedPacks
     }
 
+    /// A pack the user names with `--global --pack` is theirs too, so a `mcs.yaml` that also
+    /// installed it can't prune it away later.
+    private func claimNamedPacks(previouslyConfigured: Set<String>, environment: Environment) throws {
+        var state = try ProjectState(stateFile: environment.globalStateFile)
+        for packID in pack where state.configuredPacks.contains(packID) {
+            state.claim(packID, by: ProjectState.userOwner, wasConfigured: previouslyConfigured.contains(packID))
+        }
+        try state.save()
+    }
+
     /// Non-interactive sync for `--all` / `--pack`.
     ///
     /// `--pack` is additive: packs already configured in the scope stay in the desired set, since
@@ -375,6 +385,9 @@ struct SyncCommand: LockedCommand {
             try configurator.dryRun(packs: packs)
         } else {
             try configurator.configure(packs: packs, confirmRemovals: prune && !yes)
+            if global, !all {
+                try claimNamedPacks(previouslyConfigured: previouslyConfigured, environment: configurator.environment)
+            }
             output.header("Done")
             output.info("Run 'mcs doctor' to verify configuration")
         }

@@ -241,6 +241,10 @@ struct Configurator {
     ///
     /// - Parameter confirmRemovals: When `true`, prompt the user before removing packs.
     ///   Pass `false` for non-interactive paths (`--pack`, `--all`).
+    /// - Parameter preflighted: The result of `preflight` for these same packs and seeds, so the
+    ///   state and built-in values are not read twice.
+    /// - Parameter warnFileOwnedRemovals: `false` for bootstrap, whose own prune removes only packs
+    ///   its file owns.
     /// - Parameter reusePriorValuesSilently: When `true`, skip the interactive
     ///   "Reuse these values?" gate even when stdin is a TTY — used by
     ///   `mcs update`, where re-asking only makes sense for genuinely new prompts.
@@ -249,10 +253,16 @@ struct Configurator {
         packs: [any TechPack],
         confirmRemovals: Bool = true,
         reusePriorValuesSilently: Bool = false,
-        seededValues: [String: String] = [:]
+        seededValues: [String: String] = [:],
+        preflighted: Preflight? = nil,
+        warnFileOwnedRemovals: Bool = true
     ) throws {
-        var state = try ProjectState(stateFile: scope.stateFile)
-        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
+        let checked = try preflighted ?? preflight(
+            packs: packs, seededValues: seededValues, reusePriorValuesSilently: reusePriorValuesSilently
+        )
+        var state = checked.state
+        let builtInValues = checked.builtInValues
+        let nonInteractiveValues = checked.nonInteractiveValues
         let fsContext = strategy.makeCollisionContext(trackedFiles: state.allTrackedFiles)
         let packs = DestinationCollisionResolver.resolveCollisions(
             packs: packs, output: output, filesystemContext: fsContext
@@ -263,32 +273,10 @@ struct Configurator {
         let removals = previousIDs.subtracting(selectedIDs)
         let additions = selectedIDs.subtracting(previousIDs)
 
-        let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
-        var nonInteractiveValues: [String: String] = [:]
-        if !output.hasInteractiveStdin {
-            // Template-read warnings are left to resolveAllValues, which reports them once.
-            let resolution = resolveNonInteractively(
-                packs: packs, state: state, removals: removals, seededValues: seededValues,
-                builtInValues: builtInValues,
-                reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
-            )
-            guard resolution.unresolved.isEmpty else {
-                throw PromptResolutionError(unresolved: resolution.unresolved, isGlobalScope: scope.isGlobalScope)
-            }
-            nonInteractiveValues = resolution.resolved
-        }
-
         // 1. Confirm and unconfigure removed packs
         if confirmRemovals, !removals.isEmpty {
             output.plain("")
-            let suffix = scope.labelSuffix
-            output.warn("The following packs will be removed\(suffix):")
-            for packID in removals.sorted() {
-                output.plain("  - \(packID)")
-                if let artifacts = state.artifacts(for: packID) {
-                    strategy.printRemovalSummary(artifacts, output: output)
-                }
-            }
+            printRemovals(removals, state: state)
             output.plain("")
             guard output.askYesNo("Proceed with removal?", default: true) else {
                 output.info("Sync cancelled.")
@@ -311,6 +299,12 @@ struct Configurator {
             output: output
         )
 
+        // The user's choice wins, but a file that installed the pack will put it back.
+        if warnFileOwnedRemovals {
+            for packID in removals.sorted() where !state.owners(of: packID).subtracting([ProjectState.userOwner]).isEmpty {
+                output.warn("'\(packID)' was installed by \(BootstrapFile.defaultFilename); its next 'mcs bootstrap' reinstalls it.")
+            }
+        }
         for packID in removals.sorted() {
             unconfigurePack(packID, state: &state)
         }
@@ -479,9 +473,12 @@ struct Configurator {
         }
         remaining.plugins = unremovedPlugins
 
-        // Remove MCP servers
+        // Remove MCP servers. A `user`-scope server is one registration shared by every scope, so a
+        // project copy leaving must not take the one the global record of the same pack still holds
+        // (a pack moving from project to global installs globally first).
+        let globallyHeld = globallyHeldMCPServers(packID: packID)
         for server in artifacts.mcpServers
-            where removeMCPServerArtifact(server, exec: exec) {
+            where globallyHeld.contains(server) || removeMCPServerArtifact(server, exec: exec) {
             removedServers.insert(server)
         }
         remaining.mcpServers.removeAll { removedServers.contains($0) }
@@ -646,10 +643,12 @@ struct Configurator {
             output: output, resolvedValues: priors, priorValues: priors
         )
         var templatesUnreadable = false
+        // Templates always count for retention: global sync never prompts for their placeholders,
+        // but it still fills them from stored values, which must outlive another pack's removal.
         let consumed = CrossPackPromptResolver.consumedKeys(
             packs: survivingPacks,
             context: context,
-            includeTemplates: scope.includeTemplatesInScan,
+            includeTemplates: true,
             onWarning: {
                 if reportWarnings { output.warn($0) }
                 templatesUnreadable = true
@@ -737,6 +736,15 @@ struct Configurator {
         if seedFromPriors {
             allValues.merge(plan.reusableValues) { existing, _ in existing }
         }
+        // Global scope never prompts for template placeholders — a global template may name a
+        // project-only key — but a value stored or seeded for one (mcs.yaml `values:`) still applies.
+        // Declared prompts are left to the reuse gate above, which may have declined their priors.
+        if !scope.includeTemplatesInScan {
+            let declaredKeys = Set(plan.declared.map(\.key))
+            let templateOnlyKeys = ConfiguratorSupport.referencedPlaceholderKeys(packs: packs, includeTemplates: true)
+                .subtracting(declaredKeys)
+            allValues.merge(priorValues.filter { templateOnlyKeys.contains($0.key) }) { existing, _ in existing }
+        }
         // The preflight replayed every stage below, so off-TTY no executor reaches a reader.
         allValues.merge(nonInteractiveValues) { existing, _ in existing }
 
@@ -775,6 +783,52 @@ struct Configurator {
 
         state.setResolvedValues(allValues)
         return allValues
+    }
+
+    /// The removal listing `configure` confirms, exposed so a caller converging several scopes can
+    /// ask once for all of them.
+    func printRemovals(_ removals: Set<String>, state: ProjectState) {
+        output.warn("The following packs will be removed\(scope.labelSuffix):")
+        for packID in removals.sorted() {
+            output.plain("  - \(packID)")
+            if let artifacts = state.artifacts(for: packID) {
+                strategy.printRemovalSummary(artifacts, output: output)
+            }
+        }
+    }
+
+    /// What `preflight` read and resolved, so `configure` can start from it.
+    struct Preflight {
+        fileprivate let state: ProjectState
+        fileprivate let builtInValues: [String: String]
+        fileprivate let nonInteractiveValues: [String: String]
+    }
+
+    /// The checks `configure` runs before touching the scope — scope support, then off-TTY prompt
+    /// resolution against the post-removal priors — so a caller converging several scopes can
+    /// reject the whole run before any of them changes.
+    func preflight(
+        packs: [any TechPack],
+        seededValues: [String: String] = [:],
+        reusePriorValuesSilently: Bool = false
+    ) throws -> Preflight {
+        let state = try ProjectState(stateFile: scope.stateFile)
+        let builtInValues = strategy.resolveBuiltInValues(shell: shell, output: output)
+        try checkScopeSupport(packs: packs, previouslyConfigured: state.configuredPacks)
+        guard !output.hasInteractiveStdin else {
+            return Preflight(state: state, builtInValues: builtInValues, nonInteractiveValues: [:])
+        }
+        // Template-read warnings are left to resolveAllValues, which reports them once.
+        let resolution = resolveNonInteractively(
+            packs: packs, state: state,
+            removals: state.configuredPacks.subtracting(packs.map(\.identifier)),
+            seededValues: seededValues, builtInValues: builtInValues,
+            reusePriorValuesSilently: reusePriorValuesSilently, reportWarnings: false
+        )
+        guard resolution.unresolved.isEmpty else {
+            throw PromptResolutionError(unresolved: resolution.unresolved, isGlobalScope: scope.isGlobalScope)
+        }
+        return Preflight(state: state, builtInValues: builtInValues, nonInteractiveValues: resolution.resolved)
     }
 
     private func checkScopeSupport(packs: [any TechPack], previouslyConfigured: Set<String>) throws {
@@ -1214,6 +1268,19 @@ struct Configurator {
         case stillNeeded
         /// Removal was attempted but failed.
         case failed
+    }
+
+    /// `user`-scope servers the global record of `packID` claims; empty in global scope itself.
+    private func globallyHeldMCPServers(packID: String) -> Set<MCPServerRef> {
+        guard !scope.isGlobalScope else { return [] }
+        let globalState: ProjectState
+        do {
+            globalState = try ProjectState(stateFile: environment.globalStateFile)
+        } catch {
+            output.warn("  Could not read global state: \(error.localizedDescription) — removing MCP servers anyway")
+            return []
+        }
+        return Set((globalState.artifacts(for: packID)?.mcpServers ?? []).filter { $0.scope == Constants.MCPScope.user })
     }
 
     /// Remove a single MCP server. The executor logs the outcome.
