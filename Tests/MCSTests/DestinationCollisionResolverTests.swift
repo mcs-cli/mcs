@@ -285,6 +285,7 @@ struct HookAlwaysNamespaceTests {
 // MARK: - Wrapped Pack Preservation Tests
 
 private struct OverridingTechPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier = "my-pack"
     let displayName = "My Pack"
     let description = "Pack overriding every defaulted TechPack member"

@@ -23,6 +23,8 @@ struct ExternalPackManifest: Codable {
     /// Entries cannot reference `techpack.yaml` or any path referenced by a component/template —
     /// `validate()` rejects those at publish time and the runtime loader strips them defensively.
     let ignore: [String]?
+    /// Scopes the pack may be installed into (`project`, `global`). Absent means both.
+    let scopes: [String]?
 }
 
 // MARK: - Loading
@@ -181,6 +183,29 @@ extension ExternalPackManifest {
         try validateIgnoreEntries()
     }
 
+    /// Publish-time check for `scopes:`, kept out of `validate()` so a user's sync never fails on
+    /// an author's typo — `reportInvalidScopes(output:)` is its runtime counterpart.
+    func validateScopes() throws {
+        guard let scopes else { return }
+        guard !scopes.isEmpty else {
+            throw ManifestError.invalidScopes(reason: "the list is empty — omit `scopes` to support both")
+        }
+        for value in scopes where PackScope(rawValue: value) == nil {
+            throw ManifestError.invalidScopes(reason: Self.unknownScopeReason(value))
+        }
+    }
+
+    static func unknownScopeReason(_ value: String) -> String {
+        "unknown scope '\(value)' — expected \(PackScope.allCases.map(\.rawValue).joined(separator: " or "))"
+    }
+
+    /// Both scopes when `scopes` is absent; otherwise only its known values. A list with none
+    /// supports no scope, so a typo fails closed instead of widening into the scope it forbade.
+    var supportedScopes: Set<PackScope> {
+        guard let scopes else { return Set(PackScope.allCases) }
+        return Set(scopes.compactMap(PackScope.init(rawValue:)))
+    }
+
     /// Why an `ignore:` entry is forbidden. Both `validateIgnoreEntries` (publish-strict)
     /// and `sanitizedIgnoreEntries` (runtime-lenient) classify entries via this enum so the
     /// rule list lives in one place.
@@ -333,8 +358,25 @@ extension ExternalPackManifest {
             prompts: prompts,
             configureProject: configureProject,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: kept.isEmpty ? nil : kept
+            ignore: kept.isEmpty ? nil : kept,
+            scopes: scopes
         )
+    }
+}
+
+// MARK: - Scope reporting (runtime safety guard)
+
+extension ExternalPackManifest {
+    /// Warn about each unknown `scopes:` value, which `supportedScopes` ignores, and about a list
+    /// left with none: that pack can no longer be added to any scope.
+    func reportInvalidScopes(output: CLIOutput) {
+        guard let scopes else { return }
+        for value in scopes where PackScope(rawValue: value) == nil {
+            output.warn("Pack '\(identifier)': ignoring `scopes:` value — \(Self.unknownScopeReason(value))")
+        }
+        if supportedScopes.isEmpty {
+            output.warn("Pack '\(identifier)' declares no valid scope, so it cannot be installed anywhere")
+        }
     }
 }
 
@@ -409,7 +451,8 @@ extension ExternalPackManifest {
             prompts: prompts,
             configureProject: configureProject,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: ignore
+            ignore: ignore,
+            scopes: scopes
         )
     }
 }
@@ -450,7 +493,8 @@ extension ExternalPackManifest {
             prompts: prompts,
             configureProject: configureProject,
             supplementaryDoctorChecks: supplementaryDoctorChecks,
-            ignore: ignore
+            ignore: ignore,
+            scopes: scopes
         )
     }
 }
@@ -472,6 +516,7 @@ enum ManifestError: Error, Equatable, LocalizedError {
     case duplicateDestination(destination: String, fileType: String, componentIDs: [String])
     case ignoreEntryLoadBearing(entry: String, reason: String)
     case invalidPluginSource(componentID: String, reason: String)
+    case invalidScopes(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -502,6 +547,8 @@ enum ManifestError: Error, Equatable, LocalizedError {
             "ignore: entry '\(entry)' is not allowed: \(reason)"
         case let .invalidPluginSource(componentID, reason):
             "Component '\(componentID)': \(reason)"
+        case let .invalidScopes(reason):
+            "Invalid `scopes`: \(reason)"
         }
     }
 }

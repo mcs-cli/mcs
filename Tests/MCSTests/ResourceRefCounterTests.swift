@@ -6,6 +6,7 @@ import Testing
 
 /// Minimal TechPack stub that declares specific components for ref counting tests.
 private struct StubTechPack: TechPack {
+    let supportedScopes = Set(PackScope.allCases)
     let identifier: String
     let displayName: String
     let description: String
