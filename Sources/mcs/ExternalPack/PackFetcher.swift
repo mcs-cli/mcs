@@ -15,7 +15,7 @@ struct PackFetcher {
     // MARK: - Fetch (Clone)
 
     /// Clone a pack repo to `~/.mcs/packs/<identifier>/`.
-    /// If `ref` is specified, clone at that ref (tag or branch — `--branch` cannot resolve a commit SHA).
+    /// If `ref` is specified, clone at that tag, branch, or full commit SHA.
     /// If the pack directory already exists, it is removed first for a clean state.
     func fetch(url: String, identifier: String, ref: String?) throws -> FetchResult {
         try validateIdentifier(identifier)
@@ -47,19 +47,39 @@ struct PackFetcher {
             try fm.removeItem(at: packPath)
         }
 
-        // Clone
-        var args = ["clone", "--depth", "1"]
-        if let ref {
-            args += ["--branch", ref]
+        // Built by hand rather than `clone --branch`, which cannot resolve a commit SHA. The
+        // checkout is the same detached, depth-1 shape `update` resets to, for every ref type.
+        let steps: [(arguments: [String], workingDirectory: String?)] = [
+            (["init", "--quiet", packPath.path], nil),
+            (["remote", "add", "origin", url], packPath.path),
+            (["fetch", "--depth", "1", "origin", Self.fetchRefspec(ref)], packPath.path),
+            (["checkout", "--quiet", Self.fetchedRef], packPath.path),
+        ]
+        // Unlike `git clone`, a failed step leaves the initialised directory behind, and a
+        // scheduled retry would pile them up under a fresh temp path each time.
+        let commitSHA: String
+        do {
+            for step in steps {
+                let result = shell.run(
+                    shell.environment.gitPath, arguments: step.arguments, workingDirectory: step.workingDirectory
+                )
+                guard result.succeeded else {
+                    // Only the fetch can fail for a reason the ref's shape explains.
+                    let hint = step.arguments.first == "fetch" ? Self.refHint(ref) : ""
+                    throw PackFetchError.cloneFailed(url: url, stderr: result.stderr + hint)
+                }
+            }
+            commitSHA = try currentCommit(at: packPath)
+        } catch {
+            if fm.fileExists(atPath: packPath.path) {
+                do {
+                    try fm.removeItem(at: packPath)
+                } catch let cleanup {
+                    output.warn("Could not remove partial checkout at \(packPath.path): \(cleanup.localizedDescription)")
+                }
+            }
+            throw error
         }
-        args += [url, packPath.path]
-
-        let result = shell.run(shell.environment.gitPath, arguments: args)
-        guard result.succeeded else {
-            throw PackFetchError.cloneFailed(url: url, stderr: result.stderr)
-        }
-
-        let commitSHA = try currentCommit(at: packPath)
 
         return FetchResult(
             localPath: packPath,
@@ -68,25 +88,56 @@ struct PackFetcher {
         )
     }
 
+    /// A full 40-hex commit SHA: a ref that can never move.
+    static func isCommitSHA(_ ref: String) -> Bool {
+        ref.count == 40 && ref.allSatisfy(\.isHexDigit)
+    }
+
+    /// What every fetch asks the remote for. With no ref it is the remote's default branch,
+    /// fetched by name so no checkout depends on a local `origin/HEAD`, which a pack first
+    /// cloned at a ref never has.
+    static func fetchTarget(_ ref: String?) -> String {
+        ref ?? "HEAD"
+    }
+
+    /// Where clone and update land a fetch. A private ref rather than the shared `FETCH_HEAD`, so
+    /// the update-check hook fetching in the same checkout can't swap what gets checked out.
+    static let fetchedRef = "refs/mcs/fetch"
+
+    static func fetchRefspec(_ ref: String?, into destination: String = fetchedRef) -> String {
+        "+\(fetchTarget(ref)):\(destination)"
+    }
+
+    /// Appended to a failed fetch's stderr for the two ref shapes git's own message doesn't explain.
+    static func refHint(_ ref: String?) -> String {
+        guard let ref, ref.allSatisfy(\.isHexDigit) else { return "" }
+        if isCommitSHA(ref) {
+            return "\nThe server may not allow fetching a commit by SHA (it needs protocol v2 or"
+                + " uploadpack.allowReachableSHA1InWant); pin a tag instead."
+        }
+        guard (7 ..< 40).contains(ref.count) else { return "" }
+        return "\nIf '\(ref)' is an abbreviated commit SHA, use the full 40-character SHA."
+    }
+
     // MARK: - Update
 
     /// Fetch the commit `ref` names (the remote's default branch when nil) without touching the
     /// working tree, so anything loading from the checkout keeps reading it while the caller decides.
     ///
-    /// Fetching the ref explicitly and resetting to the result is uniform for any ref type; a plain
+    /// Fetching by name into `fetchedRef` is uniform for every ref type, including none; a plain
     /// `checkout <branch>` would not advance the local branch past what the clone captured.
     func fetchTarget(packPath: URL, ref: String?) throws -> String {
         try ensureGitAvailable()
         if let ref { try validateRef(ref) }
 
-        let fetchArgs = ["fetch", "--depth", "1", "origin"] + (ref.map { [$0] } ?? [])
+        let fetchArgs = ["fetch", "--depth", "1", "origin", Self.fetchRefspec(ref)]
         let fetchResult = shell.run(shell.environment.gitPath, arguments: fetchArgs, workingDirectory: packPath.path)
         guard fetchResult.succeeded else {
-            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr)
+            throw PackFetchError.fetchFailed(path: packPath.path, stderr: fetchResult.stderr + Self.refHint(ref))
         }
-        // Peeled: an annotated tag's FETCH_HEAD names the tag object, never equal to HEAD, so
+        // Peeled: an annotated tag's fetched ref names the tag object, never equal to HEAD, so
         // every update of a tag-pinned pack would read as a change.
-        return try resolveCommit("\(ref == nil ? "origin/HEAD" : "FETCH_HEAD")^{commit}", at: packPath)
+        return try resolveCommit("\(Self.fetchedRef)^{commit}", at: packPath)
     }
 
     /// Move the checkout back to `commitSHA`. A shallow fetch may have dropped it locally, so a
